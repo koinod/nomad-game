@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+:root {
+  --nomad-bg: #0b0e12;
+  --nomad-panel: #12161c;
+  --nomad-line: #232b36;
+  --nomad-text: #d7dde5;
+  --nomad-dim: #8a94a3;
+  --nomad-accent: #e8b34b;
+  --nomad-danger: #d9534f;
+  --nomad-ok: #5aa469;
+}
+
+html, body, #root {
+  height: 100%;
+  overscroll-behavior: none;
+}
+
+body {
+  background: var(--nomad-bg);
+  color: var(--nomad-text);
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  overflow: hidden;
+  position: fixed;
+  width: 100%;
+}
+
+canvas { display: block; }
+
+.nomad-scroll {
+  -webkit-user-select: text;
+  user-select: text;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
+
+button:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--nomad-accent);
+  outline-offset: 2px;
+}

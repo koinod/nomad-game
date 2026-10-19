@@ -1,0 +1,46 @@
+// Shared input state written by keyboard/mouse handlers and the mobile
+// touch controls, read by the player controller each tick.
+export interface InputState {
+  moveX: number; // -1..1 strafe right
+  moveY: number; // -1..1 forward
+  lookDX: number; // accumulated pixels, consumed per tick
+  lookDY: number;
+  sprint: boolean;
+  attackMelee: boolean; // edge-triggered: set true on press, controller clears
+  attackRanged: boolean; // edge-triggered
+  interact: boolean; // edge-triggered
+  phone: boolean; // edge-triggered
+  pause: boolean; // edge-triggered
+  hotbar: number; // 0 = none, 1..3 edge-triggered
+}
+
+export const input: InputState = {
+  moveX: 0,
+  moveY: 0,
+  lookDX: 0,
+  lookDY: 0,
+  sprint: false,
+  attackMelee: false,
+  attackRanged: false,
+  interact: false,
+  phone: false,
+  pause: false,
+  hotbar: 0,
+};
+
+export function consumeLook(): [number, number] {
+  const dx = input.lookDX;
+  const dy = input.lookDY;
+  input.lookDX = 0;
+  input.lookDY = 0;
+  return [dx, dy];
+}
+
+export function resetEdgeTriggers(): void {
+  input.attackMelee = false;
+  input.attackRanged = false;
+  input.interact = false;
+  input.phone = false;
+  input.pause = false;
+  input.hotbar = 0;
+}
