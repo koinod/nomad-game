@@ -1,0 +1,271 @@
+// Interact.ts — containers, campfires, relay switch, NPCs, beacon.
+// E within 3m picks the nearest interactable.
+
+import * as THREE from 'three';
+import { useGameStore } from '../store/gameStore';
+import { sfx } from '../systems/audio';
+
+export interface LootEntry {
+  id: string;
+  min: number;
+  max: number;
+  chance: number;
+}
+
+export interface ContainerDef {
+  id: string;
+  x: number;
+  z: number;
+  loot: LootEntry[];
+}
+
+export interface InteractHooks {
+  resourceMult: number;
+  rng: () => number;
+  groundY: (x: number, z: number) => number;
+  scene: THREE.Scene;
+  isLooted: (id: string) => boolean;
+  markLooted: (id: string) => void;
+  isCleared: (id: string) => boolean;
+  markCleared: (id: string) => void;
+  setLastSafe: (x: number, z: number) => void;
+  rest: () => void;
+}
+
+export interface Interactable {
+  id: string;
+  kind: 'container' | 'campfire' | 'switch' | 'npc' | 'beacon';
+  pos: THREE.Vector3;
+  label: string;
+  use: () => void;
+}
+
+function personMesh(jacket: number, skin: number): THREE.Group {
+  const g = new THREE.Group();
+  const jm = new THREE.MeshStandardMaterial({ color: jacket, roughness: 1 });
+  const sm = new THREE.MeshStandardMaterial({ color: skin, roughness: 0.9 });
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.75, 0.34), jm);
+  torso.position.y = 1.15;
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.34, 0.3), sm);
+  head.position.y = 1.72;
+  const legs = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.78, 0.3), new THREE.MeshStandardMaterial({ color: 0x35322c, roughness: 1 }));
+  legs.position.y = 0.39;
+  g.add(torso, head, legs);
+  return g;
+}
+
+export class InteractSystem {
+  readonly interactables: Interactable[] = [];
+  private crateMeshes = new Map<string, THREE.Mesh>();
+
+  constructor(hooks: InteractHooks, pois: Record<string, [number, number]>, containers: ContainerDef[]) {
+    const s = useGameStore.getState();
+    const at = (id: string): [number, number] => pois[id] ?? [0, 0];
+
+    // ---- containers ----
+    const crateMat = new THREE.MeshStandardMaterial({ color: 0x6e5a3e, roughness: 1 });
+    const crateGeo = new THREE.BoxGeometry(0.9, 0.9, 0.9);
+    for (const c of containers) {
+      const y = hooks.groundY(c.x, c.z);
+      const pos = new THREE.Vector3(c.x, y, c.z);
+      const mesh = new THREE.Mesh(crateGeo, crateMat);
+      mesh.position.set(c.x, y + 0.45, c.z);
+      mesh.rotation.y = hooks.rng() * Math.PI;
+      mesh.visible = !hooks.isLooted(c.id);
+      hooks.scene.add(mesh);
+      this.crateMeshes.set(c.id, mesh);
+      this.interactables.push({
+        id: c.id,
+        kind: 'container',
+        pos,
+        label: hooks.isLooted(c.id) ? 'Empty container' : 'Search container',
+        use: () => {
+          if (hooks.isLooted(c.id)) {
+            s.addToast('Nothing left here.');
+            return;
+          }
+          const rng = hooks.rng;
+          let tookAny = false;
+          for (const e of c.loot) {
+            if (rng() > e.chance) continue;
+            const qty = Math.max(1, Math.round((e.min + rng() * (e.max - e.min)) * hooks.resourceMult));
+            if (!s.addItem(e.id, qty)) {
+              s.addToast('Could not take everything.');
+              return; // do NOT mark looted
+            }
+            tookAny = true;
+          }
+          if (!tookAny) s.addToast('Nothing useful inside.');
+          hooks.markLooted(c.id);
+          const m = this.crateMeshes.get(c.id);
+          if (m) m.visible = false;
+          sfx.play('pickup', { volume: 0.8 });
+        },
+      });
+    }
+
+    // ---- campfires (safe points + rest) ----
+    for (const pid of ['shore_camp', 'jonah_camp', 'lighthouse_base']) {
+      const [x, z] = at(pid);
+      const pos = new THREE.Vector3(x, hooks.groundY(x, z), z);
+      this.interactables.push({
+        id: `campfire:${pid}`,
+        kind: 'campfire',
+        pos,
+        label: 'Rest at campfire',
+        use: () => {
+          hooks.setLastSafe(x, z);
+          s.addToast('Safe point marked.');
+          hooks.rest();
+        },
+      });
+    }
+
+    // ---- relay switch (one-shot) ----
+    {
+      const [x, z] = at('relay_switch');
+      const pos = new THREE.Vector3(x, hooks.groundY(x, z), z);
+      this.interactables.push({
+        id: 'relay_switch',
+        kind: 'switch',
+        pos,
+        label: hooks.isCleared('relay_switch') ? 'Relay switch (online)' : 'Throw the relay switch',
+        use: () => {
+          if (hooks.isCleared('relay_switch')) {
+            s.addToast('The relay is already online.');
+            return;
+          }
+          hooks.markCleared('relay_switch');
+          s.questEvent('interact', 'poi:relay_switch', 1);
+          s.setFlag('relay_online');
+          sfx.play('switch', { volume: 1 });
+          s.addToast('The relay hums back to life.');
+        },
+      });
+    }
+
+    // ---- NPCs ----
+    const npcDefs: { id: string; poiId: string; label: string; jacket: number }[] = [
+      { id: 'npc:jonah', poiId: 'jonah_camp', label: 'Talk to Jonah', jacket: 0x5a4632 },
+      { id: 'npc:kowalski', poiId: 'lighthouse_base', label: 'Talk to Kowalski', jacket: 0x3c5a6e },
+    ];
+    for (const n of npcDefs) {
+      const [x, z] = at(n.poiId);
+      const y = hooks.groundY(x, z);
+      const mesh = personMesh(n.jacket, 0xc9a180);
+      mesh.position.set(x + 2.2, y, z + 1.5);
+      mesh.rotation.y = Math.PI * 0.75;
+      hooks.scene.add(mesh);
+      const pos = mesh.position.clone();
+      this.interactables.push({
+        id: n.id,
+        kind: 'npc',
+        pos,
+        label: n.label,
+        use: () => {
+          const src = n.id as 'npc:jonah' | 'npc:kowalski';
+          s.questEvent('talk', n.id, 1);
+          s.openDialogue(src, 'start');
+          sfx.play('ui', { volume: 0.5 });
+        },
+      });
+    }
+
+    // ---- beacon (lighthouse top choice) ----
+    {
+      const [x, z] = at('lighthouse_base');
+      const pos = new THREE.Vector3(x, hooks.groundY(x, z), z);
+      this.interactables.push({
+        id: 'beacon',
+        kind: 'beacon',
+        pos,
+        label: 'Climb to the lamp room',
+        use: () => {
+          const rep = s.rep['lighthouse'] ?? 0;
+          if (rep >= 50) {
+            s.openDialogue('npc:kowalski', 'beacon_choice');
+          } else {
+            s.addToast(`The beacon needs the Collective's trust (Lighthouse rep 50 — have ${rep}).`);
+            sfx.play('ui', { volume: 0.5 });
+          }
+        },
+      });
+    }
+  }
+
+  /** Nearest interactable within maxDist of (x,z), or null. */
+  nearest(x: number, z: number, maxDist: number): Interactable | null {
+    let best: Interactable | null = null;
+    let bestD = maxDist;
+    for (const it of this.interactables) {
+      const d = Math.hypot(it.pos.x - x, it.pos.z - z);
+      if (d < bestD) {
+        bestD = d;
+        best = it;
+      }
+    }
+    return best;
+  }
+}
+
+/** Container placement. Positions are offsets around their POI. */
+export function buildContainerDefs(pois: Record<string, [number, number]>): ContainerDef[] {
+  const off = (pid: string, dx: number, dz: number): [number, number] => {
+    const [x, z] = pois[pid] ?? [0, 0];
+    return [x + dx, z + dz];
+  };
+  const C = (
+    id: string, pid: string, dx: number, dz: number, loot: LootEntry[],
+  ): ContainerDef => {
+    const [x, z] = off(pid, dx, dz);
+    return { id, x, z, loot };
+  };
+  return [
+    C('c_wreck_phone', 'wreck', 3, 2, [{ id: 'phone', min: 1, max: 1, chance: 1 }]),
+    C('c_wreck_1', 'wreck', -4, 3, [
+      { id: 'scrap', min: 1, max: 3, chance: 0.9 },
+      { id: 'cloth', min: 1, max: 2, chance: 0.7 },
+      { id: 'canned_food', min: 1, max: 2, chance: 0.6 },
+    ]),
+    C('c_shore_1', 'shore_camp', 5, -4, [
+      { id: 'canned_food', min: 1, max: 2, chance: 0.8 },
+      { id: 'water_bottle', min: 1, max: 2, chance: 0.7 },
+    ]),
+    C('c_town_1', 'town', 12, 8, [
+      { id: 'scrap', min: 2, max: 4, chance: 0.9 },
+      { id: 'wire', min: 1, max: 2, chance: 0.6 },
+    ]),
+    C('c_town_2', 'town', -18, 12, [
+      { id: 'cloth', min: 1, max: 3, chance: 0.8 },
+      { id: 'bandage', min: 1, max: 2, chance: 0.5 },
+    ]),
+    C('c_town_3', 'town', 22, -14, [
+      { id: 'ammo_9mm', min: 4, max: 10, chance: 0.6 },
+      { id: 'scrap', min: 1, max: 2, chance: 0.8 },
+    ]),
+    C('c_town_4', 'town', -8, -20, [
+      { id: 'canned_food', min: 1, max: 3, chance: 0.8 },
+      { id: 'water_bottle', min: 1, max: 2, chance: 0.6 },
+    ]),
+    C('c_forest_1', 'forest_cache', 4, 3, [
+      { id: 'relay_part', min: 1, max: 1, chance: 1 },
+      { id: 'scrap', min: 1, max: 2, chance: 0.7 },
+    ]),
+    C('c_forest_2', 'forest_cache', -5, -3, [
+      { id: 'relay_part', min: 1, max: 1, chance: 1 },
+      { id: 'wire', min: 1, max: 3, chance: 0.8 },
+    ]),
+    C('c_dune_1', 'dune_cache', 3, -4, [
+      { id: 'relay_part', min: 1, max: 1, chance: 1 },
+      { id: 'cloth', min: 1, max: 2, chance: 0.7 },
+    ]),
+    C('c_relay_1', 'relay_station', -10, 6, [
+      { id: 'scrap', min: 2, max: 4, chance: 0.9 },
+      { id: 'ammo_9mm', min: 4, max: 8, chance: 0.6 },
+    ]),
+    C('c_light_1', 'lighthouse_base', -6, 5, [
+      { id: 'bandage', min: 1, max: 2, chance: 0.8 },
+      { id: 'medkit', min: 1, max: 1, chance: 0.4 },
+    ]),
+  ];
+}
