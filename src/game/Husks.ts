@@ -1019,6 +1019,13 @@ export class HuskManager {
   private pools: AcidPool[] = [];
   private globs: SpitGlob[] = [];
 
+  /**
+   * Optional placement veto (Game wires it to the building colliders):
+   * a spawn point inside a structure is rejected and re-rolled, so area
+   * zones that overlap buildings don't seed husks indoors.
+   */
+  spawnBlocked?: (x: number, z: number) => boolean;
+
   constructor(scene: THREE.Scene, zones: SpawnZone[], seed: number) {
     this.scene = scene;
     this.zones = zones;
@@ -1031,7 +1038,7 @@ export class HuskManager {
       const r = this.rng() * zone.radius;
       const x = zone.x + Math.cos(a) * r;
       const z = zone.z + Math.sin(a) * r;
-      if (groundY(x, z) > 0.8) return [x, z];
+      if (groundY(x, z) > 0.8 && !this.spawnBlocked?.(x, z)) return [x, z];
     }
     return null;
   }

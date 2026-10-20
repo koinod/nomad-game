@@ -7,6 +7,7 @@ import { makeFbm, makeNoise2D, mulberry32, clamp, lerp, smoothstep } from './rng
 import { buildHouses, houseFootprints, type HouseResult } from './HousesV4';
 import { buildPoiBuildings, poiFootprints, type PoiBuildResult } from './PoiBuildingsV4';
 import { buildLighthouse } from './Lighthouse';
+import { decalPlane } from './modelKit';
 import type { KitBuilding, KitResult } from './kit';
 import { airbaseFootprints, buildAirbase, buildCarrier, CARRIER_DECK_Y } from './Airbase';
 import type { BiomeId } from './Game';
@@ -271,6 +272,7 @@ export class World {
     this.buildWreck();
     this.buildLighthouse();
     this.buildRelayRuin();
+    this.buildDressing();
   }
 
   /**
@@ -804,6 +806,83 @@ export class World {
     this.lampLight.position.set(x, built.lampAnchorY, z);
     built.result.group.add(this.lampLight);
     this.scene.add(built.result.group);
+  }
+
+  /**
+   * Map-phase dressing: region signage at the POI approaches (the island
+   * should tell you where you are) and burnt-out wreck shells along the
+   * spine road. Pure scenery — no colliders, no loot.
+   */
+  private buildDressing(): void {
+    const postMat = new THREE.MeshStandardMaterial({ color: 0x4a3826, roughness: 1 });
+    const boardMat = new THREE.MeshStandardMaterial({ color: 0x5a4632, roughness: 1 });
+    const sign = (poiId: string, dx: number, dz: number, text: string, ry: number): void => {
+      const [px, pz] = this.poi(poiId);
+      const x = px + dx;
+      const z = pz + dz;
+      const y = this.groundY(x, z);
+      const g = new THREE.Group();
+      for (const s of [-1.3, 1.3]) {
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.14, 2.1, 0.14), postMat);
+        post.position.set(s, 1.05, 0);
+        post.castShadow = true;
+        g.add(post);
+      }
+      const board = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.85, 0.07), boardMat);
+      board.position.y = 1.72;
+      board.castShadow = true;
+      g.add(board);
+      const face = decalPlane(text, 3.2, 'rgba(238,234,222,0.95)', 44);
+      face.position.set(0, 1.72, 0.05);
+      g.add(face);
+      g.position.set(x, y, z);
+      g.rotation.y = ry;
+      g.name = `sign:${poiId}`;
+      this.scene.add(g);
+    };
+    sign('town', -26, 16, 'CEDAR SHOAL', 0.35);
+    sign('marina', 12, 10, 'MARINA', -0.4);
+    sign('relay_station', -14, 12, 'RELAY RIDGE', 0.2);
+    sign('lighthouse_base', -16, 9, 'LIGHTHOUSE POINT', 0.55);
+    sign('airbase', -42, 58, 'AIRBASE — RESTRICTED', 0.9);
+
+    // wreck shells: burnt hull + cab + wheels, one tipped on its side
+    const shellMat = new THREE.MeshStandardMaterial({ color: 0x35322e, roughness: 1 });
+    const rustMat = new THREE.MeshStandardMaterial({ color: 0x5a3a28, roughness: 1 });
+    const tireMat = new THREE.MeshStandardMaterial({ color: 0x1c1c1e, roughness: 1 });
+    const wreck = (x: number, z: number, ry: number, tipped: boolean): void => {
+      const y = this.groundY(x, z);
+      const g = new THREE.Group();
+      const hull = new THREE.Mesh(new THREE.BoxGeometry(4.3, 0.62, 1.78), shellMat);
+      hull.position.y = 0.55;
+      hull.castShadow = true;
+      g.add(hull);
+      const cab = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.58, 1.62), rustMat);
+      cab.position.set(-0.2, 1.12, 0);
+      cab.castShadow = true;
+      g.add(cab);
+      for (const [wx, wz] of [[-1.45, 0.92], [1.45, 0.92], [-1.45, -0.92], [1.45, -0.92]] as [number, number][]) {
+        const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.22, 10), tireMat);
+        wheel.rotation.x = Math.PI / 2;
+        wheel.position.set(wx, 0.34, wz);
+        g.add(wheel);
+      }
+      if (tipped) {
+        g.rotation.z = Math.PI / 2.15;
+        g.position.set(x, y + 0.85, z);
+      } else {
+        g.position.set(x, y, z);
+      }
+      g.rotation.y = ry;
+      g.name = 'wreck-shell';
+      this.scene.add(g);
+    };
+    const wreckSpots: [number, number, number, boolean][] = [
+      [-300, 96, 0.4, false], // west of the wreck POI, on the shore road
+      [120, 62, -0.3, true], // tipped, east of town
+      [415, 120, 0.9, false], // the dunes approach
+    ];
+    for (const [x, z, ry, tipped] of wreckSpots) wreck(x, z, ry, tipped);
   }
 
   private buildRelayRuin(): void {

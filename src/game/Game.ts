@@ -309,6 +309,15 @@ export class Game {
       { id: 'airbase', x: airbaseX, z: airbaseZ, radius: 48, count: 4, kinds: ['shambler', 'brute', 'spitter', 'stalker'] },
     ];
     this.husks = new HuskManager(this.scene, zones, opts.seed);
+    // spawn sanity (map phase): area zones overlap the town — without a
+    // veto, husks seeded inside houses and shops. Points inside any
+    // building collider (padded) are rejected and re-rolled.
+    this.husks.spawnBlocked = (x, z) => {
+      for (const c of this.houseColliders) {
+        if (x >= c.x0 - 0.6 && x <= c.x1 + 0.6 && z >= c.z0 - 0.6 && z <= c.z1 + 0.6) return true;
+      }
+      return false;
+    };
     this.husks.spawnInitial(
       this.deadHusks,
       (x, z) => this.groundY(x, z),
