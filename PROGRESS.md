@@ -62,6 +62,24 @@ Deviations/notes:
   offset ~20m from shore_camp so q_prologue step 2 requires walking in; no per-frame allocations in the
   hot loop (sky updates throttled to 4Hz, shared geometries/materials).
 
+## 2026-10-20 — Mobile UI revamp wave SHIPPED + deployed + verified live
+- Commits on main: 07bdc47 (mobile UI revamp) + b9523c1 (attachments wave, gun customization + magazines/reload).
+  NOTE: two coordinators worked the same tree concurrently; 07bdc47 swept the
+  mobile-UI uncommitted edits (HUD.tsx/TouchControls.tsx) and b9523c1 swept
+  Game.ts/audio.ts — final tree verified coherent: tsc clean, vitest 24/24, vite build green.
+- Touch changes:
+  - WeaponBar: third "Throw" slot — shows equipped throwable + qty (or first grenade in pack); tap auto-equips a grenade into the melee slot if needed, then throws via the normal melee→onThrow projectile path (frag/molotov/flashbang).
+  - Hold-to-search: tapping interact (F desktop / USE touch) while searching now cancels it (press consumed so the search doesn't restart); HUD progress bar gets an explicit Cancel button; "Pick safe (locked)" renders "Picking …".
+  - Noise meter extracted to a component: desktop unchanged in vitals; touch gets a compact top-center pill (LOUD/audible/quiet).
+  - Interact prompt: adaptive key cap (USE on touch, F desktop); on touch it sits above the USE button instead of under the weapon bar.
+  - Hotbar on touch = right-edge vertical strip for the right thumb (bottom-center is the weapon bar's zone).
+  - Safe-area insets on HUD + TouchControls roots; slimmer weapon slots (h-12 w-24).
+  - Sibling's ammo counter shipped in the same wave: HUD magazine loaded/reserve readout for the equipped gun.
+- Safe/lockpick touch flow: USE on a locked safe without a lockpick → "Locked. You need a lockpick." toast (engine); with one → 4s pick with progress + cancel; lockpick consumed on completion (engine, unchanged).
+- Incidental fix: 'craft' sfx name added to SfxName + synthesized ratchet sound (tsc was failing on attachMod's sfx.play('craft')).
+- Deploy: push to origin main AUTO-DEPLOYED (the "no auto-deploy on push" note from m1/deploy is now stale — Vercel picked up the push).
+- Verified live: https://nomad-game-koinocapital-7163s-projects.vercel.app → 200, serves index-DiBGEFCf.js (912,851 bytes), bundle contains the revamp's "Search cancelled" string.
+
 ## 2026-10-19 — Coordinator: deploy v0.1.0 (m1/deploy)
 - Pushed `main` to github.com/koinod/nomad-game (gh OAuth token lacks `workflow` scope, so
   `.github/workflows/ci.yml` could not be pushed — neither via gh nor the GitHub App API;
