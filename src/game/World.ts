@@ -46,6 +46,18 @@ function duneBand(x: number, z: number): number {
   return smoothstep(95, 150, az) * smoothstep(245, 195, az);
 }
 
+/** The airbase plateau (AIRBASE wave): a graded-flat military complex on
+ *  the south-east plain, formula-leveled like the town pad so the whole
+ *  site — depot, runway, hangar row — sits on one surveyed grade. */
+export const AIRBASE_CENTER: [number, number] = [480, -108];
+export const AIRBASE_GRADE = 2.7;
+function airbaseMask(x: number, z: number): number {
+  return (
+    smoothstep(168, 128, Math.abs(x - AIRBASE_CENTER[0])) *
+    smoothstep(118, 78, Math.abs(z - AIRBASE_CENTER[1]))
+  );
+}
+
 /** Terrain pads under houses: set by World after POIs resolve, before the
  *  terrain mesh is built — heightAt blends raw terrain to the pad height so
  *  floors never overlay terrain and walls never float. */
@@ -82,6 +94,9 @@ export function heightAt(x: number, z: number): number {
   // fall to water past the shoreline and past the island ends
   const water = smoothstep(318, 288, az) * smoothstep(1, 0.35, 1 - xFall);
   h = lerp(-1.6, h, clamp(water, 0, 1));
+  // the airbase grade is surveyed LAST: swell, ridging, and beach pull
+  // all blend out across its falloff ring, so the complex core is flat
+  h = lerp(h, AIRBASE_GRADE, airbaseMask(x, z));
   // structure pads (cut/fill): full flatten across the footprint + a 1m
   // apron, then a wide feathered ring — no cliff edges at the walls, no
   // topo layers slicing through the air next to a foundation
@@ -136,6 +151,11 @@ export const POI_DEFS: PoiDef[] = [
   { id: 'dune_cache', x: 470, zGuess: 150 },
   { id: 'lighthouse_base', x: 600, zGuess: 40 },
   { id: 'lighthouse_top', x: 600, zGuess: 40 },
+  // AIRBASE wave: the depot/airbase complex (on the plateau — resolves at
+  // the nominal spot) and the beached Heavy Logistics Carrier off the
+  // marina shore (open water: findLandZ falls back to the exact guess)
+  { id: 'airbase', x: AIRBASE_CENTER[0], zGuess: AIRBASE_CENTER[1] },
+  { id: 'carrier', x: -688, zGuess: 48 },
 ];
 
 /** Find a walkable z near the guess (height in a sane band). */
