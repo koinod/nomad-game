@@ -122,16 +122,19 @@ class B {
     const hw = w / 2;
     const hd = d / 2;
     const rise = riseFrac * hd;
-    const slope = Math.hypot(rise, hd);
-    const a = Math.atan2(rise, hd);
+    const top = h - 0.3 + 0.1; // wall top the roof sits on
+    // endpoint-exact panels: eave overhang outside, top edges MEET at the
+    // ridge (the old slope+0.5 panels crossed through it — an X from
+    // below — and the gable triangles were pasted on the eave sides,
+    // leaving both ends of the roof open)
+    const slopeLen = Math.hypot(hd + 0.39, rise + 0.08);
+    const a = Math.atan2(rise + 0.08, hd + 0.39);
     const roofGroup = new THREE.Group();
+    const roofMat = new THREE.MeshStandardMaterial({ color, roughness: 1 });
     for (const sgn of [-1, 1]) {
-      const panel = new THREE.Mesh(
-        new THREE.BoxGeometry(w + 0.6, 0.14, slope + 0.5),
-        new THREE.MeshStandardMaterial({ color, roughness: 1 }),
-      );
+      const panel = new THREE.Mesh(new THREE.BoxGeometry(w + 0.6, 0.14, slopeLen), roofMat);
       panel.rotation.x = -sgn * a;
-      panel.position.set(0, h - 0.3 + rise / 2 + 0.1, sgn * (hd / 2));
+      panel.position.set(0, top + (rise - 0.04) / 2, sgn * ((hd + 0.33) / 2));
       panel.castShadow = true;
       roofGroup.add(panel);
       const fascia = new THREE.Mesh(
@@ -145,21 +148,22 @@ class B {
       new THREE.BoxGeometry(w + 0.7, 0.14, 0.3),
       new THREE.MeshStandardMaterial({ color: 0x4a3826, roughness: 1 }),
     );
-    ridge.position.set(0, h - 0.3 + rise + 0.12, 0);
+    ridge.position.set(0, top + rise + 0.02, 0);
     ridge.castShadow = true;
     roofGroup.add(ridge);
+    // gable caps on the X ends, in the ZY plane — these close the roof
+    const capMat = new THREE.MeshStandardMaterial({ color: this.color, roughness: 1, side: THREE.DoubleSide });
     for (const sgn of [-1, 1]) {
-      const gableShape = new THREE.Shape();
-      gableShape.moveTo(-hw, h - 0.3);
-      gableShape.lineTo(hw, h - 0.3);
-      gableShape.lineTo(0, h - 0.3 + rise);
-      gableShape.closePath();
-      const gable = new THREE.Mesh(
-        new THREE.ShapeGeometry(gableShape),
-        new THREE.MeshStandardMaterial({ color: this.color, roughness: 1 }),
-      );
-      gable.position.z = sgn * (hd - this.t / 2);
-      gable.rotation.y = sgn > 0 ? 0 : Math.PI;
+      const shape = new THREE.Shape();
+      shape.moveTo(-hd, top - 0.05);
+      shape.lineTo(hd, top - 0.05);
+      shape.lineTo(0, top + rise);
+      shape.closePath();
+      const geo = new THREE.ShapeGeometry(shape);
+      geo.rotateY(Math.PI / 2);
+      const gable = new THREE.Mesh(geo, capMat);
+      gable.position.set(sgn * (hw - 0.02), 0, 0);
+      gable.castShadow = true;
       roofGroup.add(gable);
     }
     this.group.add(roofGroup);
@@ -476,7 +480,14 @@ export function buildPoiBuildings(
     }
     out.group.add(b.group);
     out.containers.push(...b.containers);
-    out.roofs.push(...b.roofs);
+    // roof bounds must be world-space too (they were pushed raw — the
+    // hide-roof check compared them against world positions and misfired)
+    for (const r of b.roofs) {
+      out.roofs.push({
+        bounds: { x0: b.cx + r.bounds.x0, z0: b.cz + r.bounds.z0, x1: b.cx + r.bounds.x1, z1: b.cz + r.bounds.z1 },
+        group: r.group,
+      });
+    }
   };
   const at = (pid: string, dx: number, dz: number): [number, number] => {
     const p = pois[pid] ?? [0, 0];

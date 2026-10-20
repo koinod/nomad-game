@@ -640,10 +640,17 @@ export class Game {
     // hide the roof of whatever house the player is inside (see your own rooms)
     for (const r of this.houseRoofs) {
       const b = r.bounds;
-      r.group.visible = !(
+      const playerIn =
         player.pos.x > b.x0 - 0.5 && player.pos.x < b.x1 + 0.5 &&
-        player.pos.z > b.z0 - 0.5 && player.pos.z < b.z1 + 0.5
-      );
+        player.pos.z > b.z0 - 0.5 && player.pos.z < b.z1 + 0.5;
+      // if the CAMERA is inside the building, the building stays whole —
+      // you're indoors, you should see the room and its ceiling. The roof
+      // only lifts when you're inside and the camera is outside/above.
+      const cam = this.camera?.position ?? player.pos;
+      const camIn =
+        cam.x > b.x0 - 0.3 && cam.x < b.x1 + 0.3 &&
+        cam.z > b.z0 - 0.3 && cam.z < b.z1 + 0.3;
+      r.group.visible = !(playerIn && !camIn);
     }
 
     const night = this.isNight();

@@ -82,11 +82,13 @@ export function heightAt(x: number, z: number): number {
   // fall to water past the shoreline and past the island ends
   const water = smoothstep(318, 288, az) * smoothstep(1, 0.35, 1 - xFall);
   h = lerp(-1.6, h, clamp(water, 0, 1));
-  // house pads: full flatten inside, smooth blend ring outside
+  // structure pads (cut/fill): full flatten across the footprint + a 1m
+  // apron, then a wide feathered ring — no cliff edges at the walls, no
+  // topo layers slicing through the air next to a foundation
   for (const p of terrainPads) {
     const m = Math.max(Math.abs(x - p.cx) - p.hw, Math.abs(z - p.cz) - p.hd);
-    if (m < 2.2) {
-      const t = clamp(m / 2.2, 0, 1);
+    if (m < 4.5) {
+      const t = clamp((m - 1.0) / 3.5, 0, 1);
       h = lerp(p.y, h, smoothstep(0, 1, t));
     }
   }
@@ -285,13 +287,14 @@ export class World {
     this.sun = new THREE.DirectionalLight(0xfff2dd, 2.6);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
-    this.sun.shadow.camera.left = -60;
-    this.sun.shadow.camera.right = 60;
-    this.sun.shadow.camera.top = 60;
-    this.sun.shadow.camera.bottom = -60;
+    this.sun.shadow.camera.left = -75;
+    this.sun.shadow.camera.right = 75;
+    this.sun.shadow.camera.top = 75;
+    this.sun.shadow.camera.bottom = -75;
     this.sun.shadow.camera.near = 10;
     this.sun.shadow.camera.far = 700;
     this.sun.shadow.bias = -0.0006;
+    this.sun.shadow.normalBias = 0.05;
     this.scene.add(this.sun);
     this.scene.add(this.sun.target);
     this.hemi = new THREE.HemisphereLight(0xbdd3e6, 0x3a4a35, 0.85);
@@ -844,16 +847,28 @@ export class World {
   }
 
   /**
-   * Keep the shadow frustum centered on the player. Preserves whatever
-   * direction updateSky set — only re-anchors the light/target pair.
+   * Keep the shadow frustum centered on the player — WITHOUT the crawl.
+   * The anchor is snapped to the shadow map's texel grid in light space:
+   * an unsnapped follow makes every texel swim as the player moves, which
+   * reads as shadows glitching in and out. Snapped, the shadow image is
+   * stable frame to frame and only whole texels ever change.
    */
   updateShadowTarget(x: number, z: number): void {
     const dir = this.sun.position.clone().sub(this.sun.target.position);
     const len = dir.length() || 1;
     dir.divideScalar(len);
-    this.sun.target.position.set(x, 0, z);
+    // light-space basis
+    const up = Math.abs(dir.y) > 0.95 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+    const right = new THREE.Vector3().crossVectors(up, dir).normalize();
+    const upv = new THREE.Vector3().crossVectors(dir, right).normalize();
+    const texel = 150 / 2048; // frustum width / map size, in world units
+    const rx = Math.round((x * right.x + z * right.z) / texel) * texel;
+    const rz = Math.round((x * upv.x + z * upv.z) / texel) * texel;
+    const sx = right.x * rx + upv.x * rz;
+    const sz = right.z * rx + upv.z * rz;
+    this.sun.target.position.set(sx, 0, sz);
     this.sun.target.updateMatrixWorld();
-    this.sun.position.set(x + dir.x * 220, dir.y * 220, z + dir.z * 220);
+    this.sun.position.set(sx + dir.x * 220, dir.y * 220, sz + dir.z * 220);
   }
 
   /** Per-frame world animation (beam rotation, water shimmer). */

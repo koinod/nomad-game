@@ -64,101 +64,101 @@ interface VariantSpec {
 
 const VARIANTS: Record<VariantName, VariantSpec> = {
   ranch: {
-    tier: 'suburban', w: 9, d: 7.5, wallH: 2.75, wallColor: 0x9a8f7e, roof: 'pitched',
+    tier: 'suburban', w: 10, d: 8.5, wallH: 3.1, wallColor: 0x9fb4a4, roof: 'pitched',
     interiorWall: true, openFront: false,
     furniture: [
-      { kind: 'fridge', lx: -3.3, lz: -2.9, rot: 0 },
-      { kind: 'cabinets', lx: -1.6, lz: -3.1, rot: 0 },
-      { kind: 'bookshelf', lx: 2.9, lz: -2.9, rot: 0 },
-      { kind: 'dresser', lx: 2.9, lz: 2.4, rot: 2 },
-      { kind: 'crate', lx: -2.8, lz: 2.6, rot: 1 },
+      { kind: 'fridge', lx: -3.9, lz: -3.4, rot: 0 },
+      { kind: 'cabinets', lx: -2.0, lz: -3.6, rot: 0 },
+      { kind: 'bookshelf', lx: 3.4, lz: -3.4, rot: 0 },
+      { kind: 'dresser', lx: 3.4, lz: 2.9, rot: 2 },
+      { kind: 'crate', lx: -3.4, lz: 3.2, rot: 1 },
     ],
   },
   bungalow: {
-    tier: 'suburban', w: 6.5, d: 6, wallH: 2.7, wallColor: 0x8a7f6a, roof: 'pitched',
+    tier: 'suburban', w: 7.5, d: 7, wallH: 3.05, wallColor: 0xa8b6c2, roof: 'pitched',
     interiorWall: false, openFront: false,
     furniture: [
-      { kind: 'fridge', lx: -2.2, lz: -2.3, rot: 0 },
-      { kind: 'cabinets', lx: -0.6, lz: -2.5, rot: 0 },
-      { kind: 'dresser', lx: 2.3, lz: 1.6, rot: 2 },
-      { kind: 'toolbox', lx: -2.3, lz: 2.2, rot: 1 },
+      { kind: 'fridge', lx: -2.7, lz: -2.7, rot: 0 },
+      { kind: 'cabinets', lx: -0.8, lz: -2.9, rot: 0 },
+      { kind: 'dresser', lx: 2.8, lz: 2.0, rot: 2 },
+      { kind: 'toolbox', lx: -2.8, lz: 2.6, rot: 1 },
     ],
   },
   farmhouse: {
-    tier: 'suburban', w: 7, d: 9, wallH: 2.8, wallColor: 0x7a4a3a, roof: 'pitched',
+    tier: 'suburban', w: 8, d: 10, wallH: 3.15, wallColor: 0x8a4a3c, roof: 'pitched',
     interiorWall: true, openFront: false,
     furniture: [
-      { kind: 'fridge', lx: -2.4, lz: -3.7, rot: 0 },
-      { kind: 'cabinets', lx: -0.8, lz: -3.9, rot: 0 },
-      { kind: 'cabinets', lx: 1.0, lz: -3.9, rot: 0 },
-      { kind: 'dresser', lx: 2.4, lz: 3.2, rot: 2 },
-      { kind: 'bookshelf', lx: -2.6, lz: 3.2, rot: 1 },
-      { kind: 'crate', lx: 0.5, lz: 1.0, rot: 0 },
+      { kind: 'fridge', lx: -2.9, lz: -4.2, rot: 0 },
+      { kind: 'cabinets', lx: -1.0, lz: -4.4, rot: 0 },
+      { kind: 'cabinets', lx: 1.2, lz: -4.4, rot: 0 },
+      { kind: 'dresser', lx: 2.9, lz: 3.8, rot: 2 },
+      { kind: 'bookshelf', lx: -3.1, lz: 3.8, rot: 1 },
+      { kind: 'crate', lx: 0.6, lz: 1.2, rot: 0 },
     ],
   },
   ranch2: {
-    tier: 'suburban', w: 9.5, d: 8, wallH: 2.75, wallColor: 0x8f8272, roof: 'pitched',
+    tier: 'suburban', w: 10.5, d: 9, wallH: 3.1, wallColor: 0xb8b0a0, roof: 'pitched',
     interiorWall: true, openFront: false, twoStory: true,
     furniture: [
-      { kind: 'fridge', lx: -3.4, lz: -3.1, rot: 0 },
-      { kind: 'cabinets', lx: -1.7, lz: -3.3, rot: 0 },
-      { kind: 'bookshelf', lx: 2.5, lz: -3.1, rot: 0 },
-      { kind: 'dresser', lx: 2.9, lz: 2.9, rot: 2 },
-      { kind: 'crate', lx: -3.0, lz: 3.0, rot: 1 },
+      { kind: 'fridge', lx: -4.0, lz: -3.7, rot: 0 },
+      { kind: 'cabinets', lx: -2.0, lz: -3.9, rot: 0 },
+      { kind: 'bookshelf', lx: 3.0, lz: -3.7, rot: 0 },
+      { kind: 'dresser', lx: 3.5, lz: 3.4, rot: 2 },
+      { kind: 'crate', lx: -3.6, lz: 3.6, rot: 1 },
     ],
     furnitureUp: [
-      { kind: 'dresser', lx: 2.5, lz: -3.1, rot: 0 },
-      { kind: 'bookshelf', lx: 2.9, lz: 2.9, rot: 2 },
-      { kind: 'cabinets', lx: -3.4, lz: -3.1, rot: 0 },
-      { kind: 'crate', lx: -3.0, lz: 3.0, rot: 3 },
+      { kind: 'dresser', lx: 3.0, lz: -3.7, rot: 0 },
+      { kind: 'bookshelf', lx: 3.5, lz: 3.4, rot: 2 },
+      { kind: 'cabinets', lx: -4.0, lz: -3.7, rot: 0 },
+      { kind: 'crate', lx: -3.6, lz: 3.6, rot: 3 },
     ],
   },
   richhouse: {
-    tier: 'suburban', w: 11, d: 9.5, wallH: 2.8, wallColor: 0xa3967c, roof: 'pitched',
+    tier: 'suburban', w: 12, d: 10.5, wallH: 3.2, wallColor: 0xc2b49a, roof: 'pitched',
     interiorWall: true, openFront: false, twoStory: true,
     furniture: [
-      { kind: 'fridge', lx: -4.2, lz: -3.9, rot: 0 },
-      { kind: 'cabinets', lx: -2.4, lz: -4.1, rot: 0 },
-      { kind: 'cabinets', lx: -0.6, lz: -4.1, rot: 0 },
-      { kind: 'bookshelf', lx: 3.4, lz: -3.9, rot: 0 },
-      { kind: 'dresser', lx: 3.8, lz: 3.4, rot: 2 },
-      { kind: 'crate', lx: -4.0, lz: 3.6, rot: 1 },
+      { kind: 'fridge', lx: -4.9, lz: -4.4, rot: 0 },
+      { kind: 'cabinets', lx: -2.9, lz: -4.6, rot: 0 },
+      { kind: 'cabinets', lx: -0.7, lz: -4.6, rot: 0 },
+      { kind: 'bookshelf', lx: 4.1, lz: -4.4, rot: 0 },
+      { kind: 'dresser', lx: 4.5, lz: 4.0, rot: 2 },
+      { kind: 'crate', lx: -4.7, lz: 4.2, rot: 1 },
     ],
     furnitureUp: [
-      { kind: 'dresser', lx: 3.4, lz: -3.9, rot: 0 },
-      { kind: 'bookshelf', lx: 3.8, lz: 3.4, rot: 2 },
-      { kind: 'dresser', lx: -4.2, lz: -3.9, rot: 0 },
-      { kind: 'cabinets', lx: -2.4, lz: -4.1, rot: 0 },
+      { kind: 'dresser', lx: 4.1, lz: -4.4, rot: 0 },
+      { kind: 'bookshelf', lx: 4.5, lz: 4.0, rot: 2 },
+      { kind: 'dresser', lx: -4.9, lz: -4.4, rot: 0 },
+      { kind: 'cabinets', lx: -2.9, lz: -4.6, rot: 0 },
     ],
   },
   garage: {
-    tier: 'suburban', w: 6.5, d: 6, wallH: 2.6, wallColor: 0x7d7466, roof: 'pitched',
+    tier: 'suburban', w: 7.5, d: 7, wallH: 2.9, wallColor: 0x8b9096, roof: 'pitched',
     interiorWall: false, openFront: true,
     furniture: [
-      { kind: 'toolbox', lx: -2.2, lz: -2.2, rot: 1 },
-      { kind: 'crate', lx: 2.2, lz: -2.2, rot: 0 },
-      { kind: 'barrel', lx: 2.4, lz: 0.8, rot: 0 },
+      { kind: 'toolbox', lx: -2.7, lz: -2.7, rot: 1 },
+      { kind: 'crate', lx: 2.7, lz: -2.7, rot: 0 },
+      { kind: 'barrel', lx: 2.9, lz: 1.0, rot: 0 },
     ],
   },
   cabin: {
-    tier: 'camp', w: 5, d: 6, wallH: 2.65, wallColor: 0x6e5a3e, roof: 'shed',
+    tier: 'camp', w: 5.5, d: 6.5, wallH: 2.95, wallColor: 0x6e5a3e, roof: 'shed',
     interiorWall: false, openFront: false,
     furniture: [
-      { kind: 'cooler', lx: -1.6, lz: -2.2, rot: 0 },
-      { kind: 'crate', lx: 1.6, lz: -2.2, rot: 3 },
-      { kind: 'barrel', lx: 1.8, lz: 2.3, rot: 0 },
+      { kind: 'cooler', lx: -1.9, lz: -2.5, rot: 0 },
+      { kind: 'crate', lx: 1.9, lz: -2.5, rot: 3 },
+      { kind: 'barrel', lx: 2.1, lz: 2.6, rot: 0 },
     ],
   },
   shack: {
-    tier: 'camp', w: 4, d: 5, wallH: 2.5, wallColor: 0x5a4a38, roof: 'shed',
+    tier: 'camp', w: 4.5, d: 5.5, wallH: 2.8, wallColor: 0x5a4a38, roof: 'shed',
     interiorWall: false, openFront: false,
     furniture: [
-      { kind: 'crate', lx: -1.0, lz: -1.7, rot: 2 },
-      { kind: 'barrel', lx: 1.2, lz: 1.5, rot: 0 },
+      { kind: 'crate', lx: -1.2, lz: -2.0, rot: 2 },
+      { kind: 'barrel', lx: 1.4, lz: 1.8, rot: 0 },
     ],
   },
   leanto: {
-    tier: 'camp', w: 4, d: 3.5, wallH: 2.35, wallColor: 0x6e5a3e, roof: 'shed',
+    tier: 'camp', w: 4, d: 3.5, wallH: 2.6, wallColor: 0x6e5a3e, roof: 'shed',
     interiorWall: false, openFront: true,
     furniture: [
       { kind: 'cooler', lx: -1.0, lz: -1.2, rot: 0 },
@@ -166,7 +166,7 @@ const VARIANTS: Record<VariantName, VariantSpec> = {
     ],
   },
   ruin: {
-    tier: 'suburban', w: 8, d: 7, wallH: 2.7, wallColor: 0x8a7f72, roof: 'none',
+    tier: 'suburban', w: 8, d: 7, wallH: 3.0, wallColor: 0x8a7f72, roof: 'none',
     interiorWall: false, openFront: false,
     furniture: [
       { kind: 'toolbox', lx: 1.5, lz: 1.0, rot: 2 },
@@ -391,15 +391,16 @@ function buildOne(
 
   // floor slab (local coords — the group sits at base height)
   const floorTop = base + 0.14;
-  const slab = box(spec.w - t, 0.14, spec.d - t, 0x5a5348);
+  const slab = box(spec.w - t, 0.14, spec.d - t, 0x6b5136);
   slab.position.set(0, 0.07, 0);
   group.add(slab);
   floors.push({ ...aabb(-hw + t / 2, -hd + t / 2, hw - t / 2, hd - t / 2), y: floorTop });
 
-  // foundation skirt: ties the house to sloped terrain, hides the gap under walls
-  const skirt = box(spec.w + 0.24, 0.55, spec.d + 0.24, 0x55504a);
-  skirt.position.set(0, -0.14, 0);
-  group.add(skirt);
+  // foundation (v3): a real stem wall, deep enough to meet sloped ground
+  // on the downhill side — no floating corners, no sand-colored skirting
+  const found = box(spec.w + 0.3, 1.7, spec.d + 0.3, 0x6f6a63);
+  found.position.set(0, -0.68, 0);
+  group.add(found);
   // corner boards: trim that visually connects the wall runs
   if (!ruin) {
     for (const [ccx, ccz] of [[-hw, -hd], [hw, -hd], [-hw, hd], [hw, hd]] as [number, number][]) {
@@ -413,7 +414,7 @@ function buildOne(
   // ends on the X faces (the ridge runs along X; v1 misplaced them on the
   // eave sides, leaving both ends of every roof open), shed roofs get a
   // raised back filler + sloped end caps.
-  const roofBase = spec.twoStory && !ruin ? wh + 2.52 : wallTop;
+  const roofBase = spec.twoStory && !ruin ? wh + 2.67 : wallTop;
   if (spec.roof !== 'none') {
     const roofGroup = new THREE.Group();
     const roofCol = new THREE.Color(0x4a3a30).offsetHSL(0, 0, (rng() - 0.5) * 0.05).getHex();
@@ -435,12 +436,12 @@ function buildOne(
     };
     if (spec.roof === 'pitched') {
       const rise = Math.min(spec.w, spec.d) * 0.3;
-      const slope = Math.hypot(hd, rise);
-      const a = Math.atan2(rise, hd);
+      const slopeLen = Math.hypot(hd + 0.39, rise + 0.08);
+      const a = Math.atan2(rise + 0.08, hd + 0.39);
       for (const sgn of [1, -1]) {
-        const panel = box(spec.w + 0.7, 0.14, slope + 0.5, roofCol);
+        const panel = box(spec.w + 0.7, 0.14, slopeLen, roofCol);
         panel.rotation.x = sgn * a;
-        panel.position.set(0, roofBase + rise / 2, (sgn * hd) / 2);
+        panel.position.set(0, roofBase + (rise - 0.04) / 2, (sgn * (hd + 0.33)) / 2);
         roofGroup.add(panel);
       }
       // fascia along the eaves + ridge cap: the roof reads as connected,
@@ -537,7 +538,7 @@ function buildOne(
   if (spec.twoStory && !ruin && !spec.openFront) {
     const floorTop2 = base + wh + 0.12; // world height of the upstairs floor
     // slab (visual) — its top is the walking surface
-    const slab2 = box(spec.w - t, 0.16, spec.d - t, 0x5a5348);
+    const slab2 = box(spec.w - t, 0.16, spec.d - t, 0x6b5136);
     slab2.position.set(0, wh + 0.04, 0);
     group.add(slab2);
     // floor rects: full floor minus the stairwell (east strip, north run)
@@ -563,7 +564,7 @@ function buildOne(
     }
     // upper perimeter walls — same footprint as the ground walls (their
     // colliders already exist), no interior partitions upstairs (open loft)
-    const uh = 2.6;
+    const uh = 2.75;
     const uN = box(spec.w, uh, t, wallCol); uN.position.set(0, wh + uh / 2 - 0.05, -hd);
     const uS = box(spec.w, uh, t, wallCol); uS.position.set(0, wh + uh / 2 - 0.05, hd);
     const uW = box(t, uh, spec.d, wallCol); uW.position.set(-hw, wh + uh / 2 - 0.05, 0);
