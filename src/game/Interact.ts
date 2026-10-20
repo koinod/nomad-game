@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { useGameStore } from '../store/gameStore';
 import { ITEMS, HUSK_LOOT } from '../data/items';
 import { buildGroundMesh } from './weaponMeshes';
+import { buildFurnitureMesh, type FurnitureKind } from './furnitureMeshes';
 import { sfx } from '../systems/audio';
 
 export interface LootEntry {
@@ -19,6 +20,10 @@ export interface ContainerDef {
   x: number;
   z: number;
   loot: LootEntry[];
+  /** Furniture: distinct mesh + prompt label instead of a crate. */
+  label?: string;
+  meshKind?: FurnitureKind;
+  rotY?: number;
 }
 
 export interface InteractHooks {
@@ -76,7 +81,9 @@ function buildPickupMesh(itemId: string, qty: number): THREE.Group {
 
 export class InteractSystem {
   readonly interactables: Interactable[] = [];
-  private crateMeshes = new Map<string, THREE.Mesh>();
+  private crateMeshes = new Map<string, THREE.Object3D>();
+  private emptyLabels = new Map<string, string>();
+  private furnitureIds = new Set<string>(); // furniture stays visible when empty
   private searchedCorpses = new Set<string>();
   private pickupMeshes = new Map<string, THREE.Group>();
   private hooks: InteractHooks;
@@ -92,17 +99,28 @@ export class InteractSystem {
     for (const c of containers) {
       const y = hooks.groundY(c.x, c.z);
       const pos = new THREE.Vector3(c.x, y, c.z);
-      const mesh = new THREE.Mesh(crateGeo, crateMat);
-      mesh.position.set(c.x, y + 0.45, c.z);
-      mesh.rotation.y = hooks.rng() * Math.PI;
+      let mesh: THREE.Object3D;
+      if (c.meshKind) {
+        // furniture: distinct mesh, sits on the interior floor
+        mesh = buildFurnitureMesh(c.meshKind);
+        mesh.position.set(c.x, y, c.z);
+        mesh.rotation.y = c.rotY ?? 0;
+      } else {
+        const cm = new THREE.Mesh(crateGeo, crateMat);
+        cm.position.set(c.x, y + 0.45, c.z);
+        cm.rotation.y = hooks.rng() * Math.PI;
+        mesh = cm;
+      }
       mesh.visible = !hooks.isLooted(c.id);
       hooks.scene.add(mesh);
       this.crateMeshes.set(c.id, mesh);
+      this.emptyLabels.set(c.id, c.label ? c.label.replace('Search', 'Empty') : 'Empty container');
+      if (c.meshKind) this.furnitureIds.add(c.id);
       this.interactables.push({
         id: c.id,
         kind: 'container',
         pos,
-        label: hooks.isLooted(c.id) ? 'Empty container' : 'Search container',
+        label: hooks.isLooted(c.id) ? 'Empty container' : (c.label ?? 'Search container'),
         use: () => {
           // fresh state: the constructor's `s` snapshot goes stale after any set()
           const st = useGameStore.getState();
@@ -236,13 +254,16 @@ export class InteractSystem {
     pickup('pk_bandage', 'bandage', 2, 'shore_camp', -2.5, 3);
   }
 
-  /** Mark a container fully looted: hide the crate, relabel the prompt. */
+  /** Mark a container fully looted: hide the mesh (crates only — furniture
+   *  stays), relabel the prompt. */
   setContainerEmptied(id: string): void {
     this.hooks.markLooted(id);
-    const m = this.crateMeshes.get(id);
-    if (m) m.visible = false;
+    if (!this.furnitureIds.has(id)) {
+      const m = this.crateMeshes.get(id);
+      if (m) m.visible = false;
+    }
     const it = this.interactables.find((i) => i.id === id);
-    if (it) it.label = 'Empty container';
+    if (it) it.label = this.emptyLabels.get(id) ?? 'Empty container';
   }
 
   /** Visible ground pickup with its own mesh. One-shot: taken once. */

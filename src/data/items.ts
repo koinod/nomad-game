@@ -172,3 +172,94 @@ export const FIELD_RECIPES: Record<string, FieldRecipe> = {
 
 export const BASE_CARRY_KG = 20;
 export const BASE_SLOTS = 12;
+
+// Furniture loot, keyed by furniture kind then house tier — what a room is
+// for is what you find in it (sodgame's POI-template lesson).
+// Tier 'suburban' includes camp kinds (crate/barrel/cooler) at richer tables.
+export const FURNITURE_LOOT: Record<string, Record<'camp' | 'suburban', HuskLootEntry[]>> = {
+  fridge: {
+    camp: [
+      { id: 'canned_food', min: 1, max: 2, chance: 0.7 },
+      { id: 'water_bottle', min: 1, max: 1, chance: 0.5 },
+    ],
+    suburban: [
+      { id: 'canned_food', min: 1, max: 3, chance: 0.85 },
+      { id: 'water_bottle', min: 1, max: 2, chance: 0.65 },
+      { id: 'cooked_meat', min: 1, max: 1, chance: 0.25 },
+    ],
+  },
+  cabinets: {
+    camp: [
+      { id: 'canned_food', min: 1, max: 1, chance: 0.5 },
+      { id: 'cloth', min: 1, max: 1, chance: 0.4 },
+    ],
+    suburban: [
+      { id: 'canned_food', min: 1, max: 2, chance: 0.7 },
+      { id: 'bandage', min: 1, max: 2, chance: 0.45 },
+      { id: 'cloth', min: 1, max: 2, chance: 0.4 },
+    ],
+  },
+  dresser: {
+    camp: [
+      { id: 'cloth', min: 1, max: 2, chance: 0.6 },
+      { id: 'bandage', min: 1, max: 1, chance: 0.3 },
+    ],
+    suburban: [
+      { id: 'cloth', min: 1, max: 3, chance: 0.75 },
+      { id: 'bandage', min: 1, max: 2, chance: 0.4 },
+      { id: 'ammo_9mm', min: 2, max: 6, chance: 0.2 },
+    ],
+  },
+  bookshelf: {
+    camp: [
+      { id: 'wire', min: 1, max: 1, chance: 0.4 },
+    ],
+    suburban: [
+      { id: 'wire', min: 1, max: 2, chance: 0.5 },
+      { id: 'scrap', min: 1, max: 2, chance: 0.4 },
+      { id: 'flare', min: 1, max: 1, chance: 0.2 },
+    ],
+  },
+  cooler: {
+    camp: [
+      { id: 'canned_food', min: 1, max: 2, chance: 0.75 },
+      { id: 'water_bottle', min: 1, max: 2, chance: 0.6 },
+    ],
+    suburban: [
+      { id: 'canned_food', min: 1, max: 2, chance: 0.8 },
+      { id: 'water_bottle', min: 1, max: 2, chance: 0.7 },
+    ],
+  },
+  crate: {
+    camp: [
+      { id: 'scrap', min: 1, max: 3, chance: 0.8 },
+      { id: 'cloth', min: 1, max: 2, chance: 0.5 },
+    ],
+    suburban: [
+      { id: 'scrap', min: 2, max: 4, chance: 0.85 },
+      { id: 'wire', min: 1, max: 2, chance: 0.5 },
+      { id: 'cloth', min: 1, max: 2, chance: 0.45 },
+    ],
+  },
+  barrel: {
+    camp: [
+      { id: 'scrap', min: 1, max: 2, chance: 0.7 },
+      { id: 'fire_starter', min: 1, max: 1, chance: 0.2 },
+    ],
+    suburban: [
+      { id: 'scrap', min: 1, max: 3, chance: 0.75 },
+      { id: 'water_bottle', min: 1, max: 1, chance: 0.3 },
+    ],
+  },
+  toolbox: {
+    camp: [
+      { id: 'scrap', min: 1, max: 3, chance: 0.8 },
+      { id: 'wire', min: 1, max: 2, chance: 0.5 },
+    ],
+    suburban: [
+      { id: 'scrap', min: 2, max: 4, chance: 0.85 },
+      { id: 'wire', min: 1, max: 3, chance: 0.6 },
+      { id: 'fire_starter', min: 1, max: 1, chance: 0.25 },
+    ],
+  },
+};

@@ -13,6 +13,7 @@ import { HuskManager } from './Husks';
 import type { Husk, SpawnZone } from './Husks';
 import { InteractSystem, buildContainerDefs } from './Interact';
 import { AnimalManager } from './Animals';
+import { floorYAt, type Collider, type FloorRect } from './Colliders';
 import { sfx, ambience } from '../systems/audio';
 import { ENDING_LINES } from '../narrative/dialogue';
 import {
@@ -41,6 +42,9 @@ export class Game {
   private husks: HuskManager | null = null;
   private animals: AnimalManager | null = null;
   private interact: InteractSystem | null = null;
+  private houseColliders: Collider[] = [];
+  private houseFloors: FloorRect[] = [];
+  private houseRoofs: { bounds: Collider; group: THREE.Group }[] = [];
 
   private raf = 0;
   private running = false;
@@ -112,6 +116,11 @@ export class Game {
     // register POIs (contract)
     useGameStore.getState().setPoiPositions(this.world.poiPositions);
 
+    // houses: colliders, floor rects, roofs, furniture containers
+    this.houseColliders = this.world.houses.colliders;
+    this.houseFloors = this.world.houses.floors;
+    this.houseRoofs = this.world.houses.roofs;
+
     // snapshot world diff
     const snap = opts.snapshot ?? null;
     if (snap) {
@@ -146,7 +155,7 @@ export class Game {
       { id: 'dunes', x: 470, z: 150, radius: 55, count: 2, kinds: ['stalker'], nightOnly: true },
     ];
     this.husks = new HuskManager(this.scene, zones, opts.seed);
-    this.husks.spawnInitial(this.deadHusks, (x, z) => heightAt(x, z), this.isNight());
+    this.husks.spawnInitial(this.deadHusks, (x, z) => this.groundY(x, z), this.isNight());
 
     // wildlife: deer + rabbits, huntable for raw meat
     this.animals = new AnimalManager(this.scene, opts.seed);
@@ -158,7 +167,7 @@ export class Game {
       {
         resourceMult,
         rng: this.rng,
-        groundY: (x, z) => heightAt(x, z),
+        groundY: (x, z) => this.groundY(x, z),
         scene: this.scene,
         isLooted: (id) => this.looted.has(id),
         markLooted: (id) => { this.looted.add(id); },
@@ -168,7 +177,7 @@ export class Game {
         setCamp: (id) => { this.lastCampId = id; },
       },
       this.world.poiPositions,
-      buildContainerDefs(this.world.poiPositions),
+      [...buildContainerDefs(this.world.poiPositions), ...this.world.houses.containers],
     );
 
     // shadow flags for world + husk + interactable meshes (idempotent)
@@ -266,6 +275,11 @@ export class Game {
 
   getBiomeAt(x: number, z: number): BiomeId {
     return this.initialized ? biomeAt(x, z) : 'beach';
+  }
+
+  /** Terrain height, raised by interior floor rects inside houses. */
+  groundY(x: number, z: number): number {
+    return Math.max(heightAt(x, z), floorYAt(x, z, this.houseFloors));
   }
 
   respawnAtSafePoint(): void {
@@ -476,7 +490,7 @@ export class Game {
     const speedMul = tier === 'ok' ? 1 : tier === 'heavy' ? 0.75 : 0.55;
 
     player.update(dt, {
-      groundY: (x, z) => heightAt(x, z),
+      groundY: (x, z) => this.groundY(x, z),
       sprintAllowed: tier === 'ok',
       speedMul,
       husks,
@@ -499,8 +513,18 @@ export class Game {
         sfx.play('pickup', { volume: 0.5 });
       },
       camera,
+      colliders: this.houseColliders,
     });
     this.world?.updateShadowTarget(player.pos.x, player.pos.z);
+
+    // hide the roof of whatever house the player is inside (see your own rooms)
+    for (const r of this.houseRoofs) {
+      const b = r.bounds;
+      r.group.visible = !(
+        player.pos.x > b.x0 - 0.5 && player.pos.x < b.x1 + 0.5 &&
+        player.pos.z > b.z0 - 0.5 && player.pos.z < b.z1 + 0.5
+      );
+    }
 
     const night = this.isNight();
     husks.update(
@@ -508,7 +532,8 @@ export class Game {
       {
         playerPos: player.pos,
         isNight: night,
-        groundY: (x, z) => heightAt(x, z),
+        groundY: (x, z) => this.groundY(x, z),
+        colliders: this.houseColliders,
         onHuskKilled: (h) => this.onHuskKilled(h),
       },
       player.pos,

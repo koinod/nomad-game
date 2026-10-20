@@ -3,6 +3,7 @@
 
 import * as THREE from 'three';
 import { mulberry32 } from './rng';
+import { resolveCollisions, type Collider } from './Colliders';
 import { sfx } from '../systems/audio';
 import { useGameStore } from '../store/gameStore';
 import { DIFFICULTIES } from '../store/types';
@@ -22,6 +23,7 @@ export interface HuskCtx {
   playerPos: THREE.Vector3;
   isNight: boolean;
   groundY: (x: number, z: number) => number;
+  colliders: readonly Collider[];
   onHuskKilled: (h: Husk) => void;
 }
 
@@ -319,6 +321,8 @@ export class Husk {
         break;
       }
     }
+    // husks respect walls too — they come through the door, not the drywall
+    resolveCollisions(g.position, 0.5, ctx.colliders);
     groundClamp();
   }
 }

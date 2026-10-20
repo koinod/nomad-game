@@ -4,6 +4,7 @@
 
 import * as THREE from 'three';
 import { makeFbm, makeNoise2D, mulberry32, clamp, lerp, smoothstep } from './rng';
+import { buildHouses, type HouseResult } from './Houses';
 import type { BiomeId } from './Game';
 
 export const WORLD = {
@@ -137,6 +138,7 @@ export class World {
   readonly seed: number;
   readonly rng: () => number;
   poiPositions: Record<string, [number, number]> = {};
+  houses!: HouseResult;
 
   private sun!: THREE.DirectionalLight;
   private hemi!: THREE.HemisphereLight;
@@ -164,7 +166,8 @@ export class World {
     this.buildStars();
     this.resolvePois();
     this.buildScatter();
-    this.buildTown();
+    // enterable houses with loot, collision, and floor rects
+    this.houses = buildHouses(this.scene, this.seed, this.poiPositions, (x, z) => heightAt(x, z));
     this.buildCampfires();
     this.buildWreck();
     this.buildLighthouse();
@@ -451,37 +454,7 @@ export class World {
     this.scene.add(grass);
   }
 
-  private buildTown(): void {
-    // Ruined town: ~9 house shells around the town POI.
-    const [cx, cz] = this.poi('town');
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x8a7f72, roughness: 1 });
-    const roofMat = new THREE.MeshStandardMaterial({ color: 0x5a3f33, roughness: 1 });
-    for (let i = 0; i < 9; i++) {
-      const ang = (i / 9) * Math.PI * 2 + this.rng() * 0.5;
-      const rad = 25 + this.rng() * 55;
-      const x = cx + Math.cos(ang) * rad;
-      const z = cz + Math.sin(ang) * rad * 0.7;
-      const h = this.groundY(x, z);
-      if (h < 1) continue;
-      const wdt = 5 + this.rng() * 4;
-      const dep = 4 + this.rng() * 3;
-      const hgt = 2.6 + this.rng() * 1.6;
-      const ruin = this.rng() < 0.4; // some are roofless shells
-      const house = new THREE.Group();
-      const walls = new THREE.Mesh(new THREE.BoxGeometry(wdt, hgt, dep), wallMat);
-      walls.position.y = hgt / 2;
-      house.add(walls);
-      if (!ruin) {
-        const roof = new THREE.Mesh(new THREE.ConeGeometry(Math.max(wdt, dep) * 0.72, 1.8, 4), roofMat);
-        roof.position.y = hgt + 0.9;
-        roof.rotation.y = Math.PI / 4;
-        house.add(roof);
-      }
-      house.position.set(x, h - 0.15, z);
-      house.rotation.y = this.rng() * Math.PI;
-      this.scene.add(house);
-    }
-  }
+
 
   private buildCampfires(): void {
     for (const id of ['shore_camp', 'jonah_camp', 'lighthouse_base']) {

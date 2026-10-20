@@ -6,6 +6,7 @@ import { tryMelee, tryRanged, meleeStatsFor, equippedMeleeId, equippedRangedDef 
 import { buildHandMesh, activeHandItemId } from './weaponMeshes';
 import { getGame } from './instance';
 import type { AnimalManager, AnimalKill } from './Animals';
+import { resolveCollisions, type Collider } from './Colliders';
 import { sfx } from '../systems/audio';
 import type { HuskManager } from './Husks';
 import { clamp, lerp } from './rng';
@@ -20,6 +21,7 @@ export interface PlayerCtx {
   emitNoise: (x: number, z: number, radius: number) => void;
   onAnimalKill: (kill: AnimalKill & { id: string; min: number; max: number }) => void;
   camera: THREE.PerspectiveCamera;
+  colliders: readonly Collider[]; // house walls + furniture
 }
 
 const WALK_SPEED = 5.6;
@@ -260,6 +262,8 @@ export class Player {
     this.vel.z = lerp(this.vel.z, wishZ, vk);
     this.pos.x += this.vel.x * dt;
     this.pos.z += this.vel.z * dt;
+    // walls and furniture are solid
+    resolveCollisions(this.pos, 0.45, ctx.colliders);
     const moving = this.vel.length() > 0.6;
 
     // jump (edge) + gravity; the heightmap is the ground
