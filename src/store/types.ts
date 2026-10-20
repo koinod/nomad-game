@@ -15,6 +15,25 @@ export interface FleetEntry {
   fuelPct: number;
   condPct: number;
   dist: number;
+  storageUsedKg: number;
+  storageCapKg: number;
+  upgrades: string[];
+  tiresFlat: number;
+  hitchedTrailer: string | null; // trailer defId being towed
+}
+
+/** One trailer row for the phone's Vehicles app. */
+export interface TrailerFleetEntry {
+  defId: string;
+  name: string;
+  dist: number;
+  hitchedTo: string | null; // vehicle defId
+  module: string; // 'none' | ModuleId
+  storageUsedKg: number;
+  storageCapKg: number;
+  fuelLiters: number; // tanker only, else 0
+  beaconMode: 'off' | 'sat' | 'horde';
+  loadedVehicle: string | null; // vehicle name riding the deck
 }
 
 export interface DifficultyDef {
@@ -164,11 +183,35 @@ export interface VehicleSave {
   heading: number;
   fuel: number;
   condition: number;
+  // v3: what the run did to this vehicle (v2 saves migrate with defaults)
+  storage?: InvItem[];
+  upgrades?: string[];
+  tiresFlat?: number;
+  colorPick?: number;
+  cargoCrates?: number;
+}
+
+/** A trailer's persisted state (v3). */
+export interface TrailerSave {
+  defId: string;
+  x: number;
+  y: number;
+  z: number;
+  heading: number;
+  hitchedTo: string | null; // vehicle defId (uids are def ids — one of each)
+  module: string; // 'none' | ModuleId
+  storage: InvItem[];
+  fuelLiters: number; // tanker only
+  doorOpen: boolean;
+  loadedVehicleDefId: string | null;
+  beaconMode: 'off' | 'sat' | 'horde';
+  cargoCrates?: number;
+  rampDown?: boolean;
 }
 
 
 export interface SaveSnapshot {
-  version: 2;
+  version: 3;
   savedAt: number;
   difficulty: DifficultyId;
   seed: number;
@@ -193,6 +236,8 @@ export interface SaveSnapshot {
   survivors: SurvivorDef[];
   base: { poiId: string; facilities: string[] } | null;
   vehicles: VehicleSave[];
+  // v3: trailers — where they lie, what they're hitched to, what's inside
+  trailers: TrailerSave[];
 }
 
 export interface SaveMeta {

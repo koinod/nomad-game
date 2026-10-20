@@ -18,6 +18,7 @@ export interface InputState {
   zoomOut: boolean; // held: mobile zoom-out button
   aimTap: boolean; // edge-triggered: RMB with a gun cycles hip → shoulder → ADS
   interact: boolean; // edge-triggered
+  storage: boolean; // edge-triggered: T opens vehicle/trailer storage
   refuel: boolean; // edge-triggered: R near a vehicle pours a fuel can in
   phone: boolean; // edge-triggered
   backpack: boolean; // edge-triggered
@@ -43,6 +44,7 @@ export const input: InputState = {
   zoomIn: false,
   zoomOut: false,
   interact: false,
+  storage: false,
   refuel: false,
   phone: false,
   backpack: false,
@@ -63,6 +65,7 @@ export function resetEdgeTriggers(): void {
   input.attackMelee = false;
   input.attackRanged = false;
   input.interact = false;
+  input.storage = false;
   input.refuel = false;
   input.phone = false;
   input.backpack = false;

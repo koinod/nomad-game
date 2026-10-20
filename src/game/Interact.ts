@@ -561,6 +561,44 @@ export function buildContainerDefs(pois: Record<string, [number, number]>): Cont
       { id: 'bandage', min: 1, max: 2, chance: 0.8 },
       { id: 'medkit', min: 1, max: 1, chance: 0.4 },
     ]),
+    // vehicle-part caches: every upgrade/repair input is findable in the
+    // world (and craftable at the Machine Shop) — logistics + military spots
+    C('c_parts_warehouse', 'town', 100, 50, [
+      { id: 'tire', min: 1, max: 1, chance: 0.9 },
+      { id: 'engine_part', min: 1, max: 1, chance: 0.8 },
+      { id: 'armor_plate', min: 1, max: 2, chance: 0.6 },
+      { id: 'scrap', min: 2, max: 4, chance: 0.9 },
+    ]),
+    C('c_parts_garage', 'town', -36, -18, [
+      { id: 'tire', min: 1, max: 1, chance: 0.8 },
+      { id: 'car_battery', min: 1, max: 1, chance: 0.6 },
+      { id: 'scrap', min: 1, max: 3, chance: 0.9 },
+    ]),
+    C('c_parts_gas', 'town', 72, 26, [
+      { id: 'fuel_can', min: 1, max: 1, chance: 0.7 },
+      { id: 'tire', min: 1, max: 1, chance: 0.5 },
+      { id: 'engine_part', min: 1, max: 1, chance: 0.4 },
+    ]),
+    C('c_parts_wreck', 'wreck', -9, -7, [
+      { id: 'engine_part', min: 1, max: 1, chance: 0.7 },
+      { id: 'tire', min: 1, max: 1, chance: 0.6 },
+      { id: 'car_battery', min: 1, max: 1, chance: 0.5 },
+    ]),
+    C('c_parts_relay', 'relay_station', 8, 3, [
+      { id: 'car_battery', min: 1, max: 1, chance: 0.8 },
+      { id: 'armor_plate', min: 1, max: 1, chance: 0.5 },
+      { id: 'wire', min: 2, max: 3, chance: 0.8 },
+    ]),
+    C('c_parts_light', 'lighthouse_base', 9, -3, [
+      { id: 'armor_plate', min: 1, max: 2, chance: 0.6 },
+      { id: 'engine_part', min: 1, max: 1, chance: 0.6 },
+      { id: 'gun_parts', min: 1, max: 2, chance: 0.6 },
+    ]),
+    C('c_parts_marina', 'marina', 7, -3, [
+      { id: 'tire', min: 1, max: 1, chance: 0.7 },
+      { id: 'car_battery', min: 1, max: 1, chance: 0.6 },
+      { id: 'tool_kit', min: 1, max: 1, chance: 0.3 },
+    ]),
     // harvest nodes: fallen logs give wood, berry bushes give produce
     C('n_log_1', 'forest_cache', -14, 6, LOG_LOOT, 'logpile'),
     C('n_log_2', 'forest_cache', 16, -10, LOG_LOOT, 'logpile'),

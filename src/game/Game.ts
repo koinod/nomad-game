@@ -14,7 +14,15 @@ import { HuskManager } from './Husks';
 import type { Husk, SpawnZone } from './Husks';
 import { InteractSystem, buildContainerDefs } from './Interact';
 import { AnimalManager } from './Animals';
-import { VehicleManager, type Vehicle } from './Vehicles';
+import { VehicleManager, applyUpgradeVisuals, itemsWeightKg, refreshCargoVisuals, type Vehicle } from './Vehicles';
+import {
+  TrailerManager, CrateManager, applyModuleVisuals, refreshTrailerCargoVisuals,
+  trailerStorageCapKg, tongueDist, axleDist, tongueWorld, type Trailer,
+} from './Trailers';
+import { canHitch } from '../data/trailerData';
+import { stepTrailer, wrapAngle } from './trailerPhysics';
+import { canInstallUpgrade, storageCapKg } from '../data/upgrades';
+import type { InvItem, TrailerSave } from '../store/types';
 import { floorYAt, floorYAtRef, resolveCollisions, type Collider, type FloorRect } from './Colliders';
 import { sfx, ambience } from '../systems/audio';
 import { ENDING_LINES } from '../narrative/dialogue';
@@ -56,7 +64,11 @@ export class Game {
   // hold-to-search state (container / corpse / safe)
   private searching: { id: string; label: string; t: number; dur: number; x: number; z: number; hp: number } | null = null;
   vehicles!: VehicleManager;
+  trailers!: TrailerManager;
+  crates!: CrateManager;
   driving: Vehicle | null = null;
+  private beaconT = 0;
+  private mouseHeld = false;
   private wasFirstPerson = false;
   private cleanMeters = 0;
   private fleetT = 0;
@@ -140,6 +152,10 @@ export class Game {
     this.vehicles = new VehicleManager();
     this.vehicles.spawn(this.scene!, this.world.poiPositions, (x, z) => heightAt(x, z));
 
+    // trailers: hitched freight — box, flatbed, tanker, carrier, utility
+    this.trailers = new TrailerManager();
+    this.trailers.spawn(this.scene!, this.world.poiPositions, (x, z) => heightAt(x, z));
+
     // register POIs (contract)
     useGameStore.getState().setPoiPositions(this.world.poiPositions);
 
@@ -161,7 +177,7 @@ export class Game {
       // vehicles back where the run left them (fuel + condition included);
       // v1 saves migrate with an empty list and keep their fresh spawns
       for (const vs of snap.vehicles ?? []) {
-        const v = this.vehicles.vehicles.find((x) => x.def.id === vs.defId);
+        const v = this.vehicles.vehicles.find((x) => x.def.id === (vs.defId === 'apc' ? 'goliath' : vs.defId));
         if (!v) continue;
         v.group.position.set(vs.x, vs.y, vs.z);
         v.group.rotation.y = vs.heading;
@@ -169,6 +185,47 @@ export class Game {
         v.fuel = vs.fuel;
         v.condition = vs.condition;
         v.speed = 0;
+        // v3 state: storage, upgrades, flats, paint (v2 saves migrate with defaults)
+        v.storage = (vs.storage ?? []).filter((it) => ITEMS[it.itemId]);
+        v.upgrades = vs.upgrades ?? [];
+        v.tiresFlat = vs.tiresFlat ?? 0;
+        v.colorPick = vs.colorPick ?? v.colorPick;
+        v.cargoCrates = vs.cargoCrates ?? 0;
+        if (v.upgrades.length) applyUpgradeVisuals(v);
+        if (v.cargoCrates) refreshCargoVisuals(v);
+      }
+      // trailers back where they were left: hitched, loaded, built out
+      for (const ts of snap.trailers ?? []) {
+        const t = this.trailers.byId(ts.defId);
+        if (!t) continue;
+        t.group.position.set(ts.x, ts.y, ts.z);
+        t.group.rotation.y = ts.heading;
+        t.heading = ts.heading;
+        t.hitchedTo = ts.hitchedTo;
+        t.module = (ts.module as Trailer['module']) ?? 'none';
+        t.storage = (ts.storage ?? []).filter((it) => ITEMS[it.itemId]);
+        t.fuelLiters = ts.fuelLiters ?? 0;
+        t.doorOpen = !!ts.doorOpen;
+        t.beaconMode = ts.beaconMode ?? 'off';
+        t.loadedVehicleUid = ts.loadedVehicleDefId ?? null;
+        t.cargoCrates = ts.cargoCrates ?? 0;
+        t.rampDown = !!ts.rampDown;
+        for (const d of t.doors) {
+          const want = d.kind === 'ramp' ? (t.rampDown ? 1 : 0) : (t.doorOpen ? 1 : 0);
+          d.t = want;
+          d.target = want;
+        }
+        if (t.module !== 'none') applyModuleVisuals(t);
+        if (t.cargoCrates) refreshTrailerCargoVisuals(t);
+        if (t.loadedVehicleUid) {
+          const lv = this.vehicles.byId(t.loadedVehicleUid);
+          if (lv) {
+            lv.loadedOn = t.uid;
+            this.placeLoadedVehicle(t, lv);
+          } else {
+            t.loadedVehicleUid = null;
+          }
+        }
       }
     }
 
@@ -223,6 +280,23 @@ export class Game {
       this.world.poiPositions,
       [...buildContainerDefs(this.world.poiPositions), ...this.world.houses.containers, ...this.world.poiBuildings.containers],
     );
+
+    // physical freight: supply / parts crates that can be loaded into beds
+    // and onto decks, hauled, and opened where they land
+    this.crates = new CrateManager();
+    {
+      let cn = 1;
+      const mk = (entries: [string, number][]): InvItem[] =>
+        entries.map(([itemId, qty]) => ({ uid: `seed${cn++}`, itemId, qty }));
+      const crateAt = (poi: string, dx: number, dz: number, contents: InvItem[], label: string, band: number) => {
+        const p = this.world!.poiPositions[poi] ?? [0, 0];
+        this.crates.spawnCrate(this.scene!, p[0] + dx, p[1] + dz, this.rng() * 3, (x, z) => heightAt(x, z), contents, label, band);
+      };
+      crateAt('marina', 12, 2, mk([['bandage', 3], ['canned_food', 2], ['water_bottle', 2]]), 'Supply crate', 0x6a7a4a);
+      crateAt('town', 100, 44, mk([['engine_part', 1], ['tire', 1], ['scrap', 4]]), 'Parts crate', 0x707880);
+      crateAt('lighthouse_base', 6, -14, mk([['ammo_rifle', 3], ['bandage', 2], ['canned_food', 2]]), 'Supply crate', 0x565e4c);
+      crateAt('wreck', -6, 12, mk([['car_battery', 1], ['scrap', 3], ['wire', 2]]), 'Salvage crate', 0x8a6d3b);
+    }
 
     // shadow flags for world + husk + interactable meshes (idempotent)
     this.world.applyShadowFlags();
@@ -315,7 +389,7 @@ export class Game {
     };
   }
 
-  /** Every vehicle's live state, for the save snapshot (v2). */
+  /** Every vehicle's live state, for the save snapshot (v3). */
   getVehicleStates(): VehicleSave[] {
     if (!this.vehicles) return [];
     return this.vehicles.vehicles.map((v) => ({
@@ -326,6 +400,11 @@ export class Game {
       heading: v.heading,
       fuel: v.fuel,
       condition: v.condition,
+      storage: v.storage.map((it) => ({ ...it })),
+      upgrades: [...v.upgrades],
+      tiresFlat: v.tiresFlat,
+      colorPick: v.colorPick,
+      cargoCrates: v.cargoCrates,
     }));
   }
 
@@ -450,9 +529,11 @@ export class Game {
 
     // global edge triggers (work even while the world is paused)
     if (input.pause && s.screen === 'game' && !s.dead && !this.cutscene) {
-      // Esc closes the loot panel first; it doesn't open the pause menu
+      // Esc closes an open panel first; it doesn't open the pause menu
       if (s.lootOpenId != null) {
         useGameStore.getState().closeLoot();
+      } else if (s.storageOpen != null) {
+        useGameStore.getState().closeStorage();
       } else {
         this.setPaused(!s.paused);
       }
@@ -461,6 +542,10 @@ export class Game {
     if (input.interact && s.lootOpenId != null) {
       // E toggles the loot panel shut (world is paused, so simulate never sees it)
       useGameStore.getState().closeLoot();
+      sfx.play('ui', { volume: 0.4 });
+    }
+    if (input.interact && s.storageOpen != null) {
+      useGameStore.getState().closeStorage();
       sfx.play('ui', { volume: 0.4 });
     }
     if (input.phone && s.screen === 'game' && !s.dead && !s.dialogue && !this.cutscene) {
@@ -516,6 +601,7 @@ export class Game {
       s.backpackOpen ||
       s.sleepOpen ||
       s.lootOpenId != null ||
+      s.storageOpen != null ||
       s.dead ||
       s.screen !== 'game';
 
@@ -589,6 +675,25 @@ export class Game {
           fuelPct: Math.round((v.fuel / v.def.fuelMax) * 100),
           condPct: Math.round(v.condition * 100),
           dist: Math.round(Math.hypot(v.group.position.x - player.pos.x, v.group.position.z - player.pos.z)),
+          storageUsedKg: itemsWeightKg(v.storage),
+          storageCapKg: storageCapKg(v.def.storageKg, v.upgrades),
+          upgrades: [...v.upgrades],
+          tiresFlat: v.tiresFlat,
+          hitchedTrailer: this.trailers.trailerTowedBy(v.uid)?.def.id ?? null,
+        })),
+      );
+      s.setTrailerFleet(
+        this.trailers.trailers.map((t) => ({
+          defId: t.uid,
+          name: t.def.name,
+          dist: Math.round(Math.hypot(t.group.position.x - player.pos.x, t.group.position.z - player.pos.z)),
+          hitchedTo: t.hitchedTo,
+          module: t.module,
+          storageUsedKg: itemsWeightKg(t.storage),
+          storageCapKg: trailerStorageCapKg(t),
+          fuelLiters: Math.round(t.fuelLiters),
+          beaconMode: t.beaconMode,
+          loadedVehicle: t.loadedVehicleUid ? this.vehicles.byId(t.loadedVehicleUid)?.def.name ?? null : null,
         })),
       );
     }
@@ -601,7 +706,7 @@ export class Game {
     const speedMul = tier === 'ok' ? 1 : tier === 'heavy' ? 0.75 : 0.55;
 
     const playerCtx = {
-      groundY: (x: number, z: number) => this.groundYRef(x, z, player.pos.y),
+      groundY: (x: number, z: number) => this.dynGroundYRef(x, z, player.pos.y),
       sprintAllowed: tier === 'ok',
       speedMul,
       husks,
@@ -636,6 +741,31 @@ export class Game {
       player.update(dt, playerCtx);
     }
     this.world?.updateShadowTarget(player.pos.x, player.pos.z);
+
+    // ---- trailers, doors, freight (the vehicle & trailer wave) ----
+    this.trailers.update(dt, this.vehicles, {
+      groundY: (x, z) => heightAt(x, z),
+      ram: (x, z, r, dmg) => { husks.damageInRadius(x, z, r, dmg); },
+      noise: (x, z, r) => this.noiseAt(x, z, r),
+      time: this.elapsed,
+    });
+    this.vehicles.updateDoors(dt);
+    // any vehicle not towing sheds last frame's trailer mass
+    for (const v of this.vehicles.vehicles) {
+      if (!this.trailers.trailerTowedBy(v.uid)) v.towedMassKg = 0;
+    }
+    // loaded vehicles ride their decks; loaded crates ride their carriers
+    for (const t of this.trailers.trailers) {
+      if (!t.loadedVehicleUid) continue;
+      const lv = this.vehicles.byId(t.loadedVehicleUid);
+      if (lv) this.placeLoadedVehicle(t, lv);
+    }
+    this.followCrates();
+    this.resolveInteriors();
+    if (!this.driving) this.checkAutoHitch(s);
+    this.tickBeacons(dt);
+    // driving onto a deck: roll up the ramp, stop, and you're cargo
+    if (this.driving && !this.driving.loadedOn) this.checkDeckLock(s);
 
     // hide the roof of whatever house the player is inside (see your own rooms)
     for (const r of this.houseRoofs) {
@@ -776,32 +906,57 @@ export class Game {
     // noise meter decays — silence is the default state
     if (s.noiseLevel > 0) s.setNoiseLevel(s.noiseLevel * Math.pow(0.2, dt));
 
-    // interact prompt (F within 3m) — a vehicle within reach takes priority
+    // interact prompts: trailer / door / crate context (positional) wins,
+    // then the vehicle drive prompt, then world interactables
     const veh = !this.driving && !this.searching
       ? this.vehicles.nearest(player.pos.x, player.pos.z, 2.9)
       : null;
-    if (this.driving) {
-      s.setInteractPrompt('[F] Exit vehicle');
-    } else if (veh) {
-      const fuelNote = veh.fuel <= 0.05 ? ' — TANK EMPTY' : veh.fuel < veh.def.fuelMax * 0.35 ? ' · [R] refuel' : '';
-      s.setInteractPrompt(`[F] Drive ${veh.def.name}${fuelNote}`);
-      if (input.interact) {
-        this.enterVehicle(veh);
-        input.interact = false;
-      } else if (input.refuel) {
-        this.refuelVehicle(veh);
+    // [T] storage: your ride while driving, else the closest openable box
+    if (input.storage && !this.searching) {
+      input.storage = false;
+      if (this.driving) s.openStorage('vehicle', this.driving.uid, `${this.driving.def.name} storage`);
+      else this.openStorageNear(player.pos.x, player.pos.z, s);
+    }
+    // [R] at a tanker on foot pours a fuel can INTO the tanker
+    if (input.refuel && !this.driving && !this.searching && !veh) {
+      const tk = this.trailers.nearest(player.pos.x, player.pos.z, 3.6);
+      if (tk && tk.def.kind === 'tanker') {
+        this.pourIntoTanker(tk, s);
         input.refuel = false;
       }
-    } else {
-      const near = this.interact!.nearest(player.pos.x, player.pos.z, 3);
-      s.setInteractPrompt(near ? `[F] ${near.label}` : null);
-      if (input.interact && near && !this.searching) {
-        const handled = this.beginSearchIfNeeded(near);
-        if (!handled) {
-          near.use();
-          // refresh prompt (e.g. container now looted)
-          const again = this.interact!.nearest(player.pos.x, player.pos.z, 3);
-          s.setInteractPrompt(again ? `[F] ${again.label}` : null);
+    }
+    if (this.driving) {
+      s.setInteractPrompt('[F] Exit vehicle');
+    } else if (!this.searching) {
+      const ctx = this.contextAction(player.pos.x, player.pos.z, s);
+      if (ctx) {
+        s.setInteractPrompt(ctx.label);
+        if (input.interact) {
+          ctx.run();
+          input.interact = false;
+        }
+      } else if (veh) {
+        const fuelNote = veh.fuel <= 0.05 ? ' — TANK EMPTY' : veh.fuel < veh.def.fuelMax * 0.35 ? ' · [R] refuel' : '';
+        const flatNote = veh.tiresFlat > 0 ? ` · ⚠ ${veh.tiresFlat} flat` : '';
+        s.setInteractPrompt(`[F] Drive ${veh.def.name}${fuelNote}${flatNote} · [T] storage`);
+        if (input.interact) {
+          this.enterVehicle(veh);
+          input.interact = false;
+        } else if (input.refuel) {
+          this.refuelVehicle(veh);
+          input.refuel = false;
+        }
+      } else {
+        const near = this.interact!.nearest(player.pos.x, player.pos.z, 3);
+        s.setInteractPrompt(near ? `[F] ${near.label}` : null);
+        if (input.interact && near) {
+          const handled = this.beginSearchIfNeeded(near);
+          if (!handled) {
+            near.use();
+            // refresh prompt (e.g. container now looted)
+            const again = this.interact!.nearest(player.pos.x, player.pos.z, 3);
+            s.setInteractPrompt(again ? `[F] ${again.label}` : null);
+          }
         }
       }
     }
@@ -916,6 +1071,9 @@ export class Game {
       case 'KeyF':
         input.interact = true;
         break;
+      case 'KeyT':
+        input.storage = true;
+        break;
       case 'KeyR':
         input.refuel = true;
         break;
@@ -1014,7 +1172,7 @@ export class Game {
     const condBefore = v.condition;
     const posBefore = v.group.position.clone();
     this.vehicles.drive(dt, v, input.moveY, input.moveX, {
-      groundY: (x, z) => this.groundY(x, z),
+      groundY: (x, z) => this.driveGroundY(x, z),
       colliders: this.houseColliders,
       ram: (x, z, r, dmg) => {
         const killed = husks.damageInRadius(x, z, r, dmg);
@@ -1049,11 +1207,24 @@ export class Game {
         s.addSkillXp('driver', 5);
       }
     }
+    if (v.blewTire) {
+      v.blewTire = false;
+      s.addToast('Tire blown! She pulls and drags — swap it from the phone\u2019s Vehicles app (needs a tire).');
+      sfx.play('hit', { volume: 0.7 });
+    }
+    // turret follows the camera; mounted weapons fire on the attack input
+    if (v.turret) v.turret.rotation.y = wrapAngle(player.camYaw - v.heading);
+    this.updateVehicleWeapons(dt, v, s);
     s.setVehicle({
+      uid: v.uid,
       name: v.def.name,
       speedKmh: Math.round(Math.abs(v.speed) * 3.6),
       fuelPct: v.fuel / v.def.fuelMax,
       condPct: v.condition,
+      storageUsedKg: itemsWeightKg(v.storage),
+      storageCapKg: storageCapKg(v.def.storageKg, v.upgrades),
+      tiresFlat: v.tiresFlat,
+      upgrades: [...v.upgrades],
     });
     if (input.interact) {
       this.exitVehicle();
@@ -1068,10 +1239,15 @@ export class Game {
     this.player!.camYaw = v.heading;
     const s = useGameStore.getState();
     s.setVehicle({
+      uid: v.uid,
       name: v.def.name,
       speedKmh: 0,
       fuelPct: v.fuel / v.def.fuelMax,
       condPct: v.condition,
+      storageUsedKg: itemsWeightKg(v.storage),
+      storageCapKg: storageCapKg(v.def.storageKg, v.upgrades),
+      tiresFlat: v.tiresFlat,
+      upgrades: [...v.upgrades],
     });
     s.addToast(`Driving the ${v.def.name}. F to get out${v.fuel <= 0.05 ? ' — the tank is dry, find a fuel can.' : ''}`);
     sfx.play('ui', { volume: 0.5 });
@@ -1106,6 +1282,18 @@ export class Game {
     }
     const can = s.inventory.find((it) => it.itemId === 'fuel_can' && it.qty > 0);
     if (!can) {
+      // no can? a tanker trailer alongside will share its load
+      const tk = this.trailers?.trailers.find((t) =>
+        t.def.kind === 'tanker' && t.fuelLiters >= 1 &&
+        Math.hypot(t.group.position.x - v.group.position.x, t.group.position.z - v.group.position.z) < 9);
+      if (tk) {
+        const add = Math.min(20, tk.fuelLiters, need);
+        tk.fuelLiters -= add;
+        v.fuel += add;
+        s.addToast(`Drew ${Math.round(add)}L from the tanker (${Math.round(tk.fuelLiters)}L left in it).`);
+        sfx.play('pickup', { volume: 0.5 });
+        return;
+      }
       s.addToast('No fuel can in the pack.');
       sfx.play('ui', { volume: 0.3 });
       return;
@@ -1115,6 +1303,715 @@ export class Game {
     v.fuel = Math.min(v.def.fuelMax, v.fuel + add);
     s.addToast(`Poured in ${Math.round(add)}L of fuel.`);
     sfx.play('pickup', { volume: 0.5 });
+  }
+
+  /** [R] at a tanker: pour a carried fuel can into the trailer's tank. */
+  private pourIntoTanker(t: Trailer, s: ReturnType<typeof useGameStore.getState>): void {
+    const cap = t.def.fuelMax ?? 2000;
+    if (t.fuelLiters >= cap - 1) {
+      s.addToast('The tanker is full.');
+      return;
+    }
+    const can = s.inventory.find((it) => it.itemId === 'fuel_can' && it.qty > 0);
+    if (!can) {
+      s.addToast(`Tanker holds ${Math.round(t.fuelLiters)}L of ${cap}L. Bring a fuel can to add more.`);
+      return;
+    }
+    if (!s.removeItem(can.uid, 1)) return;
+    const add = Math.min(20, cap - t.fuelLiters);
+    t.fuelLiters += add;
+    s.addToast(`Poured ${Math.round(add)}L into the tanker — ${Math.round(t.fuelLiters)}L aboard.`);
+    sfx.play('pickup', { volume: 0.5 });
+  }
+
+  // ------------------------------------------------------------------
+  // trailers, storage, freight — the vehicle & trailer wave
+  // ------------------------------------------------------------------
+
+  /** Ground for DRIVING: terrain + house floors + trailer decks/ramps. */
+  private driveGroundY(x: number, z: number): number {
+    let y = this.groundY(x, z);
+    if (this.trailers) {
+      for (const t of this.trailers.trailers) {
+        const d = this.trailers.deckHeightAt(t, x, z);
+        if (d > y) y = d;
+      }
+    }
+    return y;
+  }
+
+  /** Ground for WALKING: house floors + trailer interiors + decks, with a
+   *  climb allowance so stepping up into a trailer reads as a step, not a wall.
+   *  Interior floors only count when the doors are open — or when the walker
+   *  is already up at floor height (inside, doors closed behind them). */
+  private dynGroundYRef(x: number, z: number, refY: number): number {
+    let y = this.groundYRef(x, z, refY);
+    if (this.trailers) {
+      for (const t of this.trailers.trailers) {
+        if (t.interior) {
+          const inside = refY > t.group.position.y + t.interior.floorY - 0.5;
+          if (t.doorOpen || inside) {
+            const f = this.trailers.interiorFloorAt(t, x, z);
+            if (f > y && f <= refY + 1.15) y = f;
+          }
+        }
+        const d = this.trailers.deckHeightAt(t, x, z);
+        if (d > y && d <= refY + 1.15) y = d;
+      }
+    }
+    if (this.vehicles) {
+      for (const v of this.vehicles.vehicles) {
+        if (!v.interior) continue;
+        const inside = refY > v.group.position.y + v.interior.floorY - 0.5;
+        if (!inside && !v.doors.some((d) => d.t > 0.5)) continue;
+        const f = this.entityFloorAt(v.group.position, v.heading, v.interior, x, z);
+        if (f > y && f <= refY + 1.15) y = f;
+      }
+    }
+    return y;
+  }
+
+  private entityLocal(pos: THREE.Vector3, heading: number, x: number, z: number): { lx: number; lz: number } {
+    const dx = x - pos.x;
+    const dz = z - pos.z;
+    const fx = Math.sin(heading);
+    const fz = Math.cos(heading);
+    return { lx: dx * fz - dz * fx, lz: dx * fx + dz * fz };
+  }
+
+  private entityFloorAt(pos: THREE.Vector3, heading: number, interior: import('./Vehicles').InteriorSpec, x: number, z: number): number {
+    const { lx, lz } = this.entityLocal(pos, heading, x, z);
+    if (Math.abs(lx) <= interior.halfW + 0.3 && lz >= interior.zRear - 0.3 && lz <= interior.zFront + 0.3) {
+      return pos.y + interior.floorY;
+    }
+    return -Infinity;
+  }
+
+  /** Park a loaded vehicle square on its trailer's deck. */
+  private placeLoadedVehicle(t: Trailer, v: Vehicle): void {
+    const w = this.trailers.worldOf(t, 0, 0.2);
+    v.group.position.set(w.x, t.group.position.y + 0.99, w.z);
+    v.heading = t.heading;
+    v.group.rotation.set(0, t.heading, 0);
+    v.speed = 0;
+  }
+
+  /** Loaded crates stick to their carriers as they move. */
+  private followCrates(): void {
+    for (const c of this.crates.crates) {
+      if (!c.loadedInto) continue;
+      if (c.loadedInto.kind === 'trailer') {
+        const t = this.trailers.byId(c.loadedInto.uid);
+        if (!t) { c.loadedInto = null; continue; }
+        const floorY = t.def.kind === 'utility' ? 0.66 : t.def.kind === 'box' ? 1.05 : 0.99;
+        const lx = (c.slot % 2 === 0 ? -0.42 : 0.42) * (t.def.width / 2);
+        const lz = t.def.length * 0.22 - Math.floor(c.slot / 2) * 0.78;
+        this.crates.placeOnCarrier(c, t.group.position, t.heading, lx, floorY, lz);
+      } else {
+        const v = this.vehicles.byId(c.loadedInto.uid);
+        if (!v) { c.loadedInto = null; continue; }
+        const floorY = v.def.id === 'sprinter' ? 0.6 : v.def.id === 'bronco' ? 1.0 : 0.9;
+        const lx = (c.slot % 2 === 0 ? -0.42 : 0.42) * (v.def.width / 2);
+        const lz = -v.def.length * 0.3 - Math.floor(c.slot / 2) * 0.78;
+        this.crates.placeOnCarrier(c, v.group.position, v.heading, lx, floorY, lz);
+      }
+    }
+  }
+
+  /** Interior walls for walk-in spaces (box trailer, sprinter) + the
+   *  houses' camera-inside roof rule applied to trailer/vehicle roofs. */
+  private resolveInteriors(): void {
+    const player = this.player!;
+    if (this.driving) return;
+    const cam = this.camera!.position;
+    type Ent = { pos: THREE.Vector3; heading: number; interior: import('./Vehicles').InteriorSpec; open: boolean; roof?: THREE.Object3D };
+    const ents: Ent[] = [];
+    for (const t of this.trailers.trailers) {
+      if (t.interior) ents.push({ pos: t.group.position, heading: t.heading, interior: t.interior, open: t.doorOpen, roof: t.roofObj });
+    }
+    for (const v of this.vehicles.vehicles) {
+      if (v.interior) ents.push({ pos: v.group.position, heading: v.heading, interior: v.interior, open: v.doors.some((d) => d.t > 0.5), roof: v.roofObj });
+    }
+    for (const e of ents) {
+      const spec = e.interior;
+      const pl = this.entityLocal(e.pos, e.heading, player.pos.x, player.pos.z);
+      const playerIn = Math.abs(pl.lx) <= spec.halfW + 0.3 && pl.lz >= spec.zRear - 0.3 && pl.lz <= spec.zFront + 0.3
+        && player.pos.y > e.pos.y + spec.floorY - 0.5;
+      if (e.roof) {
+        const cl = this.entityLocal(e.pos, e.heading, cam.x, cam.z);
+        const camIn = Math.abs(cl.lx) <= spec.halfW + 0.4 && cl.lz >= spec.zRear - 0.4 && cl.lz <= spec.zFront + 0.4;
+        e.roof.visible = !(playerIn && !camIn);
+      }
+      if (!playerIn) continue;
+      const R = 0.35;
+      let { lx, lz } = pl;
+      lx = clamp(lx, -(spec.halfW - R), spec.halfW - R);
+      if (lz > spec.zFront - R) lz = spec.zFront - R;
+      if (lz < spec.zRear + R && !(e.open && Math.abs(pl.lx) < spec.doorHalfW)) lz = spec.zRear + R;
+      if (lx !== pl.lx || lz !== pl.lz) {
+        const fx = Math.sin(e.heading);
+        const fz = Math.cos(e.heading);
+        player.pos.x = e.pos.x + lx * fz + lz * fx;
+        player.pos.z = e.pos.z - lx * fx + lz * fz;
+      }
+    }
+  }
+
+  /** Back-up auto-snap: tongue meets hitch, aligned — it couples itself. */
+  private checkAutoHitch(s: ReturnType<typeof useGameStore.getState>): void {
+    for (const t of this.trailers.trailers) {
+      if (t.hitchedTo) continue;
+      const tw = tongueWorld(t);
+      for (const v of this.vehicles.vehicles) {
+        if (v.loadedOn || this.trailers.trailerTowedBy(v.uid)) continue;
+        if (!canHitch(v.def.id, t.def.id)) continue;
+        const h = this.vehicles.hitchWorld(v);
+        if (Math.hypot(h.x - tw.x, h.z - tw.z) < 1.7 && Math.abs(wrapAngle(v.heading - t.heading)) < 0.7) {
+          t.hitchedTo = v.uid;
+          s.addToast(`Hitched the ${t.def.name} to the ${v.def.name}.`);
+          sfx.play('switch', { volume: 0.6 });
+          break;
+        }
+      }
+    }
+  }
+
+  /** Beacon trailers at work: horde mode sings, sat mode holds the uplink. */
+  private tickBeacons(dt: number): void {
+    this.beaconT += dt;
+    if (this.beaconT < 2) return;
+    this.beaconT = 0;
+    let satUp = false;
+    for (const t of this.trailers.trailers) {
+      if (t.module !== 'beacon' || t.hitchedTo) continue;
+      if (t.beaconMode === 'sat') satUp = true;
+      if (t.beaconMode === 'horde') this.noiseAt(t.group.position.x, t.group.position.z, 55);
+    }
+    const st = useGameStore.getState();
+    if (!!st.flags['sat_uplink'] !== satUp) {
+      useGameStore.setState({ flags: { ...st.flags, sat_uplink: satUp } });
+    }
+  }
+
+  /** The drive-on lock: a car stopped squarely on a ramp-down deck is cargo. */
+  private checkDeckLock(s: ReturnType<typeof useGameStore.getState>): void {
+    const v = this.driving!;
+    for (const t of this.trailers.trailers) {
+      if ((t.def.kind !== 'flatbed' && t.def.kind !== 'carrier') || !t.rampDown || t.loadedVehicleUid) continue;
+      const { lx, lz } = this.trailers.localOf(t, v.group.position.x, v.group.position.z);
+      const deckY = t.group.position.y + 0.97;
+      if (Math.abs(lx) < t.def.width / 2 - 0.25 && lz > -t.def.length / 2 + 0.6 && lz < t.def.length / 2 - 0.4
+        && Math.abs(v.group.position.y - deckY) < 0.5 && Math.abs(v.speed) < 1.0) {
+        this.lockVehicleOnDeck(t, v, s);
+        return;
+      }
+    }
+  }
+
+  private lockVehicleOnDeck(t: Trailer, v: Vehicle, s: ReturnType<typeof useGameStore.getState>): void {
+    const wasDriving = this.driving === v;
+    v.loadedOn = t.uid;
+    t.loadedVehicleUid = v.uid;
+    this.placeLoadedVehicle(t, v);
+    if (wasDriving) {
+      // the driver climbs down behind the trailer
+      const player = this.player!;
+      const w = this.trailers.worldOf(t, 0, -t.def.length / 2 - 2.6);
+      this.driving = null;
+      player.endDrive();
+      if (this.wasFirstPerson) player.forceFirstPerson(true, this.camera!);
+      player.pos.x = w.x;
+      player.pos.z = w.z;
+      player.pos.y = this.groundY(w.x, w.z);
+      resolveCollisions(player.pos, 0.45, this.houseColliders);
+      s.setVehicle(null);
+    }
+    s.addToast(`${v.def.name} locked down on the ${t.def.name}. It rides.`);
+    sfx.play('switch', { volume: 0.6 });
+  }
+
+  private unloadVehicle(t: Trailer, s: ReturnType<typeof useGameStore.getState>): void {
+    const lv = t.loadedVehicleUid ? this.vehicles.byId(t.loadedVehicleUid) : null;
+    t.loadedVehicleUid = null;
+    if (!lv) return;
+    if (!t.rampDown) this.toggleRamp(t);
+    const w = this.trailers.worldOf(t, 0, -t.def.length / 2 - 3.4);
+    lv.loadedOn = null;
+    lv.group.position.set(w.x, this.driveGroundY(w.x, w.z), w.z);
+    lv.heading = t.heading;
+    lv.group.rotation.set(0, t.heading, 0);
+    lv.speed = 0;
+    s.addToast(`${lv.def.name} unloaded.`);
+    sfx.play('switch', { volume: 0.5 });
+  }
+
+  private toggleTrailerDoors(t: Trailer): void {
+    t.doorOpen = !t.doorOpen;
+    for (const d of t.doors) {
+      if (d.kind !== 'ramp') d.target = t.doorOpen ? 1 : 0;
+    }
+    sfx.play('switch', { volume: 0.5 });
+  }
+
+  private toggleRamp(t: Trailer): void {
+    t.rampDown = !t.rampDown;
+    for (const d of t.doors) {
+      if (d.kind === 'ramp') d.target = t.rampDown ? 1 : 0;
+    }
+    sfx.play('switch', { volume: 0.5 });
+  }
+
+  private bestTowVehicle(t: Trailer): Vehicle | null {
+    const tw = tongueWorld(t);
+    let best: Vehicle | null = null;
+    let bd = 6.5;
+    for (const v of this.vehicles.vehicles) {
+      if (v.loadedOn || this.trailers.trailerTowedBy(v.uid)) continue;
+      if (!canHitch(v.def.id, t.def.id)) continue;
+      const d = Math.hypot(v.group.position.x - tw.x, v.group.position.z - tw.z);
+      if (d < bd) { bd = d; best = v; }
+    }
+    return best;
+  }
+
+  private connectTrailer(t: Trailer, v: Vehicle, s: ReturnType<typeof useGameStore.getState>): void {
+    // snap: one physics step drags the tongue onto the hitch, then it holds
+    const hitch = this.vehicles.hitchWorld(v);
+    const pos = t.group.position;
+    const next = stepTrailer({ x: pos.x, z: pos.z, heading: t.heading }, hitch, tongueDist(t), axleDist(t), 1.15, v.heading);
+    pos.x = next.x;
+    pos.z = next.z;
+    t.heading = next.heading;
+    t.hitchedTo = v.uid;
+    s.addToast(`Hitched the ${t.def.name} to the ${v.def.name}.`);
+    sfx.play('switch', { volume: 0.6 });
+  }
+
+  /** The F-key context menu: doors, hitches, ramps, crates, beacons, beds. */
+  private contextAction(px: number, pz: number, s: ReturnType<typeof useGameStore.getState>): { label: string; run: () => void } | null {
+    const T = this.trailers;
+    const t = T.nearest(px, pz, 8);
+    if (t) {
+      const L = t.def.length;
+      const rear = T.worldOf(t, 0, -L / 2);
+      const dRear = Math.hypot(rear.x - px, rear.z - pz);
+      const tw = tongueWorld(t);
+      const dTongue = Math.hypot(tw.x - px, tw.z - pz);
+      const { lx, lz } = T.localOf(t, px, pz);
+      // inside a hab trailer, the bed is the point of the room
+      if (t.module === 'hab' && t.interior && Math.abs(lx) < t.interior.halfW && lz > t.interior.zRear && lz < t.interior.zFront) {
+        return {
+          label: '[F] Sleep in the hab trailer',
+          run: () => { this.lastSafe = [px, pz]; this.lastCampId = null; s.openSleep(); },
+        };
+      }
+      if (dRear < 2.5) {
+        if (t.loadedVehicleUid && (t.def.kind === 'flatbed' || t.def.kind === 'carrier')) {
+          const lv = this.vehicles.byId(t.loadedVehicleUid);
+          return { label: `[F] Unload the ${lv?.def.name ?? 'vehicle'}`, run: () => this.unloadVehicle(t, s) };
+        }
+        if (t.cargoCrates > 0) {
+          return { label: `[F] Unload a crate from the ${t.def.name}`, run: () => this.unloadCrate({ kind: 'trailer', uid: t.uid }, s) };
+        }
+        if (t.def.kind === 'flatbed' || t.def.kind === 'carrier') {
+          return { label: `[F] ${t.rampDown ? 'Raise' : 'Lower'} the ramp`, run: () => this.toggleRamp(t) };
+        }
+        if (t.doors.length) {
+          return { label: `[F] ${t.doorOpen ? 'Close' : 'Open'} the ${t.def.name} doors`, run: () => this.toggleTrailerDoors(t) };
+        }
+      }
+      if (dTongue < 2.8) {
+        if (t.hitchedTo) {
+          const tow = this.vehicles.byId(t.hitchedTo);
+          return {
+            label: `[F] Unhitch the ${t.def.name}`,
+            run: () => {
+              t.hitchedTo = null;
+              if (tow) tow.towedMassKg = 0;
+              s.addToast(`Unhitched the ${t.def.name}. It stays where it lies.`);
+              sfx.play('switch', { volume: 0.5 });
+            },
+          };
+        }
+        const cand = this.bestTowVehicle(t);
+        if (cand) {
+          return { label: `[F] Hitch the ${t.def.name} to the ${cand.def.name}`, run: () => this.connectTrailer(t, cand, s) };
+        }
+        return {
+          label: `[F] ${t.def.name} — back a truck up to the tongue`,
+          run: () => s.addToast('No compatible truck in reach. Semi-class trailers need a semi, the Goliath, or a tank; the F-250 dually takes mid-size; pickups take the utility trailer.'),
+        };
+      }
+      if (t.module === 'beacon' && Math.hypot(t.group.position.x - px, t.group.position.z - pz) < 3.6) {
+        const next = t.beaconMode === 'off' ? 'sat' : t.beaconMode === 'sat' ? 'horde' : 'off';
+        return {
+          label: `[F] Beacon mode: ${t.beaconMode.toUpperCase()} → ${next.toUpperCase()}`,
+          run: () => { const msg = this.applyBeaconMode(t.uid, next); if (msg) s.addToast(msg); },
+        };
+      }
+      // winch a parked car onto an empty, ramp-down deck
+      if ((t.def.kind === 'flatbed' || t.def.kind === 'carrier') && t.rampDown && !t.loadedVehicleUid && dRear < 5) {
+        const lv = this.winchCandidate(t);
+        if (lv) return { label: `[F] Winch the ${lv.def.name} aboard`, run: () => this.lockVehicleOnDeck(t, lv, s) };
+      }
+      // the box trailer's personnel door (front quarter) toggles its doors
+      // too — reachable even with crates stacked at the rear
+      if (t.def.kind === 'box' && t.doors.length) {
+        const quarter = T.worldOf(t, t.def.width / 2, L / 2 - 1);
+        if (Math.hypot(quarter.x - px, quarter.z - pz) < 2.2) {
+          return { label: `[F] ${t.doorOpen ? 'Close' : 'Open'} the ${t.def.name} doors`, run: () => this.toggleTrailerDoors(t) };
+        }
+      }
+    }
+    // vehicle doors (box-truck roll door, sprinter rear doors)
+    const veh = this.vehicles.nearest(px, pz, 6.5);
+    if (veh && veh.doors.length && Math.abs(veh.speed) < 0.1) {
+      const rear = {
+        x: veh.group.position.x - Math.sin(veh.heading) * (veh.def.length / 2),
+        z: veh.group.position.z - Math.cos(veh.heading) * (veh.def.length / 2),
+      };
+      if (Math.hypot(rear.x - px, rear.z - pz) < 2.4) {
+        const open = veh.doors.some((d) => d.target > 0.5);
+        return {
+          label: `[F] ${open ? 'Close' : 'Open'} the ${veh.def.name} door`,
+          run: () => {
+            for (const d of veh.doors) d.target = open ? 0 : 1;
+            sfx.play('switch', { volume: 0.5 });
+          },
+        };
+      }
+    }
+    // a loose crate: load it into whatever bed is alongside
+    const crate = this.crates.nearestFree(px, pz, 2.3);
+    if (crate) {
+      const carrier = this.bestCarrierFor(crate.group.position.x, crate.group.position.z);
+      if (carrier) {
+        return { label: `[F] Load the ${crate.label.toLowerCase()} into the ${carrier.name}`, run: () => this.loadCrate(crate, carrier, s) };
+      }
+      return {
+        label: `[F] ${crate.label} — no bed or trailer alongside`,
+        run: () => s.addToast('Bring a truck bed or trailer alongside, then load it. [T] opens it here.'),
+      };
+    }
+    // unload a crate off a vehicle bed you're standing behind
+    if (veh && veh.cargoCrates > 0) {
+      const rear = {
+        x: veh.group.position.x - Math.sin(veh.heading) * (veh.def.length / 2),
+        z: veh.group.position.z - Math.cos(veh.heading) * (veh.def.length / 2),
+      };
+      if (Math.hypot(rear.x - px, rear.z - pz) < 2.6) {
+        return { label: `[F] Unload a crate from the ${veh.def.name}`, run: () => this.unloadCrate({ kind: 'vehicle', uid: veh.uid }, s) };
+      }
+    }
+    return null;
+  }
+
+  private winchCandidate(t: Trailer): Vehicle | null {
+    let best: Vehicle | null = null;
+    let bd = Infinity;
+    for (const v of this.vehicles.vehicles) {
+      if (v.loadedOn || v === this.driving) continue;
+      if (v.def.kind === 'skiff' || v.def.width > 2.3 || v.def.length > 7.6) continue;
+      const { lx, lz } = this.trailers.localOf(t, v.group.position.x, v.group.position.z);
+      if (lz > -t.def.length / 2 - 1 || lz < -t.def.length / 2 - 9.5 || Math.abs(lx) > 3.4) continue;
+      const d = Math.abs(lz);
+      if (d < bd) { bd = d; best = v; }
+    }
+    return best;
+  }
+
+  private bestCarrierFor(x: number, z: number): { kind: 'vehicle' | 'trailer'; uid: string; name: string } | null {
+    const LOADABLE = ['pickup', 'f250', 'sprinter', 'van', 'boxtruck', 'bronco', 'goliath'];
+    let best: { kind: 'vehicle' | 'trailer'; uid: string; name: string } | null = null;
+    let bd = 5.5;
+    for (const v of this.vehicles.vehicles) {
+      if (!LOADABLE.includes(v.def.id) || v.cargoCrates >= 6 || v.loadedOn) continue;
+      const d = Math.hypot(v.group.position.x - x, v.group.position.z - z);
+      if (d < bd) { bd = d; best = { kind: 'vehicle', uid: v.uid, name: v.def.name }; }
+    }
+    for (const t of this.trailers.trailers) {
+      if (t.def.kind === 'tanker' || t.cargoCrates >= 6) continue;
+      const d = Math.hypot(t.group.position.x - x, t.group.position.z - z);
+      if (d < bd) { bd = d; best = { kind: 'trailer', uid: t.uid, name: t.def.name }; }
+    }
+    return best;
+  }
+
+  private loadCrate(crate: import('./Trailers').CargoCrate, carrier: { kind: 'vehicle' | 'trailer'; uid: string; name: string }, s: ReturnType<typeof useGameStore.getState>): void {
+    const host = carrier.kind === 'vehicle' ? this.vehicles.byId(carrier.uid) : this.trailers.byId(carrier.uid);
+    if (!host) return;
+    crate.loadedInto = { kind: carrier.kind, uid: carrier.uid };
+    crate.slot = host.cargoCrates;
+    host.cargoCrates += 1;
+    if (carrier.kind === 'vehicle') refreshCargoVisuals(host as Vehicle);
+    else refreshTrailerCargoVisuals(host as Trailer);
+    this.followCrates();
+    s.addToast(`${crate.label} loaded into the ${carrier.name}.`);
+    sfx.play('pickup', { volume: 0.6 });
+  }
+
+  private unloadCrate(carrier: { kind: 'vehicle' | 'trailer'; uid: string }, s: ReturnType<typeof useGameStore.getState>): void {
+    const host = carrier.kind === 'vehicle' ? this.vehicles.byId(carrier.uid) : this.trailers.byId(carrier.uid);
+    if (!host || host.cargoCrates <= 0) return;
+    const crate = this.crates.crates
+      .filter((c) => c.loadedInto?.kind === carrier.kind && c.loadedInto?.uid === carrier.uid)
+      .sort((a, b) => b.slot - a.slot)[0];
+    if (!crate) { host.cargoCrates = 0; return; }
+    const hp = host.group.position;
+    const heading = (host as Vehicle).heading ?? (host as Trailer).heading;
+    const L = (host as Vehicle).def?.length ?? (host as Trailer).def.length;
+    const bx = hp.x - Math.sin(heading) * (L / 2 + 1.6);
+    const bz = hp.z - Math.cos(heading) * (L / 2 + 1.6);
+    crate.loadedInto = null;
+    crate.group.position.set(bx, this.groundY(bx, bz), bz);
+    crate.group.rotation.set(0, heading, 0);
+    host.cargoCrates = Math.max(0, host.cargoCrates - 1);
+    // re-slot the crates still aboard
+    let slot = 0;
+    for (const c of this.crates.crates) {
+      if (c.loadedInto?.kind === carrier.kind && c.loadedInto?.uid === carrier.uid) c.slot = slot++;
+    }
+    if (carrier.kind === 'vehicle') refreshCargoVisuals(host as Vehicle);
+    else refreshTrailerCargoVisuals(host as Trailer);
+    s.addToast(`${crate.label} unloaded.`);
+    sfx.play('pickup', { volume: 0.5 });
+  }
+
+  /** [T] storage target: the closest openable vehicle / trailer / crate. */
+  private openStorageNear(px: number, pz: number, s: ReturnType<typeof useGameStore.getState>): void {
+    let best: { kind: 'vehicle' | 'trailer' | 'crate'; uid: string; label: string; d: number } | null = null;
+    const crate = this.crates.nearestFree(px, pz, 2.4);
+    if (crate) best = { kind: 'crate', uid: crate.uid, label: crate.label, d: 0 };
+    const t = this.trailers.nearest(px, pz, 4.6);
+    if (t) {
+      const d = Math.hypot(t.group.position.x - px, t.group.position.z - pz);
+      if (!best || d < best.d) best = { kind: 'trailer', uid: t.uid, label: `${t.def.name} storage`, d };
+    }
+    const v = this.vehicles.nearest(px, pz, 3.6);
+    if (v) {
+      const d = Math.hypot(v.group.position.x - px, v.group.position.z - pz);
+      if (!best || d < best.d) best = { kind: 'vehicle', uid: v.uid, label: `${v.def.name} storage`, d };
+    }
+    if (best) s.openStorage(best.kind, best.uid, best.label);
+    else s.addToast('Nothing with storage in reach.');
+  }
+
+  // ---------------------------------------------------------------
+  // vehicle weapons: tank cannon (integral), Goliath MG / 40mm mounts,
+  // tank coax. Aimed by the chase camera, fired on the attack input.
+  // ---------------------------------------------------------------
+
+  private updateVehicleWeapons(dt: number, v: Vehicle, s: ReturnType<typeof useGameStore.getState>): void {
+    const player = this.player!;
+    const husks = this.husks!;
+    const isTank = v.def.id === 'tank';
+    const cannon = isTank || v.upgrades.includes('cannon_40');
+    const mg = v.upgrades.includes('mg_mount') || (isTank && v.upgrades.includes('tank_coax'));
+    if (!cannon && !mg) return;
+    const w = v as unknown as { mgT?: number; cannonT?: number };
+    w.mgT = Math.max(0, (w.mgT ?? 0) - dt);
+    w.cannonT = Math.max(0, (w.cannonT ?? 0) - dt);
+    if (!this.mouseHeld && !input.attackRanged && !input.attackMelee) return;
+    const cp = Math.cos(player.camPitch);
+    const dir = {
+      x: Math.sin(player.camYaw) * cp,
+      y: Math.sin(player.camPitch),
+      z: Math.cos(player.camYaw) * cp,
+    };
+    const origin = {
+      x: v.group.position.x + dir.x * 1.6,
+      y: v.group.position.y + (isTank ? 2.0 : 2.7),
+      z: v.group.position.z + dir.z * 1.6,
+    };
+    // first husk the aim line passes close to (arcade hitscan)
+    const aimHit = (slop: number, range: number): { x: number; z: number; along: number } | null => {
+      let bestA = Infinity;
+      let hit: { x: number; z: number; along: number } | null = null;
+      for (const h of husks.husks) {
+        if (h.state === 'dead') continue;
+        const rx = h.group.position.x - origin.x;
+        const rz = h.group.position.z - origin.z;
+        const along = rx * dir.x + rz * dir.z;
+        if (along < 2 || along > range) continue;
+        const perp2 = rx * rx + rz * rz - along * along;
+        if (perp2 < slop * slop && along < bestA) {
+          bestA = along;
+          hit = { x: h.group.position.x, z: h.group.position.z, along };
+        }
+      }
+      return hit;
+    };
+    if (cannon && w.cannonT <= 0) {
+      w.cannonT = 1.7;
+      const hit = aimHit(2.6, 90);
+      const ix = hit ? hit.x : origin.x + dir.x * 55;
+      const iz = hit ? hit.z : origin.z + dir.z * 55;
+      husks.damageInRadius(ix, iz, 4.5, 120);
+      this.animals?.damageInRadius(ix, iz, 4.5, 120);
+      this.noiseAt(ix, iz, 70);
+      const flash = new THREE.PointLight(0xffd27a, 90, 28);
+      flash.position.set(ix, this.groundY(ix, iz) + 1.6, iz);
+      this.scene!.add(flash);
+      setTimeout(() => this.scene!.remove(flash), 220);
+      this.requestHitstop(0.07);
+      sfx.play('hit', { volume: 1 });
+      s.addSkillXp('combat', 2);
+      return;
+    }
+    if (mg && w.mgT <= 0) {
+      w.mgT = 0.11;
+      const hit = aimHit(1.25, 75);
+      if (hit) husks.damageInRadius(hit.x, hit.z, 1.0, 36);
+      husks.emitNoise(v.group.position.x, v.group.position.z, 20);
+      sfx.play('shot', { volume: 0.45 });
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // store-facing API: storage, repair, upgrades, modules, beacons
+  // ---------------------------------------------------------------
+
+  /** Every trailer's live state, for the save snapshot (v3). */
+  getTrailerStates(): TrailerSave[] {
+    if (!this.trailers) return [];
+    return this.trailers.trailers.map((t) => ({
+      defId: t.def.id,
+      x: t.group.position.x,
+      y: t.group.position.y,
+      z: t.group.position.z,
+      heading: t.heading,
+      hitchedTo: t.hitchedTo,
+      module: t.module,
+      storage: t.storage.map((it) => ({ ...it })),
+      fuelLiters: Math.round(t.fuelLiters),
+      doorOpen: t.doorOpen,
+      loadedVehicleDefId: t.loadedVehicleUid,
+      beaconMode: t.beaconMode,
+      cargoCrates: t.cargoCrates,
+      rampDown: t.rampDown,
+    }));
+  }
+
+  private storageList(kind: 'vehicle' | 'trailer' | 'crate', uid: string): InvItem[] | null {
+    if (kind === 'vehicle') return this.vehicles.byId(uid)?.storage ?? null;
+    if (kind === 'trailer') return this.trailers.byId(uid)?.storage ?? null;
+    return this.crates.byId(uid)?.storage ?? null;
+  }
+
+  private storageCap(kind: 'vehicle' | 'trailer' | 'crate', uid: string): number {
+    if (kind === 'vehicle') {
+      const v = this.vehicles.byId(uid);
+      return v ? storageCapKg(v.def.storageKg, v.upgrades) : 0;
+    }
+    if (kind === 'trailer') {
+      const t = this.trailers.byId(uid);
+      return t ? trailerStorageCapKg(t) : 0;
+    }
+    return 150; // a freight crate's practical limit
+  }
+
+  getStorageItems(kind: 'vehicle' | 'trailer' | 'crate', uid: string): InvItem[] | null {
+    const list = this.storageList(kind, uid);
+    return list ? list.map((it) => ({ ...it })) : null;
+  }
+
+  /** Move a pack stack into a vehicle/trailer/crate. Returns an error or null. */
+  storagePutItem(kind: 'vehicle' | 'trailer' | 'crate', uid: string, item: InvItem): string | null {
+    const list = this.storageList(kind, uid);
+    if (!list) return 'That storage is gone.';
+    const w = (ITEMS[item.itemId]?.weight ?? 0) * item.qty;
+    if (itemsWeightKg(list) + w > this.storageCap(kind, uid)) return 'No room — that would overload it.';
+    const existing = list.find((it) => it.itemId === item.itemId);
+    if (existing) existing.qty += item.qty;
+    else list.push({ uid: item.uid, itemId: item.itemId, qty: item.qty });
+    return null;
+  }
+
+  storageTakeItem(kind: 'vehicle' | 'trailer' | 'crate', uid: string, index: number): InvItem | null {
+    const list = this.storageList(kind, uid);
+    if (!list || index < 0 || index >= list.length) return null;
+    const [taken] = list.splice(index, 1);
+    return { ...taken };
+  }
+
+  applyRepair(uid: string, kind: 'tire' | 'engine' | 'battery' | 'scrap'): string {
+    const v = this.vehicles.byId(uid);
+    if (!v) return 'Vehicle not found.';
+    if (kind === 'tire') {
+      v.tiresFlat = Math.max(0, v.tiresFlat - 1);
+      v.condition = Math.min(1, v.condition + 0.03);
+      return v.tiresFlat > 0 ? `One flat swapped — ${v.tiresFlat} to go.` : 'Fresh rubber all round. She rolls true again.';
+    }
+    if (kind === 'engine') {
+      v.condition = Math.min(1, v.condition + 0.35);
+      return 'Engine work done — timing, seals, the lot.';
+    }
+    if (kind === 'battery') {
+      v.condition = Math.min(1, v.condition + 0.25);
+      return 'Fresh battery in. She cranks strong.';
+    }
+    v.condition = Math.min(1, v.condition + 0.12);
+    return 'Patched with scrap. It holds.';
+  }
+
+  canTakeUpgrade(uid: string, upgradeId: string): boolean {
+    const v = this.vehicles.byId(uid);
+    if (!v) return false;
+    return canInstallUpgrade({ kind: v.def.kind, id: v.def.id }, upgradeId, v.upgrades);
+  }
+
+  applyUpgrade(uid: string, upgradeId: string): boolean {
+    const v = this.vehicles.byId(uid);
+    if (!v || v.upgrades.includes(upgradeId)) return false;
+    v.upgrades.push(upgradeId);
+    applyUpgradeVisuals(v);
+    return true;
+  }
+
+  applyModule(trailerUid: string, moduleId: string): boolean {
+    const t = this.trailers.byId(trailerUid);
+    if (!t || t.def.kind !== 'box' || t.module === moduleId) return false;
+    t.module = moduleId as Trailer['module'];
+    applyModuleVisuals(t);
+    return true;
+  }
+
+  applyBeaconMode(trailerUid: string, mode: 'off' | 'sat' | 'horde'): string | null {
+    const t = this.trailers.byId(trailerUid);
+    if (!t || t.module !== 'beacon') return 'That trailer has no beacon buildout.';
+    if (mode !== 'off' && t.hitchedTo) return 'The beacon only deploys parked — unhitch the trailer first.';
+    t.beaconMode = mode;
+    if (mode === 'sat') return 'Sat uplink live: fleet tracking on the map, supply drops armed (phone → Vehicles).';
+    if (mode === 'horde') return 'HORDE BEACON LIVE. Everything within 55m can hear it.';
+    return 'Beacon off.';
+  }
+
+  callSupplyDrop(trailerUid: string): string {
+    const s = useGameStore.getState();
+    const t = this.trailers.byId(trailerUid);
+    if (!t || t.module !== 'beacon') return 'No beacon buildout on that trailer.';
+    if (t.beaconMode !== 'sat') return 'Switch the beacon to SAT mode first.';
+    if (t.hitchedTo) return 'Deploy (unhitch) the trailer first.';
+    const key = `drop_day_${s.daysElapsed}`;
+    if (s.flags[key]) return 'Already called a drop today — the next bird comes tomorrow.';
+    s.setFlag(key);
+    const ang = this.rng() * Math.PI * 2;
+    const dist = 10 + this.rng() * 5;
+    const x = t.group.position.x + Math.sin(ang) * dist;
+    const z = t.group.position.z + Math.cos(ang) * dist;
+    let cn = 900 + Math.floor(this.rng() * 90);
+    const mk = (entries: [string, number][]): InvItem[] =>
+      entries.map(([itemId, qty]) => ({ uid: `drop${cn++}`, itemId, qty }));
+    const pool: [string, number][][] = [
+      [['bandage', 3], ['canned_food', 3], ['water_bottle', 2]],
+      [['medkit', 1], ['ammo_rifle', 3], ['canned_food', 2]],
+      [['fuel_can', 1], ['bandage', 2], ['ammo_rifle', 2]],
+      [['scrap', 4], ['engine_part', 1], ['canned_food', 2]],
+    ];
+    const contents = mk(pool[Math.floor(this.rng() * pool.length)]);
+    this.crates.spawnCrate(this.scene!, x, z, this.rng() * 3, (cx, cz) => heightAt(cx, cz), contents, 'Supply drop', 0x8a2f2f);
+    sfx.play('beacon', { volume: 0.7 });
+    return 'Supply drop away — a marked crate just came down near the trailer.';
   }
 
   /** Grenade leaves the hand: arc it toward where the player is looking. */
@@ -1249,6 +2146,7 @@ export class Game {
     const s = useGameStore.getState();
     if (s.screen !== 'game' || s.paused || s.dialogue != null || this.cutscene) return;
     if (document.pointerLockElement !== this.canvas) return;
+    if (e.button === 0) this.mouseHeld = true;
     if (e.button === 0) {
       // left click: fire when holding a loaded gun, bash/swing when not
       const rangedIt = s.equipped.ranged
@@ -1272,6 +2170,7 @@ export class Game {
   }
 
   private handleMouseUp(e: MouseEvent): void {
+    if (e.button === 0) this.mouseHeld = false;
     if (e.button === 2) input.blocking = false;
   }
 
@@ -1299,7 +2198,8 @@ export class Game {
       !s.phoneOpen &&
       !s.backpackOpen &&
       !s.sleepOpen &&
-      s.lootOpenId == null
+      s.lootOpenId == null &&
+      s.storageOpen == null
     ) {
       // lock lost without Esc (alt-tab, click-out) — pause the game
       this.setPaused(true);

@@ -24,7 +24,7 @@ function v0Snapshot(): RawSaveRecord {
 
 function fullV2Snapshot(): SaveSnapshot {
   return {
-    version: 2,
+    version: 3,
     savedAt: 1729000100000,
     difficulty: 'story',
     seed: 42,
@@ -58,18 +58,20 @@ function fullV2Snapshot(): SaveSnapshot {
     vehicles: [
       { defId: 'pickup', x: -550, y: 3, z: 20, heading: 1.2, fuel: 22, condition: 0.5 },
     ],
+    trailers: [],
   };
 }
 
 describe('migrate()', () => {
-  it('migrates a v0 snapshot to v2 with sane defaults', () => {
+  it('migrates a v0 snapshot to v3 with sane defaults', () => {
     const out = migrate(v0Snapshot());
-    expect(out.version).toBe(2);
+    expect(out.version).toBe(3);
     expect(out.battery).toBe(100);
     expect(out.phoneUnlocked).toBe(false);
     expect(out.hotbar).toEqual([null, null, null]);
     expect(out.equipped).toEqual({ melee: null, ranged: null, pack: null });
     expect(out.seed).toBe(0);
+    expect(out.trailers).toEqual([]);
   });
 
   it('preserves all existing v0 fields through migration', () => {
@@ -86,21 +88,37 @@ describe('migrate()', () => {
     expect(out.world).toEqual(v0.world);
   });
 
-  it('passes a current v2 snapshot through unchanged', () => {
-    const v2 = fullV2Snapshot();
-    const out = migrate({ ...v2, slot: '2' });
-    expect(out).toEqual(v2);
+  it('passes a current v3 snapshot through unchanged', () => {
+    const v3 = fullV2Snapshot();
+    const out = migrate({ ...v3, slot: '2' });
+    expect(out).toEqual(v3);
     expect(out.battery).toBe(75);
     expect(out.hotbar).toEqual(['b2', null, null]);
     expect(out.vehicles[0].defId).toBe('pickup');
   });
 
-  it('migrates a v1 snapshot to v2 with fresh run-length state', () => {
+  it('migrates a v2 snapshot to v3: trailers spawn fresh, vehicles gain v3 state', () => {
+    const v3 = fullV2Snapshot();
+    const { trailers: _t, ...rest } = v3;
+    const v2: RawSaveRecord = { ...rest, version: 2, slot: '4' };
+    const out = migrate(v2);
+    expect(out.version).toBe(3);
+    expect(out.trailers).toEqual([]);
+    // the v2 vehicle entry gains storage / upgrades / flat defaults
+    expect(out.vehicles[0].storage).toEqual([]);
+    expect(out.vehicles[0].upgrades).toEqual([]);
+    expect(out.vehicles[0].tiresFlat).toBe(0);
+    // and everything it actually held survives
+    expect(out.vehicles[0].fuel).toBe(22);
+    expect(out.player).toEqual(v3.player);
+  });
+
+  it('migrates a v1 snapshot to v3 with fresh run-length state', () => {
     const v2 = fullV2Snapshot();
-    const { daysElapsed: _d, skills: _s, perkPoints: _pp, perks: _p, survivors: _sv, base: _b, vehicles: _v, ...rest } = v2;
+    const { daysElapsed: _d, skills: _s, perkPoints: _pp, perks: _p, survivors: _sv, base: _b, vehicles: _v, trailers: _t2, ...rest } = v2;
     const v1: RawSaveRecord = { ...rest, version: 1, slot: '3' };
     const out = migrate(v1);
-    expect(out.version).toBe(2);
+    expect(out.version).toBe(3);
     expect(out.daysElapsed).toBe(0);
     expect(out.skills.combat).toEqual({ level: 0, xp: 0 });
     expect(out.skills.leadership).toEqual({ level: 0, xp: 0 });
@@ -119,7 +137,7 @@ describe('migrate()', () => {
     expect('slot' in out).toBe(false);
   });
 
-  it('round-trips: v0 -> v2 -> migrate again is stable', () => {
+  it('round-trips: v0 -> v3 -> migrate again is stable', () => {
     const once = migrate(v0Snapshot());
     const twice = migrate({ ...once, slot: '1' });
     expect(twice).toEqual(once);

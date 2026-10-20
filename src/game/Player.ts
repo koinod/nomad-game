@@ -745,13 +745,13 @@ export class Player {
           break;
         default: {
           lx = W * 0.21; // driver's seat, left-hand drive (+X = vehicle left)
-          const cabForward = seat.id === 'van' || seat.id === 'boxtruck' || seat.id === 'semi' || seat.id === 'apc';
+          const cabForward = seat.id === 'van' || seat.id === 'boxtruck' || seat.id === 'semi' || seat.id === 'semi_day' || seat.id === 'sprinter' || seat.id === 'goliath';
           lz = cabForward ? L * 0.24 : L * 0.03;
           // group origin is at the avatar's FEET and the avatar stands
           // 1.96m tall — sink the body so the head lands in the glass
           // band, not through the roof (per-vehicle roof heights)
           gy = ({
-            semi: -0.41, boxtruck: -0.72, van: -0.72, apc: 0.12,
+            semi: -0.41, semi_day: -0.41, boxtruck: -0.72, van: -0.72, sprinter: -0.6, goliath: 0.12, tank: 0.55,
             f250: -0.4, pickup: -0.5, bronco: -0.55, mustang: -0.68,
           } as Record<string, number>)[seat.id] ?? -0.66;
         }

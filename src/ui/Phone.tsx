@@ -7,6 +7,9 @@ import { FACTIONS, repTier } from '../data/factions';
 import { SKILLS, TREES, PERKS, xpToNext } from '../data/skills';
 import { traitName, moraleBand, type SurvivorJob } from '../data/survivors';
 import { FACILITIES, baseHeat, heatBand } from '../data/base';
+import { UPGRADES, canInstallUpgrade } from '../data/upgrades';
+import { MODULE_DEFS } from '../data/trailerData';
+import { VEHICLE_DEFS } from '../game/Vehicles';
 import { carryLimitKg, encumbranceTier, totalWeightKg } from '../store/inventoryUtils';
 import { DIFFICULTIES } from '../store/types';
 import type { PhoneTab } from '../store/types';
@@ -238,6 +241,32 @@ function WorldMap() {
       ctx.fillText(id.replace(/_/g, ' '), px + 4, py + 3);
     }
 
+    // SAT UPLINK: a deployed beacon trailer feeds live fleet tracking —
+    // vehicles as amber diamonds, trailers as cyan marks
+    if (st.flags['sat_uplink']) {
+      ctx.font = '7px sans-serif';
+      for (const v of g.vehicles.vehicles) {
+        const [px, py] = toPx(v.group.position.x, v.group.position.z);
+        ctx.fillStyle = '#e8b34b';
+        ctx.beginPath();
+        ctx.moveTo(px, py - 3);
+        ctx.lineTo(px + 3, py);
+        ctx.lineTo(px, py + 3);
+        ctx.lineTo(px - 3, py);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = 'rgba(232,179,75,0.85)';
+        ctx.fillText(v.def.name, px + 4, py + 2);
+      }
+      for (const t of g.trailers.trailers) {
+        const [px, py] = toPx(t.group.position.x, t.group.position.z);
+        ctx.fillStyle = '#57c7d4';
+        ctx.fillRect(px - 2, py - 2, 4, 4);
+        ctx.fillStyle = 'rgba(87,199,212,0.85)';
+        ctx.fillText(t.def.name, px + 4, py + 2);
+      }
+    }
+
     // quest target marker
     const q = st.quests[0];
     const def = q ? QUESTS.find((d) => d.id === q.id) : undefined;
@@ -286,6 +315,9 @@ function WorldMap() {
       )}
       <p className="text-xs leading-relaxed text-[#8a94a3]">
         Amber ring marks your current objective. The triangle is you.
+        {useGameStore((s) => s.flags)['sat_uplink'] && (
+          <span className="text-[#57c7d4]"> SAT UPLINK LIVE — fleet tracked: amber diamonds are vehicles, cyan squares are trailers.</span>
+        )}
       </p>
     </div>
   );
@@ -813,11 +845,35 @@ function CraftTab() {
 function VehiclesTab() {
   const vehicle = useGameStore((s) => s.vehicle);
   const fleet = useGameStore((s) => s.fleet);
+  const trailerFleet = useGameStore((s) => s.trailerFleet);
+  const inventory = useGameStore((s) => s.inventory);
+  const repairVehicle = useGameStore((s) => s.repairVehicle);
+  const installUpgrade = useGameStore((s) => s.installUpgrade);
+  const installModule = useGameStore((s) => s.installModule);
+  const setBeaconMode = useGameStore((s) => s.setBeaconMode);
+  const callSupplyDrop = useGameStore((s) => s.callSupplyDrop);
+  const atWorkshopFn = useGameStore((s) => s.atWorkshop);
+  const [selId, setSelId] = useState<string | null>(null);
+  const atShop = atWorkshopFn();
+  const sel = fleet.find((f) => f.defId === (selId ?? vehicle?.uid)) ?? fleet[0];
+  const count = (itemId: string) => inventory.reduce((n, i) => n + (i.itemId === itemId ? i.qty : 0), 0);
+  const afford = (cost: { itemId: string; qty: number }[]) => cost.every((c) => count(c.itemId) >= c.qty);
   const meter = (pct: number, color: string) => (
     <div className="h-1.5 flex-1 overflow-hidden rounded bg-[#232b36]">
       <div className={`h-full ${color}`} style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} />
     </div>
   );
+  const costLine = (cost: { itemId: string; qty: number }[]) => (
+    <span className="font-mono text-[11px] text-[#8a94a3]">
+      {cost.map((c) => (
+        <span key={c.itemId} className={count(c.itemId) >= c.qty ? 'text-[#5aa469]' : 'text-[#d9534f]'}>
+          {ITEMS[c.itemId]?.name ?? c.itemId} {count(c.itemId)}/{c.qty}{'  '}
+        </span>
+      ))}
+    </span>
+  );
+  const btn = 'shrink-0 rounded border border-[#232b36] px-2.5 py-1 text-xs text-[#d7dde5] transition-colors hover:border-[#e8b34b] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-[#232b36]';
+
   return (
     <div className="nomad-scroll flex h-full flex-col gap-4 overflow-y-auto">
       <section className="rounded border border-[#232b36] bg-[#0b0e12] p-3">
@@ -830,39 +886,171 @@ function VehiclesTab() {
             </div>
             <div className="flex items-center gap-2 text-xs">
               <span className="w-16 text-[#8a94a3]">Fuel</span>
-              {meter(vehicle.fuelPct, 'bg-[#e8b34b]')}
-              <span className="w-10 text-right font-mono text-[#d7dde5]">{vehicle.fuelPct}%</span>
+              {meter(Math.round(vehicle.fuelPct * 100), 'bg-[#e8b34b]')}
+              <span className="w-10 text-right font-mono text-[#d7dde5]">{Math.round(vehicle.fuelPct * 100)}%</span>
             </div>
             <div className="flex items-center gap-2 text-xs">
               <span className="w-16 text-[#8a94a3]">Condition</span>
-              {meter(vehicle.condPct, vehicle.condPct > 40 ? 'bg-[#5aa469]' : 'bg-[#d9534f]')}
-              <span className="w-10 text-right font-mono text-[#d7dde5]">{vehicle.condPct}%</span>
+              {meter(Math.round(vehicle.condPct * 100), vehicle.condPct > 0.4 ? 'bg-[#5aa469]' : 'bg-[#d9534f]')}
+              <span className="w-10 text-right font-mono text-[#d7dde5]">{Math.round(vehicle.condPct * 100)}%</span>
             </div>
+            <div className="flex items-center gap-2 text-xs">
+              <span className="w-16 text-[#8a94a3]">Storage</span>
+              {meter(vehicle.storageCapKg ? (vehicle.storageUsedKg / vehicle.storageCapKg) * 100 : 0, 'bg-[#5a7a9e]')}
+              <span className="w-10 text-right font-mono text-[#d7dde5]">{vehicle.storageUsedKg}/{vehicle.storageCapKg}kg</span>
+            </div>
+            {vehicle.tiresFlat > 0 && (
+              <p className="text-xs text-[#d9534f]">⚠ {vehicle.tiresFlat} flat tire{vehicle.tiresFlat > 1 ? 's' : ''} — she pulls and drags. Repair below.</p>
+            )}
             <p className="mt-1 text-[11px] text-[#8a94a3]">
-              Storage: trunks and cargo beds land with the cargo pass (P3) — fuel cans ride in the Pack until then. Sleep-in-vehicle comes with the same pass.
+              [T] opens its storage. Trailers hitch by backing up to the tongue, or [F] at the tongue with a truck close.
+              {vehicle.upgrades.length > 0 && <> Fitted: {vehicle.upgrades.map((u) => UPGRADES.find((x) => x.id === u)?.name ?? u).join(', ')}.</>}
             </p>
           </div>
         ) : (
           <p className="text-sm text-[#8a94a3]">On foot. Your fleet is listed below — walk up to one and drive.</p>
         )}
       </section>
+
       <section>
-        <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Fleet ({fleet.length})</h3>
+        <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Fleet ({fleet.length}) — tap one to work on it</h3>
         <div className="flex flex-col gap-1.5">
           {fleet.map((f) => (
-            <div key={f.defId} className="flex items-center justify-between rounded border border-[#232b36] bg-[#0b0e12] px-2.5 py-2 text-sm">
-              <span className="text-[#d7dde5]">{f.name}</span>
-              <span className="font-mono text-[11px] text-[#8a94a3]">
-                {f.dist}m · fuel {f.fuelPct}% · cond {f.condPct}%
-              </span>
-            </div>
+            <button
+              key={f.defId}
+              onClick={() => setSelId(f.defId)}
+              className={`rounded border px-2.5 py-2 text-left text-sm ${sel?.defId === f.defId ? 'border-[#e8b34b] bg-[#12161c]' : 'border-[#232b36] bg-[#0b0e12]'}`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[#d7dde5]">{f.name}</span>
+                <span className="font-mono text-[11px] text-[#8a94a3]">{f.dist}m</span>
+              </div>
+              <div className="mt-0.5 font-mono text-[11px] text-[#8a94a3]">
+                fuel {f.fuelPct}% · cond {f.condPct}% · cargo {f.storageUsedKg}/{f.storageCapKg}kg
+                {f.tiresFlat > 0 && <span className="text-[#d9534f]"> · ⚠ {f.tiresFlat} flat</span>}
+                {f.upgrades.length > 0 && <> · {f.upgrades.length} upgrade{f.upgrades.length > 1 ? 's' : ''}</>}
+                {f.hitchedTrailer && <> · towing {TRAILER_NAME[f.hitchedTrailer] ?? f.hitchedTrailer}</>}
+              </div>
+            </button>
           ))}
           {fleet.length === 0 && <p className="text-sm text-[#8a94a3]">No vehicles found yet.</p>}
+        </div>
+      </section>
+
+      {sel && (
+        <section className="rounded border border-[#232b36] bg-[#0b0e12] p-3">
+          <h3 className="mb-1 text-xs font-semibold text-[#8a94a3]">Work on the {sel.name} {sel.dist > 9 && <span className="text-[#d9534f]">(too far — {sel.dist}m)</span>}</h3>
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            <button className={btn} disabled={sel.tiresFlat <= 0 || sel.dist > 9} onClick={() => repairVehicle(sel.defId, 'tire')}>
+              Swap flat (1× Tire)
+            </button>
+            <button className={btn} disabled={sel.dist > 9 || count('engine_part') < 1} onClick={() => repairVehicle(sel.defId, 'engine')}>
+              Engine work (1× Engine part)
+            </button>
+            <button className={btn} disabled={sel.dist > 9 || count('car_battery') < 1} onClick={() => repairVehicle(sel.defId, 'battery')}>
+              Battery (1× Car battery)
+            </button>
+            <button className={btn} disabled={sel.dist > 9 || count('scrap') < 1} onClick={() => repairVehicle(sel.defId, 'scrap')}>
+              Scrap patch (Scrap)
+            </button>
+          </div>
+          <h4 className="mb-1 text-[11px] font-semibold text-[#8a94a3]">
+            UPGRADES {atShop ? '— workshop in reach' : '— need the marina Machine Shop or a base Garage Bay'}
+          </h4>
+          <div className="flex flex-col gap-1.5">
+            {UPGRADES.map((u) => {
+              const owned = sel.upgrades.includes(u.id);
+              const def = VEHICLE_DEFS.find((d) => d.id === sel.defId);
+              const fits = def ? canInstallUpgrade({ kind: def.kind, id: def.id }, u.id, sel.upgrades) : false;
+              return (
+                <div key={u.id} className="flex items-center justify-between gap-2 rounded border border-[#232b36] bg-[#12161c] px-2.5 py-1.5">
+                  <div className="min-w-0">
+                    <div className="text-xs text-[#d7dde5]">{u.name}{owned && <span className="ml-2 text-[#5aa469]">FITTED</span>}</div>
+                    <div className="truncate text-[11px] text-[#8a94a3]">{u.desc}</div>
+                    {!owned && costLine(u.cost)}
+                  </div>
+                  {!owned && (
+                    <button className={btn} disabled={!atShop || !fits || !afford(u.cost)} onClick={() => installUpgrade(sel.defId, u.id)}>
+                      Install
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      <section>
+        <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Trailers ({trailerFleet.length})</h3>
+        <div className="flex flex-col gap-1.5">
+          {trailerFleet.map((t) => (
+            <div key={t.defId} className="rounded border border-[#232b36] bg-[#0b0e12] px-2.5 py-2 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-[#d7dde5]">{t.name}</span>
+                <span className="font-mono text-[11px] text-[#8a94a3]">{t.dist}m</span>
+              </div>
+              <div className="mt-0.5 font-mono text-[11px] text-[#8a94a3]">
+                {t.hitchedTo ? `hitched to the ${fleet.find((f) => f.defId === t.hitchedTo)?.name ?? t.hitchedTo}` : 'parked'}
+                {' · '}cargo {t.storageUsedKg}/{t.storageCapKg}kg
+                {t.defId === 't_tanker' && <> · {t.fuelLiters}L fuel aboard</>}
+                {t.loadedVehicle && <> · hauling a {t.loadedVehicle}</>}
+                {t.module !== 'none' && <> · {MODULE_DEFS.find((m) => m.id === t.module)?.name}</>}
+              </div>
+              {t.defId === 't_box' && (
+                <div className="mt-2 flex flex-col gap-1.5">
+                  {MODULE_DEFS.map((m) => (
+                    <div key={m.id} className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <span className="text-xs text-[#d7dde5]">{m.name}</span>{' '}
+                        {t.module === m.id
+                          ? <span className="text-[11px] text-[#5aa469]">BUILT</span>
+                          : costLine(m.cost)}
+                      </div>
+                      {t.module !== m.id && (
+                        <button className={btn} disabled={!atShop || t.dist > 30 || !afford(m.cost)} onClick={() => installModule(t.defId, m.id)}>
+                          Build
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  {!atShop && <p className="text-[11px] text-[#8a94a3]">Buildouts happen at the marina Machine Shop or a base Garage Bay, trailer within 30m.</p>}
+                </div>
+              )}
+              {t.module === 'beacon' && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] text-[#8a94a3]">Beacon:</span>
+                  {(['off', 'sat', 'horde'] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      className={btn}
+                      disabled={t.beaconMode === mode}
+                      onClick={() => setBeaconMode(t.defId, mode)}
+                    >
+                      {mode.toUpperCase()}
+                    </button>
+                  ))}
+                  <button className={btn} disabled={t.beaconMode !== 'sat'} onClick={() => callSupplyDrop(t.defId)}>
+                    Call supply drop
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+          {trailerFleet.length === 0 && <p className="text-sm text-[#8a94a3]">No trailers found yet.</p>}
         </div>
       </section>
     </div>
   );
 }
+
+const TRAILER_NAME: Record<string, string> = {
+  t_utility: 'Utility Trailer',
+  t_flatbed: 'Flatbed Trailer',
+  t_box: 'Box Trailer',
+  t_tanker: 'Tanker Trailer',
+  t_carrier: 'Car Carrier',
+};
 
 /* ---------------- HOME: the app grid ---------------- */
 

@@ -339,6 +339,7 @@ export default function TouchControls() {
             onRelease={() => { input.blocking = false; }}
           />
           <ControlButton label="USE" ariaLabel="Interact" onPress={() => { input.interact = true; }} />
+          <ControlButton label="BOX" ariaLabel="Open vehicle or trailer storage" onPress={() => { input.storage = true; }} />
         </div>
         <div className="flex flex-col items-center gap-3">
           <ControlButton

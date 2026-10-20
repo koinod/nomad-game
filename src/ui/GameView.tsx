@@ -9,6 +9,7 @@ import Phone from './Phone';
 import Backpack from './Backpack';
 import SleepDialog from './SleepDialog';
 import LootPanel from './LootPanel';
+import StoragePanel from './StoragePanel';
 import TouchControls from './TouchControls';
 import PauseMenu from './PauseMenu';
 import DialogueOverlay from './DialogueOverlay';
@@ -83,6 +84,7 @@ export default function GameView() {
       <Backpack />
       <SleepDialog />
       <LootPanel />
+      <StoragePanel />
       <TouchControls />
       <PauseMenu />
       <DialogueOverlay />

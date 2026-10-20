@@ -2,13 +2,15 @@ import { create } from 'zustand';
 import { ITEMS, FIELD_RECIPES, STATION_RECIPES, STATION_LABEL } from '../data/items';
 import { PERKS as PERKS_ALL } from '../data/skills';
 import { MODS as MODS_ALL, magSizeOf } from '../data/mods';
+import { UPGRADES as UPGRADE_DEFS } from '../data/upgrades';
+import { MODULE_DEFS } from '../data/trailerData';
 import { FACILITIES as FACILITY_DEFS } from '../data/base';
 import { TRAITS as TRAIT_DEFS } from '../data/survivors';
 import { QUESTS } from '../data/quests';
 import { DIFFICULTIES } from './types';
 import type {
   DifficultyId, Equipped, FleetEntry, InvItem, PhoneTab, QuestProgress, QuestStepType,
-  SaveMeta, SaveSnapshot, Screen, ToastMsg,
+  SaveMeta, SaveSnapshot, Screen, ToastMsg, TrailerFleetEntry,
 } from './types';
 import {
   carryLimitKg, encumbranceTier, slotLimit, totalWeightKg, usedSlots,
@@ -130,10 +132,32 @@ interface GameState {
 
   syncPlayer: (pos: [number, number, number], hp: number, stamina: number) => void;
   damagePlayer: (amount: number, cause: string) => void;
-  vehicle: { name: string; speedKmh: number; fuelPct: number; condPct: number } | null;
+  vehicle: {
+    uid: string; name: string; speedKmh: number; fuelPct: number; condPct: number;
+    storageUsedKg: number; storageCapKg: number; tiresFlat: number; upgrades: string[];
+  } | null;
   fleet: FleetEntry[];
-  setVehicle: (v: { name: string; speedKmh: number; fuelPct: number; condPct: number } | null) => void;
+  trailerFleet: TrailerFleetEntry[];
+  setVehicle: (v: GameState['vehicle']) => void;
   setFleet: (f: FleetEntry[]) => void;
+  setTrailerFleet: (f: TrailerFleetEntry[]) => void;
+
+  // vehicle/trailer storage panel (T near a vehicle, or the phone)
+  storageOpen: { kind: 'vehicle' | 'trailer' | 'crate'; uid: string; label: string } | null;
+  storageItems: InvItem[];
+  openStorage: (kind: 'vehicle' | 'trailer' | 'crate', uid: string, label: string) => void;
+  closeStorage: () => void;
+  refreshStorage: () => void;
+  storagePut: (invUid: string) => void;
+  storageTake: (index: number) => void;
+
+  // workshop actions driven from the phone, applied by the engine
+  atWorkshop: () => boolean;
+  repairVehicle: (uid: string, kind: 'tire' | 'engine' | 'battery' | 'scrap') => void;
+  installUpgrade: (uid: string, upgradeId: string) => void;
+  installModule: (trailerUid: string, moduleId: string) => void;
+  setBeaconMode: (trailerUid: string, mode: 'off' | 'sat' | 'horde') => void;
+  callSupplyDrop: (trailerUid: string) => void;
   healPlayer: (amount: number) => void;
   advanceTime: (minutes: number) => void;
 
@@ -283,6 +307,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         rep: { lighthouse: 0, pier: 0 },
         phoneOpen: false, phoneTab: 'home', phoneUnlocked: false, battery: 100,
         backpackOpen: false, sleepOpen: false, restedMinutesLeft: 0, lootOpenId: null, lootStash: {},
+        storageOpen: null, storageItems: [], vehicle: null, fleet: [], trailerFleet: [],
         dialogue: { source: 'prologue', nodeId: 'start' },
         interactPrompt: null,
         poiPositions: {},
@@ -310,6 +335,169 @@ export const useGameStore = create<GameState>()((set, get) => {
     setVehicle: (v) => set({ vehicle: v }),
     fleet: [],
     setFleet: (f) => set({ fleet: f }),
+    trailerFleet: [],
+    setTrailerFleet: (f) => set({ trailerFleet: f }),
+
+    storageOpen: null,
+    storageItems: [],
+    openStorage: (kind, uid, label) => {
+      const eng = getGame();
+      if (!eng) return;
+      const items = eng.getStorageItems(kind, uid);
+      if (!items) { get().addToast('Nothing to open here.'); return; }
+      set({ storageOpen: { kind, uid, label }, storageItems: items });
+      if (document.pointerLockElement) document.exitPointerLock();
+    },
+    closeStorage: () => set({ storageOpen: null, storageItems: [] }),
+    refreshStorage: () => {
+      const s = get();
+      if (!s.storageOpen) return;
+      const eng = getGame();
+      const items = eng?.getStorageItems(s.storageOpen.kind, s.storageOpen.uid);
+      if (items) set({ storageItems: items });
+    },
+    storagePut: (invUid) => {
+      const s = get();
+      if (!s.storageOpen) return;
+      const eng = getGame();
+      if (!eng) return;
+      const inv = s.inventory.find((i) => i.uid === invUid);
+      if (!inv) return;
+      // never store something you're wearing/holding — it would strand the slot
+      if (invUid === s.equipped.melee || invUid === s.equipped.ranged || invUid === s.equipped.pack
+        || s.hotbar.includes(invUid)) {
+        s.addToast('Unequip it first.');
+        return;
+      }
+      const err = eng.storagePutItem(s.storageOpen.kind, s.storageOpen.uid, { uid: inv.uid, itemId: inv.itemId, qty: inv.qty });
+      if (err) { s.addToast(err); return; }
+      s.removeItem(invUid, inv.qty);
+      s.refreshStorage();
+      sfx.play('pickup', { volume: 0.4 });
+    },
+    storageTake: (index) => {
+      const s = get();
+      if (!s.storageOpen) return;
+      const eng = getGame();
+      if (!eng) return;
+      const peek = eng.getStorageItems(s.storageOpen.kind, s.storageOpen.uid)?.[index];
+      if (!peek) return;
+      // pack feasibility first (same gates addItem uses), so nothing vanishes
+      const def = ITEMS[peek.itemId];
+      if (!def) return;
+      const limit = carryLimitKg(s.equipped, s.inventory, s.difficulty, s.perks.includes('sc_packmule') ? 8 : 0);
+      if (encumbranceTier(totalWeightKg(s.inventory) + def.weight * peek.qty, limit) === 'immobile') {
+        s.addToast('Too heavy — drop something first.');
+        return;
+      }
+      const taken = eng.storageTakeItem(s.storageOpen.kind, s.storageOpen.uid, index);
+      if (!taken) return;
+      if (!s.addItem(taken.itemId, taken.qty, true)) {
+        eng.storagePutItem(s.storageOpen.kind, s.storageOpen.uid, taken); // hand it back
+        s.addToast('No room in the pack.');
+        return;
+      }
+      s.refreshStorage();
+      sfx.play('pickup', { volume: 0.5 });
+    },
+
+    repairVehicle: (uid, kind) => {
+      const s = get();
+      const eng = getGame();
+      if (!eng) return;
+      const row = s.fleet.find((f) => f.defId === uid);
+      if (!row || row.dist > 9) { s.addToast('Get closer to the vehicle to work on it.'); return; }
+      // garage bay discount: scrap patch costs 1 at your own base garage
+      const atGarage = s.atWorkshop();
+      const cost: { itemId: string; qty: number } =
+        kind === 'tire' ? { itemId: 'tire', qty: 1 }
+        : kind === 'engine' ? { itemId: 'engine_part', qty: 1 }
+        : kind === 'battery' ? { itemId: 'car_battery', qty: 1 }
+        : { itemId: 'scrap', qty: atGarage ? 1 : 2 };
+      if (kind === 'tire' && row.tiresFlat <= 0) { s.addToast('No flat tires on it.'); return; }
+      if (kind !== 'tire' && row.condPct >= 99) { s.addToast('It\u2019s already in fine shape.'); return; }
+      if (s.countItem(cost.itemId) < cost.qty) {
+        s.addToast(`Needs ${cost.qty}× ${ITEMS[cost.itemId]?.name ?? cost.itemId}.`);
+        return;
+      }
+      const it = s.inventory.find((i) => i.itemId === cost.itemId);
+      if (!it || !s.removeItem(it.uid, cost.qty)) return;
+      const msg = eng.applyRepair(uid, kind);
+      s.addToast(msg);
+      sfx.play('craft', { volume: 0.6 });
+      s.refreshStorage();
+    },
+
+    installUpgrade: (uid, upgradeId) => {
+      const s = get();
+      const eng = getGame();
+      if (!eng) return;
+      if (!s.atWorkshop()) { s.addToast('Upgrades need the marina Machine Shop or a base Garage Bay.'); return; }
+      const def = UPGRADE_DEFS.find((u) => u.id === upgradeId);
+      if (!def) return;
+      for (const c of def.cost) {
+        if (s.countItem(c.itemId) < c.qty) {
+          s.addToast(`Needs ${c.qty}× ${ITEMS[c.itemId]?.name ?? c.itemId}.`);
+          return;
+        }
+      }
+      if (!eng.canTakeUpgrade(uid, upgradeId)) { s.addToast('That vehicle can\u2019t take this upgrade.'); return; }
+      for (const c of def.cost) {
+        const it = s.inventory.find((i) => i.itemId === c.itemId);
+        if (it) s.removeItem(it.uid, c.qty);
+      }
+      eng.applyUpgrade(uid, upgradeId);
+      s.addToast(`${def.name} installed.`);
+      sfx.play('craft', { volume: 0.7 });
+    },
+
+    installModule: (trailerUid, moduleId) => {
+      const s = get();
+      const eng = getGame();
+      if (!eng) return;
+      if (!s.atWorkshop()) { s.addToast('Buildouts need the marina Machine Shop or a base Garage Bay.'); return; }
+      const row = s.trailerFleet.find((t) => t.defId === trailerUid);
+      if (!row || row.dist > 30) { s.addToast('The trailer has to be nearby.'); return; }
+      const def = MODULE_DEFS.find((m) => m.id === moduleId);
+      if (!def) return;
+      for (const c of def.cost) {
+        if (s.countItem(c.itemId) < c.qty) {
+          s.addToast(`Needs ${c.qty}× ${ITEMS[c.itemId]?.name ?? c.itemId}.`);
+          return;
+        }
+      }
+      if (!eng.applyModule(trailerUid, moduleId)) { s.addToast('That trailer can\u2019t take a buildout.'); return; }
+      for (const c of def.cost) {
+        const it = s.inventory.find((i) => i.itemId === c.itemId);
+        if (it) s.removeItem(it.uid, c.qty);
+      }
+      s.addToast(`${def.name} built out.`);
+      sfx.play('craft', { volume: 0.7 });
+    },
+
+    setBeaconMode: (trailerUid, mode) => {
+      const eng = getGame();
+      if (!eng) return;
+      const msg = eng.applyBeaconMode(trailerUid, mode);
+      if (msg) get().addToast(msg);
+    },
+
+    callSupplyDrop: (trailerUid) => {
+      const eng = getGame();
+      if (!eng) return;
+      const msg = eng.callSupplyDrop(trailerUid);
+      get().addToast(msg);
+    },
+
+    atWorkshop: () => {
+      const s = get();
+      if (s.nearStation === 'industrial') return true;
+      if (s.base?.facilities.includes('garage_bay')) {
+        const p = s.poiPositions[s.base.poiId];
+        if (p && Math.hypot(p[0] - s.pos[0], p[1] - s.pos[2]) < 30) return true;
+      }
+      return false;
+    },
 
     damagePlayer: (amount, cause) => {
       const s = get();
@@ -960,7 +1148,7 @@ export const useGameStore = create<GameState>()((set, get) => {
       const s = get();
       const eng = getGame();
       const snapshot: SaveSnapshot = {
-        version: 2,
+        version: 3,
         savedAt: Date.now(),
         difficulty: s.difficulty,
         seed: s.seed,
@@ -984,6 +1172,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         survivors: s.survivors,
         base: s.base,
         vehicles: eng ? eng.getVehicleStates() : [],
+        trailers: eng ? eng.getTrailerStates() : [],
       };
       try {
         await saveGameToSlot(slot, snapshot);
@@ -1000,7 +1189,7 @@ export const useGameStore = create<GameState>()((set, get) => {
       const snap = await loadGameFromSlot(slot);
       const s = get();
       if (!snap) { s.addToast('No save in that slot.'); return false; }
-      if (snap.version > 2) { s.addToast('Save is from a newer version.'); return false; }
+      if (snap.version > 3) { s.addToast('Save is from a newer version.'); return false; }
       set({
         screen: 'game',
         difficulty: snap.difficulty,

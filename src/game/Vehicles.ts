@@ -5,6 +5,11 @@
 import * as THREE from 'three';
 import { clamp } from './rng';
 import { resolveCollisions, type Collider } from './Colliders';
+import { ITEMS } from '../data/items';
+import type { InvItem } from '../store/types';
+import {
+  accelFactor, collisionLossFactor, ramDamageFactor, sandFactor, topSpeedFactor, wearFactor,
+} from '../data/upgrades';
 
 export interface VehicleDef {
   id: string;
@@ -18,23 +23,69 @@ export interface VehicleDef {
   noiseDrive: number; // meters at speed
   color: number;
   water?: boolean;
+  storageKg: number; // trunk / bed / cargo capacity
+  tracked?: boolean; // tank: tracks not wheels, crushes, near-indestructible
+}
+
+/** An animated door/ramp on a vehicle or trailer, driven by t 0→1. */
+export interface DoorAnim {
+  obj: THREE.Object3D;
+  kind: 'swing-l' | 'swing-r' | 'slide-up' | 'ramp';
+  base: number; // closed rotation.y (swing) / position.y (slide) / rotation.x (ramp)
+  t: number;
+  target: number;
+  travel?: number; // signed open delta (default: swing ±1.85, slide +1.5, ramp +1.15)
+}
+
+/** Walk-in interior volume in entity-local space (rear is -Z local). */
+export interface InteriorSpec {
+  halfW: number;
+  zFront: number;
+  zRear: number;
+  floorY: number; // floor height above the entity group origin
+  doorHalfW: number; // rear opening half-width (passable when doors are open)
+}
+
+/** Total weight of a stored item list (engine-side helper). */
+export function itemsWeightKg(items: readonly InvItem[]): number {
+  let w = 0;
+  for (const it of items) w += (ITEMS[it.itemId]?.weight ?? 0) * it.qty;
+  return Math.round(w * 10) / 10;
+}
+
+/** Animate a list of doors toward their targets (shared by vehicles/trailers). */
+export function stepDoors(doors: DoorAnim[], dt: number): void {
+  for (const d of doors) {
+    if (Math.abs(d.t - d.target) < 0.001) { d.t = d.target; }
+    else d.t += Math.sign(d.target - d.t) * Math.min(Math.abs(d.target - d.t), dt * 1.6);
+    if (d.kind === 'swing-l') d.obj.rotation.y = d.base - d.t * (d.travel ?? 1.85);
+    else if (d.kind === 'swing-r') d.obj.rotation.y = d.base + d.t * (d.travel ?? 1.85);
+    else if (d.kind === 'slide-up') d.obj.position.y = d.base + d.t * (d.travel ?? 1.5);
+    else d.obj.rotation.x = d.base + d.t * (d.travel ?? 1.15); // ramp folds down
+  }
 }
 
 export const VEHICLE_DEFS: VehicleDef[] = [
-  { id: 'sportbike', name: 'Sport Bike', kind: 'bike', length: 2.1, width: 0.7, fuelMax: 12, burnClass: 0.5, topSpeed: 30, noiseDrive: 40, color: 0xc23b2e },
-  { id: 'motocross', name: 'Dirt Bike', kind: 'moto', length: 2.2, width: 0.8, fuelMax: 10, burnClass: 0.5, topSpeed: 26, noiseDrive: 45, color: 0x3a6ea5 },
-  { id: 'atv', name: 'ATV', kind: 'atv', length: 2.1, width: 1.1, fuelMax: 15, burnClass: 0.6, topSpeed: 19, noiseDrive: 42, color: 0x4a5230 },
-  { id: 'skiff', name: 'Skiff', kind: 'skiff', length: 5.5, width: 2.0, fuelMax: 24, burnClass: 0.9, topSpeed: 14, noiseDrive: 38, color: 0xd8d8d0, water: true },
-  { id: 'sedan', name: 'Sedan', kind: 'car', length: 4.7, width: 1.8, fuelMax: 40, burnClass: 1.0, topSpeed: 21, noiseDrive: 45, color: 0x5a6a7a },
-  { id: 'mustang', name: 'Mustang Dark Horse', kind: 'car', length: 4.8, width: 1.9, fuelMax: 45, burnClass: 1.1, topSpeed: 42, noiseDrive: 55, color: 0x2f4d7d },
-  { id: 'van', name: 'Utility Van', kind: 'car', length: 5.2, width: 2.0, fuelMax: 55, burnClass: 1.3, topSpeed: 19, noiseDrive: 50, color: 0xb8b8b0 },
-  { id: 'bronco', name: 'Bronco 4x4', kind: 'car', length: 4.6, width: 1.9, fuelMax: 55, burnClass: 1.3, topSpeed: 21, noiseDrive: 55, color: 0x4a5a3a },
-  { id: 'pickup', name: 'Pickup', kind: 'car', length: 5.3, width: 1.9, fuelMax: 60, burnClass: 1.3, topSpeed: 20, noiseDrive: 55, color: 0x5f7285 },
-  { id: 'f250', name: 'F-250', kind: 'car', length: 5.9, width: 2.0, fuelMax: 70, burnClass: 1.4, topSpeed: 20, noiseDrive: 55, color: 0x2e2e32 },
-  { id: 'boxtruck', name: 'Box Truck', kind: 'car', length: 7.5, width: 2.5, fuelMax: 90, burnClass: 1.8, topSpeed: 16, noiseDrive: 58, color: 0xd8d4c8 },
-  { id: 'semi', name: 'Semi Tractor', kind: 'car', length: 6.5, width: 2.5, fuelMax: 200, burnClass: 2.5, topSpeed: 15, noiseDrive: 60, color: 0x8a2020 },
-  { id: 'apc', name: '6x6 APC', kind: 'car', length: 6.8, width: 2.6, fuelMax: 150, burnClass: 3.0, topSpeed: 13, noiseDrive: 65, color: 0x4a5230 },
+  { id: 'sportbike', name: 'Sport Bike', kind: 'bike', length: 2.1, width: 0.7, fuelMax: 12, burnClass: 0.5, topSpeed: 30, noiseDrive: 40, color: 0xc23b2e, storageKg: 5 },
+  { id: 'motocross', name: 'Dirt Bike', kind: 'moto', length: 2.2, width: 0.8, fuelMax: 10, burnClass: 0.5, topSpeed: 26, noiseDrive: 45, color: 0x3a6ea5, storageKg: 5 },
+  { id: 'atv', name: 'ATV', kind: 'atv', length: 2.1, width: 1.1, fuelMax: 15, burnClass: 0.6, topSpeed: 19, noiseDrive: 42, color: 0x4a5230, storageKg: 25 },
+  { id: 'skiff', name: 'Skiff', kind: 'skiff', length: 5.5, width: 2.0, fuelMax: 24, burnClass: 0.9, topSpeed: 14, noiseDrive: 38, color: 0xd8d8d0, water: true, storageKg: 120 },
+  { id: 'sedan', name: 'Sedan', kind: 'car', length: 4.7, width: 1.8, fuelMax: 40, burnClass: 1.0, topSpeed: 21, noiseDrive: 45, color: 0x5a6a7a, storageKg: 70 },
+  { id: 'mustang', name: 'Mustang Dark Horse', kind: 'car', length: 4.8, width: 1.9, fuelMax: 45, burnClass: 1.1, topSpeed: 42, noiseDrive: 55, color: 0x2f4d7d, storageKg: 45 },
+  { id: 'van', name: 'Utility Van', kind: 'car', length: 5.2, width: 2.0, fuelMax: 55, burnClass: 1.3, topSpeed: 19, noiseDrive: 50, color: 0xb8b8b0, storageKg: 260 },
+  { id: 'sprinter', name: 'Sprinter Van', kind: 'car', length: 6.0, width: 2.05, fuelMax: 75, burnClass: 1.4, topSpeed: 18, noiseDrive: 48, color: 0x9aa4ac, storageKg: 380 },
+  { id: 'bronco', name: 'Bronco 4x4', kind: 'car', length: 4.6, width: 1.9, fuelMax: 55, burnClass: 1.3, topSpeed: 21, noiseDrive: 55, color: 0x4a5a3a, storageKg: 130 },
+  { id: 'pickup', name: 'Pickup', kind: 'car', length: 5.3, width: 1.9, fuelMax: 60, burnClass: 1.3, topSpeed: 20, noiseDrive: 55, color: 0x5f7285, storageKg: 320 },
+  { id: 'f250', name: 'F-250 Dually', kind: 'car', length: 5.9, width: 2.0, fuelMax: 70, burnClass: 1.4, topSpeed: 20, noiseDrive: 55, color: 0x2e2e32, storageKg: 420 },
+  { id: 'boxtruck', name: 'Box Truck', kind: 'car', length: 7.5, width: 2.5, fuelMax: 90, burnClass: 1.8, topSpeed: 16, noiseDrive: 58, color: 0xd8d4c8, storageKg: 900 },
+  { id: 'semi', name: 'Semi Tractor', kind: 'car', length: 6.5, width: 2.5, fuelMax: 200, burnClass: 2.5, topSpeed: 15, noiseDrive: 60, color: 0x3a3f45, storageKg: 120 },
+  { id: 'semi_day', name: 'Semi Day Cab', kind: 'car', length: 5.8, width: 2.5, fuelMax: 160, burnClass: 2.3, topSpeed: 16, noiseDrive: 58, color: 0x6e3b32, storageKg: 100 },
+  { id: 'goliath', name: 'Goliath 6x6', kind: 'car', length: 6.8, width: 2.6, fuelMax: 150, burnClass: 3.0, topSpeed: 13, noiseDrive: 65, color: 0x4a5230, storageKg: 260 },
+  { id: 'tank', name: 'Battle Tank', kind: 'car', length: 7.4, width: 3.3, fuelMax: 190, burnClass: 4.2, topSpeed: 9, noiseDrive: 85, color: 0x4a4f42, storageKg: 160, tracked: true },
 ];
+
+/** Semi tractor paint rotation — the Stitch charcoal leads, fleets vary. */
+export const SEMI_PAINTS = [0x3a3f45, 0x7a2020, 0x2e4a5a, 0x5c5648];
 
 export interface Vehicle {
   uid: string;
@@ -53,6 +104,22 @@ export interface Vehicle {
   bodyPitch: number; // smoothed weight-transfer pitch (accel/brake)
   bodyRoll: number; // smoothed lateral lean (cornering)
   suspV: number; // suspension spring velocity (4-corner terrain follow)
+  turret?: THREE.Group; // goliath / tank weapon turret (aims with the camera)
+  // --- vehicle & trailer wave state ---
+  storage: InvItem[]; // what's riding in the trunk / bed / cargo bay
+  upgrades: string[]; // installed upgrade ids (data/upgrades)
+  tiresFlat: number; // blown tires: drag + pull until replaced
+  flatSide: 1 | -1; // which way a flat pulls
+  blewTire: boolean; // set by drive() on a blowout, consumed by Game (toast)
+  colorPick: number; // semi paint variation index
+  towedMassKg: number; // trailer + cargo mass, set by the trailer manager
+  cargoCrates: number; // physical crates loaded (visual + mass)
+  doors: DoorAnim[];
+  interior?: InteriorSpec; // walk-in cargo space (sprinter)
+  roofObj?: THREE.Object3D; // hidden while the player is inside, camera outside
+  loadedOn: string | null; // trailer uid this vehicle is locked onto, if any
+  upgradeGroup?: THREE.Group; // armor / racks / bullbar meshes
+  cargoGroup?: THREE.Group; // loaded-crate meshes
 }
 
 export interface DriveEnv {
@@ -109,7 +176,8 @@ function mirrors(g: THREE.Group, W: number, y: number, z: number, spread = 0.06)
 }
 
 function buildCarBody(g: THREE.Group, def: VehicleDef, v: Vehicle): void {
-  const { length: L, width: W, color } = def;
+  const { length: L, width: W } = def;
+  const color = def.id === 'semi' ? SEMI_PAINTS[v.colorPick % SEMI_PAINTS.length] : def.color;
   const body = mat(color, 0.55, 0.35);
   const dark = darkTrim();
   if (def.id === 'van') {
@@ -131,10 +199,16 @@ function buildCarBody(g: THREE.Group, def: VehicleDef, v: Vehicle): void {
     mirrors(g, W, 1.35, L * 0.42);
     box(g, W, 0.24, 0.12, dark, 0, 0.32, L * 0.52); // bumper
   } else if (def.id === 'boxtruck') {
-    // cab-over style box truck: white cargo cube, slatted roll door
+    // cab-over style box truck: white cargo cube, ANIMATED slatted roll door
     box(g, W, 2.2, L * 0.66, body, 0, 1.58, -L * 0.15); // cargo cube
-    box(g, W * 0.8, 1.9, 0.05, mat(0xbdbab0, 0.7, 0.1), 0, 1.5, -L * 0.485); // roll door
-    for (let i = 0; i < 4; i++) box(g, W * 0.8, 0.04, 0.02, dark, 0, 0.85 + i * 0.45, -L * 0.515);
+    box(g, W * 0.84, 1.94, 0.03, mat(0x0b0d0f, 0.95, 0), 0, 1.5, -L * 0.482); // dark cargo throat behind the door
+    const rollDoor = box(g, W * 0.8, 1.9, 0.05, mat(0xbdbab0, 0.7, 0.1), 0, 1.5, -L * 0.5); // roll door (slides up)
+    for (let i = 0; i < 4; i++) {
+      const slat = new THREE.Mesh(new THREE.BoxGeometry(W * 0.8, 0.04, 0.02), darkTrim());
+      slat.position.set(0, -0.65 + i * 0.45, -0.04);
+      rollDoor.add(slat);
+    }
+    v.doors.push({ obj: rollDoor, kind: 'slide-up', base: 1.5, t: 0, target: 0 });
     box(g, W * 0.96, 1.32, L * 0.2, body, 0, 0.98, L * 0.38); // cab
     box(g, W * 0.9, 0.48, 0.07, glass(), 0, 1.38, L * 0.475); // windshield
     box(g, W * 0.94, 0.3, L * 0.08, body, 0, 0.5, L * 0.46); // snub nose
@@ -146,17 +220,33 @@ function buildCarBody(g: THREE.Group, def: VehicleDef, v: Vehicle): void {
     }
     mirrors(g, W, 1.42, L * 0.44, 0.1);
     box(g, W, 0.26, 0.12, dark, 0, 0.3, L * 0.52);
-  } else if (def.id === 'semi') {
-    // long-hood tractor: cab + sleeper, chrome grille/stacks/tanks
-    box(g, W * 0.96, 1.72, 3.0, body, 0, 1.36, L * 0.2); // cab + sleeper
-    box(g, W * 0.98, 0.07, 3.05, body, 0, 2.25, L * 0.2); // cab roof
-    box(g, W * 0.88, 0.52, 0.07, glass(), 0, 1.62, L * 0.2 + 1.5); // windshield
-    box(g, W * 0.7, 0.85, 0.1, chrome(), 0, 0.95, L * 0.2 + 1.53); // grille
+  } else if (def.id === 'semi' || def.id === 'semi_day') {
+    // Long-hood tractor from the Stitch render: charcoal cab, vertical-bar
+    // grille, chrome stacks/tanks, roof markers, cow-catcher guard. The
+    // day cab drops the sleeper — same front face, shorter cab, and its
+    // shorter wheelbase (def.length) is what makes it turn tighter.
+    const day = def.id === 'semi_day';
+    const cabD = day ? 1.9 : 3.0;
+    const cabZ = L * 0.2 + (3.0 - cabD) / 2; // front face stays put
+    const frontZ = cabZ + cabD / 2;
+    box(g, W * 0.96, 1.72, cabD, body, 0, 1.36, cabZ); // cab (+sleeper on the semi)
+    box(g, W * 0.98, 0.07, cabD + 0.05, body, 0, 2.25, cabZ); // cab roof
+    box(g, W * 0.88, 0.52, 0.07, glass(), 0, 1.62, frontZ); // windshield
+    box(g, W * 0.7, 0.85, 0.1, chrome(), 0, 0.95, frontZ + 0.03); // grille
     box(g, W * 0.9, 0.5, L * 0.14, body, 0, 0.62, L * 0.42); // hood snub
     box(g, W, 0.3, 0.14, chrome(), 0, 0.32, L * 0.52); // bumper
+    for (let i = -1; i <= 1; i++) box(g, 0.12, 0.05, 0.04, mat(0xd88f2a, 0.4, 0), i * 0.3, 2.31, frontZ - 0.1); // roof markers
+    // cow-catcher guard (the Stitch semi's signature): rails + teeth
+    const guard = mat(0x2b2f36, 0.8, 0.3);
+    box(g, W * 0.78, 0.09, 0.07, guard, 0, 0.92, L * 0.56);
+    box(g, W * 0.78, 0.09, 0.07, guard, 0, 0.38, L * 0.58);
+    for (let i = -2; i <= 2; i++) {
+      const tooth = box(g, 0.09, 0.62, 0.07, guard, i * W * 0.17, 0.65, L * 0.57);
+      tooth.rotation.x = 0.1;
+    }
     for (const sgn of [1, -1]) {
-      const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 2.3, 8), chrome());
-      stack.position.set(sgn * (W / 2 - 0.12), 1.6, L * 0.2 - 1.62);
+      const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 2.3, 8), v.colorPick % 2 === 0 ? chrome() : mat(0x2b2f36, 0.6, 0.4));
+      stack.position.set(sgn * (W / 2 - 0.12), 1.6, cabZ - cabD / 2 - 0.12);
       stack.castShadow = true;
       g.add(stack);
       const tank = new THREE.Mesh(new THREE.CylinderGeometry(0.27, 0.27, 1.3, 10), mat(0x6a7076, 0.35, 0.7));
@@ -165,9 +255,9 @@ function buildCarBody(g: THREE.Group, def: VehicleDef, v: Vehicle): void {
       g.add(tank);
       box(g, 0.3, 0.1, 0.05, lampMat(), sgn * W * 0.32, 0.78, L * 0.51);
     }
-    mirrors(g, W, 1.7, L * 0.2 + 1.45, 0.12);
+    mirrors(g, W, 1.7, frontZ - 0.05, 0.12);
     box(g, W * 0.8, 0.3, 2.4, mat(0x2e3238), 0, 0.92, -L * 0.18); // fifth-wheel deck
-  } else if (def.id === 'apc') {
+  } else if (def.id === 'goliath') {
     // armored hull: sloped glacis, tapered upper hull, hatch + turret ring
     const armor = mat(color, 0.9, 0.1);
     box(g, W, 1.0, L * 0.94, armor, 0, 0.95, 0); // lower hull
@@ -184,6 +274,19 @@ function buildCarBody(g: THREE.Group, def: VehicleDef, v: Vehicle): void {
     ring.castShadow = true;
     g.add(ring);
     box(g, 0.85, 0.1, 0.85, mat(0x2e3238), 0, 2.22, 0.3); // hatch
+    // weapon turret group: empty ring mount until an MG / cannon upgrade
+    // is bolted on (applyUpgradeVisuals fills it); Game aims it.
+    const turret = new THREE.Group();
+    turret.position.set(0, 2.2, 0.3);
+    g.add(turret);
+    v.turret = turret;
+    // hull stowage: side boxes + rear spare, working-vehicle clutter
+    for (const sgn of [1, -1]) box(g, 0.18, 0.4, 1.6, mat(0x454d3c, 0.9, 0.1), sgn * (W / 2 + 0.02), 1.15, -L * 0.28);
+    const gspare = new THREE.Mesh(new THREE.CylinderGeometry(0.44, 0.44, 0.24, 14), mat(0x1e1e22, 1, 0));
+    gspare.rotation.x = Math.PI / 2;
+    gspare.position.set(0, 1.1, -L / 2 - 0.1);
+    gspare.castShadow = true;
+    g.add(gspare);
     const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.02, 1.7, 5), mat(0x1c1f24, 0.8, 0));
     antenna.position.set(-W * 0.36, 2.8, -L * 0.32);
     antenna.rotation.z = 0.08;
@@ -323,6 +426,84 @@ function buildCarBody(g: THREE.Group, def: VehicleDef, v: Vehicle): void {
     // GT wing on uprights
     for (const sgn of [1, -1]) box(g, 0.06, 0.24, 0.1, trim, sgn * W * 0.3, 1.05, -L * 0.45);
     box(g, W * 0.88, 0.05, 0.34, trim, 0, 1.19, -L * 0.46);
+  } else if (def.id === 'sprinter') {
+    // Tall cargo van: real cab + a HOLLOW walk-in cargo box with twin
+    // rear doors that swing open — you can step in the back and load it.
+    const inner = mat(0x59616a, 0.9, 0.05);
+    box(g, W * 0.98, 1.06, L * 0.26, body, 0, 0.9, L * 0.36); // cab
+    const shieldS = box(g, W * 0.9, 0.58, 0.07, glass(), 0, 1.48, L * 0.48);
+    shieldS.rotation.x = -0.1; // raked windshield
+    box(g, W * 0.96, 0.4, L * 0.13, body, 0, 0.52, L * 0.44); // snub hood
+    box(g, W * 0.66, 0.2, 0.06, dark, 0, 0.5, L * 0.51); // grille
+    for (const sgn of [1, -1]) {
+      box(g, 0.3, 0.1, 0.05, lampMat(), sgn * W * 0.34, 0.76, L * 0.51);
+      box(g, 0.07, 0.34, 0.05, tailMat(), sgn * W * 0.44, 1.0, -L * 0.51);
+    }
+    mirrors(g, W, 1.5, L * 0.44, 0.08);
+    box(g, W, 0.24, 0.12, dark, 0, 0.32, L * 0.52); // bumper
+    // cargo shell: floor / side walls / roof / front wall — a real inside
+    const cz = -L * 0.13;
+    const cd = L * 0.72;
+    box(g, W * 0.96, 0.08, cd, inner, 0, 0.52, cz); // floor (top ≈ 0.56)
+    box(g, 0.07, 1.62, cd, body, -(W / 2 - 0.035), 1.37, cz);
+    box(g, 0.07, 1.62, cd, body, W / 2 - 0.035, 1.37, cz);
+    const roofS = box(g, W, 0.07, cd, body, 0, 2.21, cz);
+    v.roofObj = roofS;
+    box(g, W, 1.62, 0.07, body, 0, 1.37, cz + cd / 2); // front wall (behind cab)
+    box(g, W, 0.26, 0.07, body, 0, 2.05, cz - cd / 2); // header over the doors
+    // interior ribs + a work light so the inside reads as a space
+    for (let i = 0; i < 3; i++) box(g, W * 0.9, 0.05, 0.08, inner, 0, 2.14, cz - cd * 0.3 + i * cd * 0.3);
+    box(g, 0.3, 0.04, 0.12, mat(0xd8cf9a, 0.4, 0), 0, 2.15, cz); // cargo lamp
+    // twin rear doors, hinged at the sides (+X hinge swings with -Y rot)
+    for (const sgn of [1, -1]) {
+      const pivot = new THREE.Group();
+      pivot.position.set(sgn * (W / 2 - 0.03), 1.28, cz - cd / 2);
+      g.add(pivot);
+      const leaf = box(pivot, W / 2 - 0.05, 1.5, 0.05, body, -sgn * (W / 4 - 0.01), 0, 0);
+      const win = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.02), glass());
+      win.position.set(0, 0.42, -0.04);
+      leaf.add(win); // door window
+      v.doors.push({ obj: pivot, kind: sgn > 0 ? 'swing-l' : 'swing-r', base: 0, t: 0, target: 0 });
+    }
+    v.interior = { halfW: W / 2 - 0.17, zFront: L * 0.2, zRear: -L * 0.47, floorY: 0.56, doorHalfW: W / 2 - 0.08 };
+  } else if (def.id === 'tank') {
+    // Tracked armor: no wheels — long track housings with road wheels,
+    // a sloped glacis, and a turret whose cannon is very real.
+    const armor = mat(color, 0.85, 0.25);
+    const trackM = mat(0x22241f, 1, 0);
+    for (const sgn of [1, -1]) {
+      box(g, 0.62, 0.95, L * 0.98, trackM, sgn * (W / 2 - 0.31), 0.55, 0); // track housing
+      for (let i = 0; i < 5; i++) {
+        const rw = new THREE.Mesh(new THREE.CylinderGeometry(0.33, 0.33, 0.66, 10), mat(0x363a31, 0.9, 0.1));
+        rw.rotation.z = Math.PI / 2;
+        rw.position.set(sgn * (W / 2 - 0.31), 0.36, -L * 0.36 + i * L * 0.18);
+        rw.castShadow = true;
+        g.add(rw);
+      }
+      box(g, 0.66, 0.16, L * 0.9, armor, sgn * (W / 2 - 0.31), 1.1, 0); // track top skirt
+    }
+    box(g, W * 0.72, 0.78, L * 0.94, armor, 0, 1.06, 0); // hull
+    const glacis = box(g, W * 0.72, 0.72, 0.12, armor, 0, 1.02, L * 0.47);
+    glacis.rotation.x = -0.45; // sloped nose
+    box(g, W * 0.7, 0.16, L * 0.52, armor, 0, 1.52, -L * 0.12); // rear deck
+    for (const sgn of [1, -1]) box(g, 0.24, 0.06, 0.05, lampMat(), sgn * W * 0.26, 1.24, L * 0.52); // headlights
+    // turret: hull ring + slab turret + long cannon with muzzle brake
+    const turret = new THREE.Group();
+    turret.position.set(0, 1.6, -L * 0.02);
+    g.add(turret);
+    box(turret, 1.7, 0.52, 2.2, armor, 0, 0.26, -0.1);
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.115, 3.4, 10), mat(0x3a3e35, 0.55, 0.4));
+    barrel.rotation.x = Math.PI / 2;
+    barrel.position.set(0, 0.34, 2.35);
+    barrel.castShadow = true;
+    turret.add(barrel);
+    const brake = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.42, 10), mat(0x2c2f29, 0.7, 0.3));
+    brake.rotation.x = Math.PI / 2;
+    brake.position.set(0, 0.34, 3.85);
+    turret.add(brake);
+    box(turret, 0.62, 0.1, 0.62, mat(0x2c2f29, 0.8, 0.2), 0.32, 0.57, -0.35); // hatch
+    box(turret, 1.2, 0.3, 0.5, mat(0x454d3c, 0.9, 0.1), 0, 0.3, -1.35); // turret basket stowage
+    v.turret = turret;
   } else {
     // sedan: clean four-door — sloped hood, glass cabin, trunk lip
     box(g, W, 0.5, L, body, 0, 0.55, 0); // lower body
@@ -343,23 +524,28 @@ function buildCarBody(g: THREE.Group, def: VehicleDef, v: Vehicle): void {
     box(g, W, 0.2, 0.1, dark, 0, 0.34, L * 0.52); // bumpers
     box(g, W, 0.2, 0.1, dark, 0, 0.34, -L * 0.52);
   }
-  // wheels
+  // wheels (the tank rides on its modeled tracks instead)
+  if (def.id === 'tank') { v.wheelR = 0.5; return; }
   const wr =
     def.id === 'f250' ? 0.44 :
     def.id === 'pickup' ? 0.4 :
     def.id === 'bronco' ? 0.38 :
-    def.id === 'van' ? 0.36 :
-    def.id === 'semi' || def.id === 'boxtruck' ? 0.42 :
-    def.id === 'apc' ? 0.46 : 0.33;
+    def.id === 'van' || def.id === 'sprinter' ? 0.36 :
+    def.id === 'semi' || def.id === 'semi_day' || def.id === 'boxtruck' ? 0.42 :
+    def.id === 'goliath' ? 0.46 : 0.33;
   v.wheelR = wr;
-  const ww = def.id === 'apc' ? 0.34 : def.id === 'pickup' || def.id === 'f250' || def.id === 'bronco' ? 0.3 : 0.24;
-  const nAxle = def.id === 'semi' || def.id === 'apc' || def.id === 'boxtruck' ? 3 : 2;
+  const ww = def.id === 'goliath' ? 0.34 : def.id === 'pickup' || def.id === 'f250' || def.id === 'bronco' ? 0.3 : 0.24;
+  const nAxle = def.id === 'semi' || def.id === 'semi_day' || def.id === 'goliath' || def.id === 'boxtruck' ? 3 : 2;
   const axleZs = nAxle === 3 ? [L * 0.32, -L * 0.1, -L * 0.32] : [L * 0.32, -L * 0.32];
   axleZs.forEach((az, i) => {
     for (const sx of [-1, 1]) {
       wheel(g, wr, ww, (sx * (W / 2 - 0.05)), wr, az, v.wheelSpin, i === 0 ? v.wheelPivots : undefined);
     }
   });
+  if (def.id === 'f250') {
+    // the dually: paired rear wheels — the mid-tier tow class shows it
+    for (const sx of [-1, 1]) wheel(g, wr, 0.22, sx * (W / 2 - 0.3), wr, -L * 0.32, v.wheelSpin);
+  }
 }
 
 function buildBike(g: THREE.Group, def: VehicleDef, v: Vehicle): void {
@@ -471,6 +657,16 @@ function makeVehicle(def: VehicleDef, x: number, z: number, heading: number, gro
     bodyPitch: 0,
     bodyRoll: 0,
     suspV: 0,
+    storage: [],
+    upgrades: [],
+    tiresFlat: 0,
+    flatSide: 1,
+    blewTire: false,
+    colorPick: def.id === 'semi' ? Math.floor(Math.random() * SEMI_PAINTS.length) : 0,
+    towedMassKg: 0,
+    cargoCrates: 0,
+    doors: [],
+    loadedOn: null,
   };
   if (def.kind === 'skiff') buildSkiff(g, def);
   else if (def.kind === 'bike' || def.kind === 'moto' || def.kind === 'atv') buildBike(g, def, v);
@@ -501,7 +697,10 @@ const SPAWNS: SpawnDef[] = [
   { id: 'f250', poi: 'wreck', dx: 5, dz: 3, heading: 0 },
   { id: 'motocross', poi: 'dune_cache', dx: 4, dz: 4, heading: Math.PI / 2 },
   { id: 'semi', poi: 'dune_cache', dx: 55, dz: -18, heading: Math.PI / 2 },
-  { id: 'apc', poi: 'lighthouse_base', dx: 12, dz: -8, heading: -Math.PI / 2 },
+  { id: 'semi_day', poi: 'dune_cache', dx: 38, dz: -30, heading: Math.PI / 2 },
+  { id: 'sprinter', poi: 'town', dx: 88, dz: 58, heading: Math.PI },
+  { id: 'goliath', poi: 'lighthouse_base', dx: 12, dz: -8, heading: -Math.PI / 2 },
+  { id: 'tank', poi: 'lighthouse_base', dx: 24, dz: -18, heading: -Math.PI / 2 },
   { id: 'skiff', poi: 'marina', dx: -64, dz: 8, heading: Math.PI / 2 },
 ];
 
@@ -529,6 +728,7 @@ export class VehicleManager {
     let best: Vehicle | null = null;
     let bd = maxD;
     for (const v of this.vehicles) {
+      if (v.loadedOn) continue; // riding a trailer deck — not enterable
       const d = Math.hypot(v.group.position.x - x, v.group.position.z - z);
       if (d < bd) {
         bd = d;
@@ -536,6 +736,18 @@ export class VehicleManager {
       }
     }
     return best;
+  }
+
+  /** World position of a vehicle's rear hitch point (behind the bumper). */
+  hitchWorld(v: Vehicle): { x: number; z: number } {
+    const p = v.group.position;
+    const back = v.def.length / 2 + 0.35;
+    return { x: p.x - Math.sin(v.heading) * back, z: p.z - Math.cos(v.heading) * back };
+  }
+
+  /** Advance every vehicle's door animations (called once per frame). */
+  updateDoors(dt: number): void {
+    for (const v of this.vehicles) if (v.doors.length) stepDoors(v.doors, dt);
   }
 
   byId(uid: string): Vehicle | null {
@@ -586,7 +798,6 @@ export class VehicleManager {
     const inWater = groundHere < -0.4;
     const onSand = groundHere < 0.9; // beach band — soft surface, real drag
     const wb = def.kind === 'car' ? def.length * 0.64 : 1.4; // wheelbase (axles ±L·0.32 / ±0.7)
-
     // steer angle: ramps toward the input, max angle shrinks with speed
     const maxSteerBase = def.kind === 'car' ? 0.58 : 0.72; // ~33° cars, ~41° bikes/atv
     const maxSteer = maxSteerBase / (1 + speedRatio * 2.4);
@@ -595,15 +806,20 @@ export class VehicleManager {
     v.steerAngle += clamp(steerTarget - v.steerAngle, -steerRate * dt, steerRate * dt);
     v.steerVis = v.steerAngle;
 
-    // longitudinal: power curve launch, real brakes, aero + rolling drag
-    const surfaceTop = onSand ? 0.78 : 1;
-    const topF = def.topSpeed * condF * surfaceTop * (inWater ? 0.3 : 1);
+    // longitudinal: power curve launch, real brakes, aero + rolling drag.
+    // Load matters: a hitched trailer's mass (towedMassKg, set by the
+    // trailer manager) and blown tires cut the top end and the pull;
+    // an engine tune buys some of it back (data/upgrades math).
+    const surfaceTop = onSand ? sandFactor(v.upgrades) : 1;
+    const topF = def.topSpeed * condF * surfaceTop * (inWater ? 0.3 : 1)
+      * topSpeedFactor(v.upgrades, v.towedMassKg, v.tiresFlat);
+    const accelF = accelFactor(v.upgrades, v.towedMassKg);
     const topR = def.topSpeed * 0.32 * condF;
     const th = hasFuel ? clamp(throttle, -1, 1) : 0;
     const accelBefore = v.speed;
     if (th > 0.02) {
       const power = clamp(1 - v.speed / Math.max(topF, 1), 0.22, 1); // strong launch, tapering top end
-      v.speed += th * (topF / 2.9) * power * (onSand ? 0.8 : 1) * dt;
+      v.speed += th * (topF / 2.9) * power * (onSand ? 0.8 : 1) * accelF * dt;
     } else if (th < -0.02) {
       if (v.speed > 0.4) {
         v.speed -= (topF / 1.05) * dt; // brakes
@@ -637,6 +853,14 @@ export class VehicleManager {
     const newRearZ = rearZ + fz * v.speed * dt;
     pos.x = newRearX + fx * (wb / 2);
     pos.z = newRearZ + fz * (wb / 2);
+    // tracked vehicles pivot on their tracks at a standstill
+    if (def.tracked && Math.abs(v.speed) < 1.2 && Math.abs(th) < 0.05 && Math.abs(steer) > 0.1) {
+      v.heading -= clamp(steer, -1, 1) * 1.1 * dt;
+    }
+    // a flat tire drags the nose toward its side, worse with speed
+    if (v.tiresFlat > 0) {
+      v.heading += v.flatSide * 0.05 * v.tiresFlat * (v.speed / Math.max(def.topSpeed, 1)) * dt;
+    }
 
     // body vs. buildings (center-circle, as before)
     const radius = Math.max(def.length, def.width) / 2 * 0.75;
@@ -645,12 +869,23 @@ export class VehicleManager {
     resolveCollisions(p3, radius, env.colliders);
     const clipped = Math.hypot(p3.x - before.x, p3.z - before.z) > 0.001;
     if (clipped && Math.abs(v.speed) > 5) {
-      v.condition = Math.max(0, v.condition - 0.02);
-      env.noise(pos.x, pos.z, 18);
+      if (def.tracked) {
+        env.noise(pos.x, pos.z, 26); // the building loses; the tank doesn't notice
+      } else {
+        v.condition = Math.max(0, v.condition - 0.02 * collisionLossFactor(v.upgrades));
+        env.noise(pos.x, pos.z, 18);
+        // a hard hit on a worn vehicle can blow a tire (run-flats prevent it)
+        if (v.condition < 0.3 && v.tiresFlat < 2 && !v.upgrades.includes('run_flats') && Math.random() < 0.45) {
+          v.tiresFlat += 1;
+          v.flatSide = Math.random() < 0.5 ? 1 : -1;
+          v.blewTire = true;
+          env.noise(pos.x, pos.z, 30);
+        }
+      }
     }
     pos.x = p3.x;
     pos.z = p3.z;
-    if (clipped) v.speed *= 0.35;
+    if (clipped) v.speed *= def.tracked ? 0.88 : 0.35;
 
     // SUSPENSION: sample the ground at all four wheel contact patches.
     // Body height, pitch, AND roll all come from the four corners — a
@@ -667,7 +902,8 @@ export class VehicleManager {
     const hRL = hAt(-fx * (wb / 2) - rx * (track / 2), -fz * (wb / 2) - rz * (track / 2));
     const hRR = hAt(-fx * (wb / 2) + rx * (track / 2), -fz * (wb / 2) + rz * (track / 2));
     const avgH = (hFL + hFR + hRL + hRR) / 4;
-    const rideH = def.kind === 'atv' || def.kind === 'bike' || def.kind === 'moto' ? 0.05 : 0.02;
+    const rideH = (def.kind === 'atv' || def.kind === 'bike' || def.kind === 'moto' ? 0.05 : 0.02)
+      + (v.upgrades.includes('lift_kit') ? 0.1 : 0);
     // spring: stiffness 90, damping 12 (underdamped — visible travel)
     v.suspV += ((avgH + rideH - pos.y) * 90 - v.suspV * 12) * dt;
     pos.y += v.suspV * dt;
@@ -705,12 +941,17 @@ export class VehicleManager {
       v.fuel = Math.max(0, v.fuel - 0.18 * def.burnClass * Math.max(speedRatio, 0.15) * dt);
     }
     if (!def.water) {
-      v.condition = Math.max(0, v.condition - (0.02 / 60) * (0.3 + speedRatio) * dt);
+      v.condition = Math.max(0, v.condition - (0.02 / 60) * (0.3 + speedRatio) * dt * wearFactor(v.upgrades));
     }
     if (Math.abs(v.speed) > 4) {
       const fx = Math.sin(v.heading);
       const fz = Math.cos(v.heading);
-      env.ram(pos.x + fx * (def.length / 2), pos.z + fz * (def.length / 2), 1.2 + def.width / 2, Math.abs(v.speed) * 2.2);
+      const crush = !!def.tracked; // the tank flattens what it touches
+      env.ram(
+        pos.x + fx * (def.length / 2), pos.z + fz * (def.length / 2),
+        crush ? 3.0 : 1.2 + def.width / 2,
+        Math.abs(v.speed) * (crush ? 5 : 2.2) * ramDamageFactor(v.upgrades),
+      );
     }
     (v as { noiseT?: number }).noiseT = ((v as { noiseT?: number }).noiseT ?? 0) + dt;
     if ((v as { noiseT?: number }).noiseT! > 0.3) {
@@ -721,4 +962,131 @@ export class VehicleManager {
       for (const w of v.wheelSpin) w.rotation.x += (v.speed / v.wheelR) * dt;
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Upgrade + cargo visuals: installed upgrades and loaded crates are real
+// meshes on the vehicle, rebuilt whenever the state changes.
+// ---------------------------------------------------------------------------
+
+/** Rebuild the visible upgrade hardware (armor, racks, bullbar, weapons). */
+export function applyUpgradeVisuals(v: Vehicle): void {
+  if (v.upgradeGroup) {
+    v.group.remove(v.upgradeGroup);
+    v.upgradeGroup = undefined;
+  }
+  if (v.turret) {
+    const old = v.turret.getObjectByName('weaponMount');
+    if (old) v.turret.remove(old);
+  }
+  if (v.upgrades.length === 0) return;
+  const g = new THREE.Group();
+  const { length: L, width: W } = v.def;
+  const steel = mat(0x3d434b, 0.6, 0.5);
+  const dark = darkTrim();
+  if (v.upgrades.includes('armor')) {
+    // welded plate over doors, hood, and quarters
+    for (const sgn of [1, -1]) {
+      box(g, 0.06, 0.62, L * 0.52, steel, sgn * (W / 2 + 0.02), 0.95, L * 0.02);
+      box(g, 0.06, 0.5, L * 0.3, steel, sgn * (W / 2 + 0.02), 0.8, -L * 0.33);
+    }
+    box(g, W * 0.8, 0.06, L * 0.3, steel, 0, 1.22, L * 0.32);
+  }
+  if (v.upgrades.includes('cargo_racks') && v.def.kind === 'car') {
+    if (v.def.id === 'pickup' || v.def.id === 'f250') {
+      // bed rails + a headache rack behind the cab
+      for (const sgn of [1, -1]) box(g, 0.05, 0.22, L * 0.36, dark, sgn * (W / 2 - 0.05), 1.42, -L * 0.3);
+      box(g, W * 0.9, 0.3, 0.05, dark, 0, 1.5, -L * 0.12);
+    } else if (v.def.id !== 'goliath' && v.def.id !== 'tank') {
+      const roofY = v.def.id === 'van' ? 2.2 : v.def.id === 'sprinter' ? 2.3 : v.def.id === 'boxtruck' ? 2.75 : 1.5;
+      for (const sgn of [1, -1]) box(g, 0.06, 0.06, L * 0.44, dark, sgn * W * 0.3, roofY, -L * 0.05);
+      for (let i = 0; i < 3; i++) box(g, W * 0.64, 0.05, 0.09, dark, 0, roofY + 0.02, -L * 0.05 + (i - 1) * L * 0.16);
+    }
+  }
+  if (v.upgrades.includes('bullbar')) {
+    // a heavier welded push bar than any factory guard
+    box(g, W * 0.72, 0.12, 0.09, steel, 0, 0.98, L / 2 + 0.16);
+    box(g, W * 0.72, 0.12, 0.09, steel, 0, 0.5, L / 2 + 0.2);
+    for (const sgn of [1, -1]) box(g, 0.1, 0.66, 0.09, steel, sgn * W * 0.3, 0.74, L / 2 + 0.18);
+    box(g, W * 0.5, 0.3, 0.06, steel, 0, 0.74, L / 2 + 0.2); // center plate
+  }
+  v.group.add(g);
+  v.upgradeGroup = g;
+
+  // weapons live on the turret so they aim with it
+  if (v.turret) {
+    const w = new THREE.Group();
+    w.name = 'weaponMount';
+    if (v.upgrades.includes('mg_mount')) {
+      box(w, 0.22, 0.22, 0.7, dark, 0, 0.18, 0.3); // receiver
+      const b = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.9, 8), mat(0x1c1f24, 0.5, 0.5));
+      b.rotation.x = Math.PI / 2;
+      b.position.set(0, 0.24, 1.0);
+      w.add(b);
+      box(w, 0.5, 0.34, 0.05, steel, 0, 0.16, 0.62); // gun shield
+      box(w, 0.16, 0.2, 0.3, mat(0x5c5648, 0.8, 0.1), 0.24, 0.1, 0.15); // ammo can
+    }
+    if (v.upgrades.includes('cannon_40')) {
+      box(w, 0.9, 0.5, 1.3, mat(v.def.color, 0.7, 0.3), 0, 0.22, 0.1); // turret bustle
+      const b = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.09, 2.0, 10), mat(0x2c2f29, 0.55, 0.4));
+      b.rotation.x = Math.PI / 2;
+      b.position.set(0, 0.3, 1.5);
+      b.castShadow = true;
+      w.add(b);
+      const brake = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.3, 10), mat(0x22241f, 0.7, 0.3));
+      brake.rotation.x = Math.PI / 2;
+      brake.position.set(0, 0.3, 2.45);
+      w.add(brake);
+    }
+    if (v.upgrades.includes('tank_coax')) {
+      const b = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.6, 8), mat(0x1c1f24, 0.5, 0.5));
+      b.rotation.x = Math.PI / 2;
+      b.position.set(0.42, 0.34, 1.6);
+      w.add(b);
+      box(w, 0.18, 0.16, 0.4, dark, 0.42, 0.3, 0.6); // coax receiver
+    }
+    if (w.children.length) v.turret.add(w);
+  }
+  if (v.upgrades.includes('tank_reactive')) {
+    const g2 = new THREE.Group();
+    const era = mat(0x596048, 0.85, 0.15);
+    for (const sgn of [1, -1]) {
+      for (let i = 0; i < 4; i++) box(g2, 0.1, 0.34, 0.8, era, sgn * (W * 0.37 + 0.03), 1.1, -L * 0.3 + i * L * 0.19);
+    }
+    const plow = box(g2, W * 0.78, 0.55, 0.1, mat(0x3d434b, 0.6, 0.5), 0, 0.55, L / 2 + 0.22);
+    plow.rotation.x = 0.35; // ram plow
+    v.group.add(g2);
+    if (v.upgradeGroup) v.upgradeGroup.add(g2);
+  }
+}
+
+/** Rebuild the physical crate meshes riding in a bed / cargo bay. */
+export function refreshCargoVisuals(v: Vehicle): void {
+  if (v.cargoGroup) {
+    v.group.remove(v.cargoGroup);
+    v.cargoGroup = undefined;
+  }
+  const n = Math.min(v.cargoCrates, 6);
+  if (n <= 0) return;
+  const id = v.def.id;
+  // only open/visible cargo areas get meshes; sealed vehicles carry inside
+  if (id !== 'pickup' && id !== 'f250' && id !== 'sprinter' && id !== 'bronco') return;
+  const g = new THREE.Group();
+  const wood = mat(0x7a5c38, 0.9, 0);
+  const frame = mat(0x4c3a22, 0.95, 0);
+  const L = v.def.length;
+  const floorY = id === 'sprinter' ? 0.6 : id === 'bronco' ? 1.0 : 0.9;
+  const z0 = id === 'sprinter' ? -L * 0.32 : -L * 0.3;
+  for (let i = 0; i < n; i++) {
+    const cx = (i % 2 === 0 ? -0.42 : 0.42) * (v.def.width / 2);
+    const cz = z0 - Math.floor(i / 2) * 0.72;
+    const crate = box(g, 0.64, 0.5, 0.64, wood, cx, floorY + 0.25, cz);
+    for (const fy of [0.22, -0.22]) {
+      const band = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.08, 0.68), frame);
+      band.position.set(0, fy, 0);
+      crate.add(band);
+    }
+  }
+  v.group.add(g);
+  v.cargoGroup = g;
 }

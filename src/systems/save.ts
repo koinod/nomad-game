@@ -3,7 +3,7 @@ import type { DifficultyId, SaveMeta, SaveSnapshot } from '../store/types';
 
 const DB_NAME = 'nomad';
 const STORE = 'saves';
-const CURRENT_VERSION = 2;
+const CURRENT_VERSION = 3;
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
@@ -70,6 +70,20 @@ export function migrate(record: RawSaveRecord): SaveSnapshot {
     if (s.base === undefined) s.base = null;
     if (s.vehicles === undefined) s.vehicles = [];
     s.version = 2;
+  }
+
+  if (s.version === 2) {
+    // v2 -> v3: trailers were added, and vehicles grew storage / upgrades /
+    // flat-tire state. Old runs keep their vehicles; trailers spawn fresh.
+    if (s.trailers === undefined) s.trailers = [];
+    if (Array.isArray(s.vehicles)) {
+      for (const v of s.vehicles as Record<string, unknown>[]) {
+        if (v.storage === undefined) v.storage = [];
+        if (v.upgrades === undefined) v.upgrades = [];
+        if (v.tiresFlat === undefined) v.tiresFlat = 0;
+      }
+    }
+    s.version = 3;
   }
 
   if (s.version !== CURRENT_VERSION) {
