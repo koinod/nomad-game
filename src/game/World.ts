@@ -4,7 +4,7 @@
 
 import * as THREE from 'three';
 import { makeFbm, makeNoise2D, mulberry32, clamp, lerp, smoothstep } from './rng';
-import { buildHouses, type HouseResult } from './Houses';
+import { buildHouses, houseFootprints, type HouseResult } from './Houses';
 import type { BiomeId } from './Game';
 import type { StationId } from '../data/items';
 import type { Collider } from './Colliders';
@@ -45,6 +45,22 @@ function duneBand(x: number, z: number): number {
   return smoothstep(95, 150, az) * smoothstep(245, 195, az);
 }
 
+/** Terrain pads under houses: set by World after POIs resolve, before the
+ *  terrain mesh is built — heightAt blends raw terrain to the pad height so
+ *  floors never overlay terrain and walls never float. */
+interface TerrainPad {
+  cx: number;
+  cz: number;
+  hw: number;
+  hd: number;
+  y: number;
+}
+let terrainPads: TerrainPad[] = [];
+
+export function setTerrainPads(pads: TerrainPad[]): void {
+  terrainPads = pads;
+}
+
 /** Deterministic island height. Requires initTerrainField(seed) first. */
 export function heightAt(x: number, z: number): number {
   const az = Math.abs(z);
@@ -65,6 +81,14 @@ export function heightAt(x: number, z: number): number {
   // fall to water past the shoreline and past the island ends
   const water = smoothstep(318, 288, az) * smoothstep(1, 0.35, 1 - xFall);
   h = lerp(-1.6, h, clamp(water, 0, 1));
+  // house pads: full flatten inside, smooth blend ring outside
+  for (const p of terrainPads) {
+    const m = Math.max(Math.abs(x - p.cx) - p.hw, Math.abs(z - p.cz) - p.hd);
+    if (m < 2.2) {
+      const t = clamp(m / 2.2, 0, 1);
+      h = lerp(p.y, h, smoothstep(0, 1, t));
+    }
+  }
   return h;
 }
 
@@ -165,11 +189,12 @@ export class World {
   }
 
   build(): void {
+    this.resolvePois();
+    this.setupHousePads();
     this.buildTerrain();
     this.buildWater();
     this.buildLights();
     this.buildStars();
-    this.resolvePois();
     this.buildScatter();
     // enterable houses with loot, collision, and floor rects
     this.houses = buildHouses(this.scene, this.seed, this.poiPositions, (x, z) => heightAt(x, z));
@@ -293,6 +318,21 @@ export class World {
     this.stars = new THREE.Points(geo, this.starMat);
     this.stars.name = 'stars';
     this.scene.add(this.stars);
+  }
+
+  /** Flatten a terrain pad under each house footprint (corners measured on
+   *  raw terrain before any pad exists). */
+  private setupHousePads(): void {
+    const pads = houseFootprints(this.poiPositions).map((f) => {
+      const corners = [
+        heightAt(f.cx - f.hw, f.cz - f.hd),
+        heightAt(f.cx + f.hw, f.cz - f.hd),
+        heightAt(f.cx - f.hw, f.cz + f.hd),
+        heightAt(f.cx + f.hw, f.cz + f.hd),
+      ];
+      return { ...f, y: Math.min(...corners) - 0.08 };
+    });
+    setTerrainPads(pads);
   }
 
   private resolvePois(): void {

@@ -279,10 +279,11 @@ function buildOne(
     const thresh = box(doorW + 0.16, 0.07, t + 0.34, 0x5a5348);
     thresh.position.set(doorAt, 0.035, hd);
     group.add(thresh);
-    // the leaf, swung open against the inside wall
+    // the leaf, swung open against the inside wall (flat = along +X; a touch
+    // ajar so it reads as a real door, not a wall panel)
     const hinge = new THREE.Group();
     hinge.position.set(gapLo + 0.05, 0.07, hd - t / 2 - 0.03);
-    hinge.rotation.y = -1.95;
+    hinge.rotation.y = 0.22;
     const slabW = doorW - 0.06;
     const slabH = DOOR_H - 0.04;
     const leaf = box(slabW, slabH, 0.05, DOOR_COLORS[Math.floor(rng() * DOOR_COLORS.length)]);
@@ -433,6 +434,33 @@ function buildOne(
   group.position.set(cx, base, cz);
   group.rotation.y = (p.rotQ * Math.PI) / 2;
   return { group, colliders, floors, containers, roofs };
+}
+
+/** Building footprints (axis-aligned; quarter-turn rotations swap w/d).
+ *  World uses these to flatten a terrain pad under every house — no terrain
+ *  poking through floors, no floating corners. */
+export interface HouseFootprint {
+  cx: number;
+  cz: number;
+  hw: number;
+  hd: number;
+}
+
+export function houseFootprints(pois: Record<string, [number, number]>): HouseFootprint[] {
+  const out: HouseFootprint[] = [];
+  for (const p of PLACEMENTS) {
+    const poi = pois[p.poi];
+    if (!poi) continue;
+    const spec = VARIANTS[p.variant];
+    const swap = p.rotQ % 2 === 1;
+    out.push({
+      cx: poi[0] + p.dx,
+      cz: poi[1] + p.dz,
+      hw: (swap ? spec.d : spec.w) / 2,
+      hd: (swap ? spec.w : spec.d) / 2,
+    });
+  }
+  return out;
 }
 
 export function buildHouses(
