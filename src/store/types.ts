@@ -4,7 +4,18 @@ import type { SurvivorDef } from '../data/survivors';
 
 export type DifficultyId = 'story' | 'survivor' | 'hardcore';
 export type Screen = 'title' | 'difficulty' | 'prologue' | 'game' | 'ending';
-export type PhoneTab = 'loadout' | 'world' | 'command' | 'skills';
+export type PhoneTab =
+  | 'home' | 'pack' | 'character' | 'craft' | 'world'
+  | 'base' | 'team' | 'vehicles' | 'log';
+
+/** One fleet row for the phone's Vehicles app (published by the engine). */
+export interface FleetEntry {
+  defId: string;
+  name: string;
+  fuelPct: number;
+  condPct: number;
+  dist: number;
+}
 
 export interface DifficultyDef {
   id: DifficultyId;

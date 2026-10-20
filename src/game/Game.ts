@@ -59,6 +59,7 @@ export class Game {
   driving: Vehicle | null = null;
   private wasFirstPerson = false;
   private cleanMeters = 0;
+  private fleetT = 0;
   private houseColliders: Collider[] = [];
   private houseFloors: FloorRect[] = [];
   private houseRoofs: { bounds: Collider; group: THREE.Group }[] = [];
@@ -491,7 +492,7 @@ export class Game {
       } else if (st.phoneOpen) {
         st.closePhone();
       } else if (st.phoneUnlocked && st.battery > 0) {
-        st.openPhone('loadout');
+        st.openPhone('pack');
         if (useGameStore.getState().phoneOpen && document.pointerLockElement) {
           document.exitPointerLock();
         }
@@ -576,6 +577,21 @@ export class Game {
       }
     }
     s.setNearStation(foundStation);
+
+    // fleet telemetry for the phone's Vehicles app (~1 Hz)
+    this.fleetT += dt;
+    if (this.fleetT > 1 && this.vehicles) {
+      this.fleetT = 0;
+      s.setFleet(
+        this.vehicles.vehicles.map((v) => ({
+          defId: v.def.id,
+          name: v.def.name,
+          fuelPct: Math.round((v.fuel / v.def.fuelMax) * 100),
+          condPct: Math.round(v.condition * 100),
+          dist: Math.round(Math.hypot(v.group.position.x - player.pos.x, v.group.position.z - player.pos.z)),
+        })),
+      );
+    }
 
     // encumbrance gates sprint + slows movement
     const tier = encumbranceTier(

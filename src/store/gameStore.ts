@@ -7,7 +7,7 @@ import { TRAITS as TRAIT_DEFS } from '../data/survivors';
 import { QUESTS } from '../data/quests';
 import { DIFFICULTIES } from './types';
 import type {
-  DifficultyId, Equipped, InvItem, PhoneTab, QuestProgress, QuestStepType,
+  DifficultyId, Equipped, FleetEntry, InvItem, PhoneTab, QuestProgress, QuestStepType,
   SaveMeta, SaveSnapshot, Screen, ToastMsg,
 } from './types';
 import {
@@ -131,7 +131,9 @@ interface GameState {
   syncPlayer: (pos: [number, number, number], hp: number, stamina: number) => void;
   damagePlayer: (amount: number, cause: string) => void;
   vehicle: { name: string; speedKmh: number; fuelPct: number; condPct: number } | null;
+  fleet: FleetEntry[];
   setVehicle: (v: { name: string; speedKmh: number; fuelPct: number; condPct: number } | null) => void;
+  setFleet: (f: FleetEntry[]) => void;
   healPlayer: (amount: number) => void;
   advanceTime: (minutes: number) => void;
 
@@ -230,7 +232,7 @@ export const useGameStore = create<GameState>()((set, get) => {
     rep: { lighthouse: 0, pier: 0 },
 
     phoneOpen: false,
-    phoneTab: 'loadout',
+    phoneTab: 'home',
     phoneUnlocked: false,
     battery: 100,
 
@@ -279,7 +281,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         doneQuests: [],
         flags: {},
         rep: { lighthouse: 0, pier: 0 },
-        phoneOpen: false, phoneTab: 'loadout', phoneUnlocked: false, battery: 100,
+        phoneOpen: false, phoneTab: 'home', phoneUnlocked: false, battery: 100,
         backpackOpen: false, sleepOpen: false, restedMinutesLeft: 0, lootOpenId: null, lootStash: {},
         dialogue: { source: 'prologue', nodeId: 'start' },
         interactPrompt: null,
@@ -306,6 +308,8 @@ export const useGameStore = create<GameState>()((set, get) => {
 
     vehicle: null,
     setVehicle: (v) => set({ vehicle: v }),
+    fleet: [],
+    setFleet: (f) => set({ fleet: f }),
 
     damagePlayer: (amount, cause) => {
       const s = get();
@@ -1013,7 +1017,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         doneQuests: snap.doneQuests,
         flags: snap.flags,
         rep: snap.rep,
-        phoneOpen: false, phoneTab: 'loadout', phoneUnlocked: snap.phoneUnlocked, battery: snap.battery,
+        phoneOpen: false, phoneTab: 'home', phoneUnlocked: snap.phoneUnlocked, battery: snap.battery,
         dialogue: null, interactPrompt: null,
         dead: false, deathCause: null, endingChoice: null, cutsceneLine: 0,
         daysElapsed: snap.daysElapsed,

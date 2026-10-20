@@ -19,6 +19,33 @@ open-ended reasons to stay busy are pinned for later (marked, not built).
 D.C. at 1/10 scale) → cure → hardmode pivot (government + new factions + new
 tech tree) → Stage 2 = New Dawn-like evolved overworld after an ending.
 
+## CANON: the phone deck + mobile bases (2026-10-20, Ian)
+
+**The sat phone is the command deck.** It comes up mid-screen as a physical
+device (rugged sat/tac phone), app-based like a real phone — not a side panel:
+- **Pack** — Tarkov-style inventory: a visual grid where items take space, so
+  the player can SEE capacity (grid data model: item footprints — Phase P2).
+- **Character** — health/body management fused with the skill tree + perks.
+- **Craft** — the crafting TREE, and the same place you modify weapons
+  (attachments) and clothing/armor.
+- **Base** — base management. **Team** — survivor management (gear, jobs).
+- **Vehicles** — vehicle management; live when you're in one (fuel, condition,
+  and storage once trunks/trailers land).
+
+**Vehicles become mobile bases** — the long-game vehicle vision:
+sleep in vehicles; walk in the backs of vans/box trucks; load cargo (crates,
+supply drops, resources) into vehicles and trailers; build inside trailers,
+close them, sleep in them; pull trailers (hitch matrix); load cars onto the
+carrier; haul everything back to base; then **equip survivors with gear +
+vehicles and dispatch them** on tasks against the world and other AI
+(expedition system).
+
+**Build order:** P1 phone deck shell (apps, device frame; Pack stays list
+until P2) → P2 Tarkov grid inventory (item footprints, grid UI) → P3 vehicle
+storage + sleep-in-vehicle + walk-in backs (van/box truck) → P4 trailers
+(hitch, cargo, build/sleep inside) + car carrier loading → P5 survivor
+dispatch (equipped expeditions with outcomes).
+
 The waves after houses v1, in build order. Each wave ships as a playable,
 beta-testable build before the next starts.
 

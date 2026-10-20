@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useGameStore } from '../store/gameStore';
-import { ITEMS } from '../data/items';
+import { ITEMS, FIELD_RECIPES, STATION_RECIPES, STATION_LABEL } from '../data/items';
+import { MODS } from '../data/mods';
 import { QUESTS } from '../data/quests';
 import { FACTIONS, repTier } from '../data/factions';
 import { SKILLS, TREES, PERKS, xpToNext } from '../data/skills';
@@ -358,7 +359,7 @@ function BaseSection() {
   );
 }
 
-function CommandTab() {
+function LogTab() {
   const quests = useGameStore((s) => s.quests);
   const doneQuests = useGameStore((s) => s.doneQuests);
   const rep = useGameStore((s) => s.rep);
@@ -372,7 +373,6 @@ function CommandTab() {
 
   return (
     <div className="nomad-scroll flex h-full flex-col gap-4 overflow-y-auto">
-      <BaseSection />
       {/* quests */}
       <section>
         <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Quests</h3>
@@ -476,11 +476,9 @@ function SkillsTab() {
   const perkPoints = useGameStore((s) => s.perkPoints);
   const perks = useGameStore((s) => s.perks);
   const buyPerk = useGameStore((s) => s.buyPerk);
-  const survivors = useGameStore((s) => s.survivors);
-  const assignJob = useGameStore((s) => s.assignJob);
 
   return (
-    <div className="nomad-scroll flex h-full flex-col gap-4 overflow-y-auto">
+    <div className="flex flex-col gap-4">
       <section>
         <h3 className="mb-2 flex items-center justify-between text-xs font-semibold text-[#8a94a3]">
           Skills <span className="text-[#e8b34b]">{perkPoints} perk point{perkPoints === 1 ? '' : 's'}</span>
@@ -538,6 +536,18 @@ function SkillsTab() {
         </section>
       ))}
 
+
+    </div>
+  );
+}
+
+
+/* ---------------- CREW (Team app) ---------------- */
+
+function CrewSection() {
+  const survivors = useGameStore((s) => s.survivors);
+  const assignJob = useGameStore((s) => s.assignJob);
+  return (
       <section>
         <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Crew ({survivors.length})</h3>
         {survivors.length === 0 && (
@@ -575,75 +585,455 @@ function SkillsTab() {
           </div>
         ))}
       </section>
+  );
+}
+
+/* ---------------- CHARACTER app: vitals + skills/perks ---------------- */
+
+function CharacterTab() {
+  const hp = useGameStore((s) => s.hp);
+  const maxHp = useGameStore((s) => s.maxHp);
+  const stamina = useGameStore((s) => s.stamina);
+  const maxStamina = useGameStore((s) => s.maxStamina);
+  const daysElapsed = useGameStore((s) => s.daysElapsed);
+  const inventory = useGameStore((s) => s.inventory);
+  const equipped = useGameStore((s) => s.equipped);
+  const difficulty = useGameStore((s) => s.difficulty);
+  const perks = useGameStore((s) => s.perks);
+  const weight = totalWeightKg(inventory);
+  const limit = carryLimitKg(equipped, inventory, difficulty, perks.includes('sc_packmule') ? 8 : 0);
+  const tier = encumbranceTier(weight, limit);
+  const armorPct = Math.min(
+    50,
+    Math.round(100 * inventory.reduce((a, i) => a + (ITEMS[i.itemId]?.armor ?? 0) * i.qty, 0)) +
+      (perks.includes('br_thickskin') ? 5 : 0),
+  );
+  const bar = (v: number, max: number, color: string) => (
+    <div className="h-2 flex-1 overflow-hidden rounded bg-[#232b36]">
+      <div className={`h-full ${color}`} style={{ width: `${Math.max(0, Math.min(100, (v / max) * 100))}%` }} />
+    </div>
+  );
+  return (
+    <div className="nomad-scroll flex h-full flex-col gap-4 overflow-y-auto">
+      <section className="rounded border border-[#232b36] bg-[#0b0e12] p-3">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-sm font-medium text-[#d7dde5]">Field status</span>
+          <span className="text-[11px] text-[#8a94a3]">Day {daysElapsed + 1} · {DIFFICULTIES[difficulty].label}</span>
+        </div>
+        <div className="flex flex-col gap-1.5 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="w-16 text-[#8a94a3]">Health</span>
+            {bar(hp, maxHp, 'bg-[#d9534f]')}
+            <span className="w-14 text-right font-mono text-[#d7dde5]">{Math.ceil(hp)}/{maxHp}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-16 text-[#8a94a3]">Stamina</span>
+            {bar(stamina, maxStamina, 'bg-[#5aa469]')}
+            <span className="w-14 text-right font-mono text-[#d7dde5]">{Math.ceil(stamina)}/{maxStamina}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-16 text-[#8a94a3]">Armor</span>
+            <span className="text-[#d7dde5]">{armorPct}% damage reduction (worn + carried rated gear)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-16 text-[#8a94a3]">Load</span>
+            <span className={tier === 'ok' ? 'text-[#d7dde5]' : 'text-[#d9534f]'}>
+              {weight.toFixed(1)} / {limit.toFixed(0)} kg{tier !== 'ok' ? ` — ${tier}` : ''}
+            </span>
+          </div>
+        </div>
+        <p className="mt-2 text-[11px] text-[#8a94a3]">
+          Heal from the Pack (bandages, medkits). Rest at campfires or in a claimed base to recover.
+        </p>
+      </section>
+      <SkillsTab />
     </div>
   );
 }
 
-/* ---------------- Phone shell ---------------- */
+/* ---------------- TEAM app ---------------- */
 
-const TABS: { id: PhoneTab; label: string }[] = [
-  { id: 'loadout', label: 'Loadout' },
-  { id: 'world', label: 'World' },
-  { id: 'command', label: 'Command' },
-  { id: 'skills', label: 'Skills' },
+function TeamTab() {
+  const base = useGameStore((s) => s.base);
+  return (
+    <div className="nomad-scroll flex h-full flex-col gap-4 overflow-y-auto">
+      <CrewSection />
+      <section className="rounded border border-[#232b36] bg-[#0b0e12] p-3">
+        <h3 className="mb-1 text-xs font-semibold text-[#8a94a3]">Dispatch</h3>
+        <p className="text-sm text-[#8a94a3]">
+          {base
+            ? 'Crew run their jobs at base each day. Sending equipped survivors out on vehicle expeditions is the next system on the board (P5) — gear, a vehicle, a task, and whatever they bring back. Or don\u2019t.'
+            : 'Claim a home base (Shore Camp, Jonah\u2019s Camp, or the lighthouse) to give the crew a home to work from. Expedition dispatch — survivors out in vehicles with real gear — lands with the trailer & cargo pass.'}
+        </p>
+      </section>
+    </div>
+  );
+}
+
+/* ---------------- CRAFT app: the tree + weapon/clothing modification ---------------- */
+
+function CraftTab() {
+  const inventory = useGameStore((s) => s.inventory);
+  const equipped = useGameStore((s) => s.equipped);
+  const nearStation = useGameStore((s) => s.nearStation);
+  const craftRecipe = useGameStore((s) => s.craftRecipe);
+  const attachMod = useGameStore((s) => s.attachMod);
+  const detachMod = useGameStore((s) => s.detachMod);
+  const countItem = (id: string) => inventory.reduce((a, i) => a + (i.itemId === id ? i.qty : 0), 0);
+  const weapon = inventory.find((i) => i.uid === equipped.ranged);
+  const weaponDef = weapon ? ITEMS[weapon.itemId] : undefined;
+  const atBench = nearStation === 'workbench';
+  const armorPieces = inventory.filter((i) => (ITEMS[i.itemId]?.armor ?? 0) > 0);
+
+  const recipeRow = (r: (typeof FIELD_RECIPES)[string], lockedNote?: string) => {
+    const can = !lockedNote && r.components.every((c) => countItem(c.itemId) >= c.qty);
+    return (
+      <div key={r.id} className={`flex items-center justify-between gap-2 text-sm ${lockedNote ? 'opacity-50' : ''}`}>
+        <div className="min-w-0">
+          <div className="text-[#d7dde5]">{r.name}</div>
+          <div className="truncate text-[11px] text-[#8a94a3]">
+            {lockedNote ??
+              r.components
+                .map((c) => `${countItem(c.itemId)}/${c.qty} ${ITEMS[c.itemId]?.name ?? c.itemId}`)
+                .join(' · ')}
+          </div>
+        </div>
+        <button
+          onClick={() => { sfx.play('ui'); craftRecipe(r.id); }}
+          disabled={!can}
+          className="shrink-0 rounded border border-[#232b36] px-2.5 py-1 text-xs text-[#d7dde5] transition-colors hover:border-[#e8b34b] disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Craft
+        </button>
+      </div>
+    );
+  };
+
+  return (
+    <div className="nomad-scroll flex h-full flex-col gap-4 overflow-y-auto">
+      <section>
+        <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Field craft — anywhere</h3>
+        <div className="flex flex-col gap-1.5">
+          {Object.values(FIELD_RECIPES).filter((r) => !r.station).map((r) => recipeRow(r))}
+        </div>
+      </section>
+      {(['workbench', 'chemistry', 'industrial'] as const).map((st) => (
+        <section key={st}>
+          <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">
+            {STATION_LABEL[st]}
+            {nearStation === st && <span className="ml-1 text-[#e8b34b]">— in range</span>}
+          </h3>
+          <div className="flex flex-col gap-1.5">
+            {Object.values(STATION_RECIPES)
+              .filter((r) => r.station === st)
+              .map((r) =>
+                recipeRow(
+                  r,
+                  nearStation === st
+                    ? undefined
+                    : `Needs a ${STATION_LABEL[st]} — ${st === 'industrial' ? 'at the marina Machine Shop' : st === 'chemistry' ? 'one at the relay station' : 'at Jonah\u2019s camp or in town'}`,
+                ),
+              )}
+          </div>
+        </section>
+      ))}
+
+      <section>
+        <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Modify — weapon</h3>
+        {!weapon || !weaponDef ? (
+          <p className="text-sm text-[#8a94a3]">No ranged weapon equipped. Equip one from the Pack.</p>
+        ) : !weaponDef.modSlots || weaponDef.modSlots.length === 0 ? (
+          <p className="text-sm text-[#8a94a3]">{weaponDef.name} takes no attachments.</p>
+        ) : (
+          <div className="flex flex-col gap-1.5">
+            <div className="text-sm text-[#d7dde5]">
+              {weaponDef.name}
+              {!atBench && <span className="ml-2 text-[11px] text-[#8a94a3]">fitting needs a Weapons Bench</span>}
+            </div>
+            {weaponDef.modSlots.map((slot) => {
+              const attached = (weapon.mods ?? []).find((id) => MODS[id]?.slot === slot);
+              return (
+                <div key={slot} className="flex items-center gap-2 text-sm">
+                  <span className="w-24 text-[11px] uppercase tracking-wide text-[#8a94a3]">{slot}</span>
+                  {attached ? (
+                    <>
+                      <span className="flex-1 text-[#d7dde5]">{MODS[attached]?.name ?? attached}</span>
+                      {atBench && (
+                        <button
+                          onClick={() => { sfx.play('ui'); detachMod(weapon.uid, attached); }}
+                          className="rounded border border-[#232b36] px-2 py-0.5 text-[11px] text-[#d7dde5] hover:border-[#e8b34b]"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <span className="flex-1 text-[11px] text-[#8a94a3]">empty</span>
+                  )}
+                </div>
+              );
+            })}
+            {atBench &&
+              inventory
+                .filter((i) => i.itemId in MODS)
+                .map((mi) => (
+                  <button
+                    key={mi.uid}
+                    onClick={() => { sfx.play('ui'); attachMod(weapon.uid, mi.uid); }}
+                    className="rounded border border-[#232b36] px-2 py-1 text-left text-xs text-[#e8b34b] hover:border-[#e8b34b]"
+                  >
+                    Fit {MODS[mi.itemId]?.name} ({MODS[mi.itemId]?.gunPartsCost} parts)
+                  </button>
+                ))}
+          </div>
+        )}
+      </section>
+
+      <section>
+        <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Modify — clothing & armor</h3>
+        {armorPieces.length === 0 ? (
+          <p className="text-sm text-[#8a94a3]">No rated armor carried. Vests and helmets cut the damage you take, up to 50%.</p>
+        ) : (
+          <div className="flex flex-col gap-1">
+            {armorPieces.map((i) => (
+              <div key={i.uid} className="flex items-center justify-between text-sm">
+                <span className="text-[#d7dde5]">{ITEMS[i.itemId]?.name} ×{i.qty}</span>
+                <span className="text-xs text-[#8a94a3]">{Math.round((ITEMS[i.itemId]?.armor ?? 0) * 100)}% each</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+/* ---------------- VEHICLES app ---------------- */
+
+function VehiclesTab() {
+  const vehicle = useGameStore((s) => s.vehicle);
+  const fleet = useGameStore((s) => s.fleet);
+  const meter = (pct: number, color: string) => (
+    <div className="h-1.5 flex-1 overflow-hidden rounded bg-[#232b36]">
+      <div className={`h-full ${color}`} style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} />
+    </div>
+  );
+  return (
+    <div className="nomad-scroll flex h-full flex-col gap-4 overflow-y-auto">
+      <section className="rounded border border-[#232b36] bg-[#0b0e12] p-3">
+        <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Current vehicle</h3>
+        {vehicle ? (
+          <div className="flex flex-col gap-1.5 text-sm">
+            <div className="flex items-baseline justify-between">
+              <span className="font-medium text-[#d7dde5]">{vehicle.name}</span>
+              <span className="font-mono text-xs text-[#8a94a3]">{vehicle.speedKmh} km/h</span>
+            </div>
+            <div className="flex items-center gap-2 text-xs">
+              <span className="w-16 text-[#8a94a3]">Fuel</span>
+              {meter(vehicle.fuelPct, 'bg-[#e8b34b]')}
+              <span className="w-10 text-right font-mono text-[#d7dde5]">{vehicle.fuelPct}%</span>
+            </div>
+            <div className="flex items-center gap-2 text-xs">
+              <span className="w-16 text-[#8a94a3]">Condition</span>
+              {meter(vehicle.condPct, vehicle.condPct > 40 ? 'bg-[#5aa469]' : 'bg-[#d9534f]')}
+              <span className="w-10 text-right font-mono text-[#d7dde5]">{vehicle.condPct}%</span>
+            </div>
+            <p className="mt-1 text-[11px] text-[#8a94a3]">
+              Storage: trunks and cargo beds land with the cargo pass (P3) — fuel cans ride in the Pack until then. Sleep-in-vehicle comes with the same pass.
+            </p>
+          </div>
+        ) : (
+          <p className="text-sm text-[#8a94a3]">On foot. Your fleet is listed below — walk up to one and drive.</p>
+        )}
+      </section>
+      <section>
+        <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Fleet ({fleet.length})</h3>
+        <div className="flex flex-col gap-1.5">
+          {fleet.map((f) => (
+            <div key={f.defId} className="flex items-center justify-between rounded border border-[#232b36] bg-[#0b0e12] px-2.5 py-2 text-sm">
+              <span className="text-[#d7dde5]">{f.name}</span>
+              <span className="font-mono text-[11px] text-[#8a94a3]">
+                {f.dist}m · fuel {f.fuelPct}% · cond {f.condPct}%
+              </span>
+            </div>
+          ))}
+          {fleet.length === 0 && <p className="text-sm text-[#8a94a3]">No vehicles found yet.</p>}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+/* ---------------- HOME: the app grid ---------------- */
+
+const APPS: { id: PhoneTab; glyph: string; label: string }[] = [
+  { id: 'pack', glyph: '🎒', label: 'Pack' },
+  { id: 'character', glyph: '🧍', label: 'Character' },
+  { id: 'craft', glyph: '🛠️', label: 'Craft' },
+  { id: 'world', glyph: '🗺️', label: 'Map' },
+  { id: 'base', glyph: '🏠', label: 'Base' },
+  { id: 'team', glyph: '👥', label: 'Team' },
+  { id: 'vehicles', glyph: '🚙', label: 'Vehicles' },
+  { id: 'log', glyph: '📋', label: 'Log' },
 ];
+
+function HomeScreen() {
+  const setPhoneTab = useGameStore((s) => s.setPhoneTab);
+  const daysElapsed = useGameStore((s) => s.daysElapsed);
+  const vehicle = useGameStore((s) => s.vehicle);
+  const nearStation = useGameStore((s) => s.nearStation);
+  const survivors = useGameStore((s) => s.survivors);
+  const base = useGameStore((s) => s.base);
+  const badge = (id: PhoneTab): string | null => {
+    if (id === 'vehicles' && vehicle) return vehicle.name;
+    if (id === 'craft' && nearStation) return STATION_LABEL[nearStation];
+    if (id === 'team' && survivors.length > 0) return `${survivors.length} crew`;
+    if (id === 'base' && base) return 'claimed';
+    return null;
+  };
+  return (
+    <div className="flex h-full flex-col p-4">
+      <div className="mb-1 text-lg font-semibold text-[#d7dde5]">Day {daysElapsed + 1}</div>
+      <div className="mb-4 text-xs text-[#8a94a3]">
+        {vehicle ? `In the ${vehicle.name} · fuel ${vehicle.fuelPct}%` : 'On foot · Outer Banks relay in range'}
+      </div>
+      <div className="grid grid-cols-4 gap-3">
+        {APPS.map((a) => (
+          <button
+            key={a.id}
+            onClick={() => { sfx.play('ui'); setPhoneTab(a.id); }}
+            className="flex flex-col items-center gap-1"
+          >
+            <span className="flex h-14 w-14 items-center justify-center rounded-2xl border border-[#2b3442] bg-gradient-to-b from-[#1b222c] to-[#12161c] text-[26px] shadow-inner transition-colors hover:border-[#e8b34b]">
+              {a.glyph}
+            </span>
+            <span className="text-[10px] text-[#d7dde5]">{a.label}</span>
+            {badge(a.id) && (
+              <span className="max-w-[72px] truncate text-[9px] text-[#e8b34b]">{badge(a.id)}</span>
+            )}
+          </button>
+        ))}
+      </div>
+      <div className="mt-auto text-center text-[10px] text-[#5d6875]">
+        Sat link encrypted · apps run offline-first
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Phone shell: a device, mid-screen ---------------- */
+
+const APP_TITLES: Record<PhoneTab, string> = {
+  home: 'SAT PHONE',
+  pack: 'Pack',
+  character: 'Character',
+  craft: 'Craft & Modify',
+  world: 'Map',
+  base: 'Base',
+  team: 'Team',
+  vehicles: 'Vehicles',
+  log: 'Log',
+};
 
 export default function Phone() {
   const phoneOpen = useGameStore((s) => s.phoneOpen);
   const phoneTab = useGameStore((s) => s.phoneTab);
   const setPhoneTab = useGameStore((s) => s.setPhoneTab);
   const closePhone = useGameStore((s) => s.closePhone);
+  const timeMinutes = useGameStore((s) => s.timeMinutes);
+  const battery = useGameStore((s) => s.battery);
 
   if (!phoneOpen) return null;
 
+  const hh = Math.floor(timeMinutes / 60) % 24;
+  const mm = Math.floor(timeMinutes % 60);
+  const clock = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+
   return (
-    <div className="absolute inset-0 z-30">
-      {/* scrim: tapping outside closes */}
-      <div className="absolute inset-0 bg-black/50" onClick={() => closePhone()} />
-      <aside className="absolute right-0 top-0 flex h-full w-[380px] max-w-[92vw] flex-col border-l border-[#232b36] bg-[#12161c]">
-        <header className="flex items-center justify-between border-b border-[#232b36] px-4 py-3">
-          <div>
-            <div className="text-sm font-semibold text-[#d7dde5]">SAT PHONE</div>
-            <div className="text-[11px] text-[#8a94a3]">Field terminal</div>
+    <div className="absolute inset-0 z-30 flex items-center justify-center">
+      {/* scrim: tapping outside the device closes it */}
+      <div className="absolute inset-0 bg-black/60" onClick={() => closePhone()} />
+      {/* the device: rugged sat phone, bezel + notch + side buttons */}
+      <div className="relative flex h-[min(780px,94dvh)] w-[400px] max-w-[94vw] flex-col rounded-[2.4rem] border border-[#2c333d] bg-[#08090b] p-2 shadow-[0_30px_80px_rgba(0,0,0,0.85)]">
+        <div className="absolute -right-[3px] top-28 h-16 w-[3px] rounded bg-[#2c333d]" />
+        <div className="absolute -left-[3px] top-24 h-10 w-[3px] rounded bg-[#2c333d]" />
+        <div className="absolute -left-[3px] top-40 h-10 w-[3px] rounded bg-[#2c333d]" />
+        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[1.9rem] bg-[#10141a]">
+          {/* notch */}
+          <div className="pointer-events-none absolute left-1/2 top-1.5 z-10 h-[18px] w-24 -translate-x-1/2 rounded-full bg-black" />
+          {/* status bar */}
+          <div className="flex items-center justify-between px-5 pb-1 pt-2 text-[11px] text-[#aeb8c4]">
+            <span className="font-mono">{clock}</span>
+            <span className="flex items-center gap-2">
+              <span className="tracking-widest text-[#5aa469]">SAT LINK</span>
+              <span className="flex items-end gap-[2px]">
+                <span className="w-[3px] rounded bg-[#5aa469]" style={{ height: 4 }} />
+                <span className="w-[3px] rounded bg-[#5aa469]" style={{ height: 6 }} />
+                <span className="w-[3px] rounded bg-[#5aa469]" style={{ height: 8 }} />
+                <span className="w-[3px] rounded bg-[#39424e]" style={{ height: 10 }} />
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="flex h-[10px] w-[22px] items-center rounded-[3px] border border-[#5d6875] p-[1px]">
+                  <span
+                    className={`h-full rounded-[2px] ${battery > 25 ? 'bg-[#5aa469]' : 'bg-[#d9534f]'}`}
+                    style={{ width: `${Math.max(4, Math.round(battery))}%` }}
+                  />
+                </span>
+                <span className="font-mono">{Math.round(battery)}%</span>
+              </span>
+            </span>
           </div>
-          <button
-            onClick={() => {
-              sfx.play('ui');
-              closePhone();
-            }}
-            aria-label="Close phone"
-            className="rounded border border-[#232b36] px-3 py-1.5 text-sm text-[#d7dde5] transition-colors hover:border-[#e8b34b]"
-          >
-            Close
-          </button>
-        </header>
-        <nav className="flex border-b border-[#232b36]" role="tablist">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              role="tab"
-              aria-selected={phoneTab === t.id}
-              onClick={() => {
-                sfx.play('ui');
-                setPhoneTab(t.id);
-              }}
-              className={`flex-1 px-4 py-2.5 text-sm transition-colors ${
-                phoneTab === t.id
-                  ? 'border-b-2 border-[#e8b34b] text-[#e8b34b]'
-                  : 'text-[#8a94a3] hover:text-[#d7dde5]'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </nav>
-        <div className="min-h-0 flex-1 p-4">
-          {phoneTab === 'loadout' && <LoadoutTab />}
-          {phoneTab === 'world' && <WorldMap />}
-          {phoneTab === 'command' && <CommandTab />}
-          {phoneTab === 'skills' && <SkillsTab />}
+          {/* app header */}
+          {phoneTab !== 'home' && (
+            <header className="flex items-center justify-between border-b border-[#232b36] px-3 py-2">
+              <button
+                onClick={() => { sfx.play('ui'); setPhoneTab('home'); }}
+                className="rounded px-2 py-1 text-sm text-[#8a94a3] transition-colors hover:text-[#e8b34b]"
+              >
+                ‹ Apps
+              </button>
+              <div className="text-sm font-semibold text-[#d7dde5]">{APP_TITLES[phoneTab]}</div>
+              <button
+                onClick={() => { sfx.play('ui'); closePhone(); }}
+                aria-label="Close phone"
+                className="rounded px-2 py-1 text-sm text-[#8a94a3] transition-colors hover:text-[#e8b34b]"
+              >
+                ✕
+              </button>
+            </header>
+          )}
+          {phoneTab === 'home' && (
+            <header className="flex items-center justify-between px-4 pb-1 pt-1">
+              <div className="text-[11px] font-semibold tracking-widest text-[#8a94a3]">SAT PHONE</div>
+              <button
+                onClick={() => { sfx.play('ui'); closePhone(); }}
+                aria-label="Close phone"
+                className="rounded px-2 py-0.5 text-sm text-[#8a94a3] transition-colors hover:text-[#e8b34b]"
+              >
+                ✕
+              </button>
+            </header>
+          )}
+          {/* app body */}
+          <div className="min-h-0 flex-1 p-3">
+            {phoneTab === 'home' && <HomeScreen />}
+            {phoneTab === 'pack' && <LoadoutTab />}
+            {phoneTab === 'character' && <CharacterTab />}
+            {phoneTab === 'craft' && <CraftTab />}
+            {phoneTab === 'world' && <WorldMap />}
+            {phoneTab === 'base' && (
+              <div className="nomad-scroll h-full overflow-y-auto">
+                <BaseSection />
+              </div>
+            )}
+            {phoneTab === 'team' && <TeamTab />}
+            {phoneTab === 'vehicles' && <VehiclesTab />}
+            {phoneTab === 'log' && <LogTab />}
+          </div>
+          {/* home indicator */}
+          <div className="mx-auto mb-1.5 mt-1 h-1 w-24 shrink-0 rounded bg-[#39424e]" />
         </div>
-      </aside>
+      </div>
     </div>
   );
 }
