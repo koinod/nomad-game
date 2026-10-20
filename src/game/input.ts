@@ -14,6 +14,8 @@ export interface InputState {
   leanLeft: boolean; // held: Q
   leanRight: boolean; // held: E (tap still interacts)
   fpToggle: boolean; // edge-triggered: V toggles first/third person
+  zoomIn: boolean; // held: mobile zoom-in button
+  zoomOut: boolean; // held: mobile zoom-out button
   interact: boolean; // edge-triggered
   phone: boolean; // edge-triggered
   backpack: boolean; // edge-triggered
@@ -35,6 +37,8 @@ export const input: InputState = {
   leanLeft: false,
   leanRight: false,
   fpToggle: false,
+  zoomIn: false,
+  zoomOut: false,
   interact: false,
   phone: false,
   backpack: false,

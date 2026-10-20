@@ -15,20 +15,21 @@ export interface DifficultyDef {
   carryBonus: number; // additive fraction on carry limit (0.2 = +20%)
   saveAnywhere: boolean;
   permadeath: boolean;
+  firstPersonOnly: boolean; // hardcore: no third-person crutch
 }
 
 export const DIFFICULTIES: Record<DifficultyId, DifficultyDef> = {
   story: {
     id: 'story', label: 'Story', tagline: 'For the journey. Husks hit softer, supplies are plentiful, save anywhere.',
-    huskDamage: 0.6, playerDamageTaken: 0.6, resourceMult: 1.3, carryBonus: 0.2, saveAnywhere: true, permadeath: false,
+    huskDamage: 0.6, playerDamageTaken: 0.6, resourceMult: 1.3, carryBonus: 0.2, saveAnywhere: true, permadeath: false, firstPersonOnly: false,
   },
   survivor: {
     id: 'survivor', label: 'Survivor', tagline: 'The intended balance. Save at campfires only.',
-    huskDamage: 1.0, playerDamageTaken: 1.0, resourceMult: 1.0, carryBonus: 0, saveAnywhere: false, permadeath: false,
+    huskDamage: 1.0, playerDamageTaken: 1.0, resourceMult: 1.0, carryBonus: 0, saveAnywhere: false, permadeath: false, firstPersonOnly: false,
   },
   hardcore: {
-    id: 'hardcore', label: 'Hardcore', tagline: 'Scarce supplies, brutal husks. Death ends the run.',
-    huskDamage: 1.4, playerDamageTaken: 1.5, resourceMult: 0.7, carryBonus: 0, saveAnywhere: false, permadeath: true,
+    id: 'hardcore', label: 'Hardcore', tagline: 'Scarce supplies, brutal husks. First person only. Death ends the run.',
+    huskDamage: 1.4, playerDamageTaken: 1.5, resourceMult: 0.7, carryBonus: 0, saveAnywhere: false, permadeath: true, firstPersonOnly: true,
   },
 };
 

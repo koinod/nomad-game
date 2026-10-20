@@ -12,17 +12,19 @@ function ControlButton({
   onRelease,
   ariaLabel,
   className,
+  small,
 }: {
   label: string;
   onPress: () => void;
   onRelease?: () => void;
   ariaLabel: string;
   className?: string;
+  small?: boolean;
 }) {
   return (
     <button
       aria-label={ariaLabel}
-      className={`flex h-16 w-16 items-center justify-center rounded-full border border-[#232b36] bg-[#0b0e12]/80 text-sm font-semibold text-[#d7dde5] active:border-[#e8b34b] active:text-[#e8b34b] ${className ?? ''}`}
+      className={`flex ${small ? 'h-11 w-11 text-xs' : 'h-16 w-16 text-sm'} items-center justify-center rounded-full border border-[#232b36] bg-[#0b0e12]/80 font-semibold text-[#d7dde5] active:border-[#e8b34b] active:text-[#e8b34b] ${className ?? ''}`}
       style={{ touchAction: 'none' }}
       onTouchStart={(e) => {
         e.preventDefault();
@@ -226,6 +228,39 @@ export default function TouchControls() {
         </div>
       </div>
 
+      {/* lean + zoom: small hold buttons above the joystick — lean peeks
+          around cover at POIs, zoom pulls the camera in/out */}
+      <div className="absolute bottom-64 left-6 flex gap-2">
+        <ControlButton
+          small
+          label="◀"
+          ariaLabel="Hold to lean left"
+          onPress={() => { input.leanLeft = true; }}
+          onRelease={() => { input.leanLeft = false; }}
+        />
+        <ControlButton
+          small
+          label="▶"
+          ariaLabel="Hold to lean right"
+          onPress={() => { input.leanRight = true; }}
+          onRelease={() => { input.leanRight = false; }}
+        />
+        <ControlButton
+          small
+          label="Z+"
+          ariaLabel="Hold to zoom in"
+          onPress={() => { input.zoomIn = true; }}
+          onRelease={() => { input.zoomIn = false; }}
+        />
+        <ControlButton
+          small
+          label="Z−"
+          ariaLabel="Hold to zoom out"
+          onPress={() => { input.zoomOut = true; }}
+          onRelease={() => { input.zoomOut = false; }}
+        />
+      </div>
+
       {/* combat cluster: right side, PUBG-style big FIRE */}
       <div className="absolute bottom-28 right-6 flex items-end gap-3">
         <div className="flex flex-col gap-3">
@@ -250,7 +285,7 @@ export default function TouchControls() {
             onPress={() => { input.blocking = true; }}
             onRelease={() => { input.blocking = false; }}
           />
-          <ControlButton label="E" ariaLabel="Interact" onPress={() => { input.interact = true; }} />
+          <ControlButton label="USE" ariaLabel="Interact" onPress={() => { input.interact = true; }} />
         </div>
         <div className="flex flex-col items-center gap-3">
           <ControlButton

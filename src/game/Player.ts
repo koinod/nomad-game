@@ -7,6 +7,7 @@ import { buildHandMesh, activeHandItemId } from './weaponMeshes';
 import { getGame } from './instance';
 import type { AnimalManager, AnimalKill } from './Animals';
 import { resolveCollisions, type Collider } from './Colliders';
+import { DIFFICULTIES } from '../store/types';
 import { sfx } from '../systems/audio';
 import type { HuskManager } from './Husks';
 import { clamp, lerp } from './rng';
@@ -27,7 +28,6 @@ export interface PlayerCtx {
 const WALK_SPEED = 5.6;
 const SPRINT_SPEED = 10.4;
 const CROUCH_SPEED = 2.6;
-const CAM_DIST = 6.4;
 const JUMP_VEL = 5.6;
 const GRAVITY = 20;
 const ACCEL_GROUND = 11;
@@ -73,6 +73,11 @@ export class Player {
   firstPerson = false; // V toggles; body hides, camera rides at eye level
   private viewModel!: THREE.Group; // FP arm + weapon, parented to the camera
   private vmAnchor!: THREE.Group; // weapon mount inside the view model
+  private smoothTarget = new THREE.Vector3(); // damped look target (TP)
+  private smoothInit = false; // snap the camera once on teleport/respawn
+  private fpEyeYSmooth = 0; // damped eye height (FP)
+  leanAmt = 0; // current lean (-1 left .. +1 right), drives camera + shot origin
+  zoomDist = 6.4; // third-person orbit distance (mouse wheel / mobile buttons)
 
   constructor(scene: THREE.Scene) {
     this.buildMesh();
@@ -115,8 +120,9 @@ export class Player {
     this.handAnchor = new THREE.Group();
     this.handAnchor.position.set(0, -0.7, 0.08);
     this.armR.add(this.handAnchor);
-    // swing trail: a flat arc segment at chest height that flashes during a swing
-    const trailGeo = new THREE.RingGeometry(1.1, 2.7, 24, 1, -0.85, 1.7);
+    // swing trail: the equipped weapon's real hit zone, drawn at chest height —
+    // inner 0.9m, outer = weapon range, arc = full swing wedge, centered on facing
+    const trailGeo = new THREE.RingGeometry(0.9, 2.7, 24, 1, -Math.PI / 2 - 0.85, 1.7);
     const trailMat = new THREE.MeshBasicMaterial({
       color: 0xffe6b0, transparent: true, opacity: 0,
       side: THREE.DoubleSide, depthWrite: false,
@@ -145,6 +151,21 @@ export class Player {
 
   setPosition(x: number, y: number, z: number): void {
     this.group.position.set(x, y, z);
+    this.vel.set(0, 0, 0);
+    this.smoothInit = false; // camera snaps to the new spot instead of flying there
+    this.smoothCamMinY = 0;
+  }
+
+  private setFirstPerson(v: boolean, camera: THREE.PerspectiveCamera): void {
+    this.firstPerson = v;
+    this.rig.visible = !v;
+    this.viewModel.visible = v;
+    if (this.viewModel.parent === camera) camera.remove(this.viewModel);
+    if (v) {
+      camera.add(this.viewModel);
+      // re-anchor the camera ground clearance when entering FP
+      this.smoothCamMinY = 0;
+    }
   }
 
   get pos(): THREE.Vector3 {
@@ -162,11 +183,14 @@ export class Player {
     this.muzzle.intensity = 26;
   }
 
-  /** Eye position + aim dir for hitscan (camera-driven). */
+  /** Eye position + aim dir for hitscan (camera-driven). Leaning shifts the
+   *  eye toward the peek side so shots clear the cover you're peeking from. */
   aim(camera: THREE.PerspectiveCamera): { eye: THREE.Vector3; dir: THREE.Vector3 } {
     const dir = new THREE.Vector3();
     camera.getWorldDirection(dir);
-    const eye = this.pos.clone().add(new THREE.Vector3(0, 1.6, 0));
+    const eye = this.pos.clone().add(new THREE.Vector3(0, 1.82, 0));
+    const right = new THREE.Vector3(Math.cos(this.camYaw), 0, -Math.sin(this.camYaw));
+    eye.addScaledVector(right, this.leanAmt * 0.75);
     return { eye, dir };
   }
 
@@ -194,20 +218,26 @@ export class Player {
 
   update(dt: number, ctx: PlayerCtx): void {
     this.syncHandWeapon();
+    // camera zoom (mobile held buttons; desktop wheel writes zoomDist directly)
+    if (input.zoomIn) this.zoomDist = clamp(this.zoomDist - 5 * dt, 2.5, 9);
+    if (input.zoomOut) this.zoomDist = clamp(this.zoomDist + 5 * dt, 2.5, 9);
+    const fpLocked = DIFFICULTIES[useGameStore.getState().difficulty].firstPersonOnly;
     if (input.fpToggle) {
-      this.firstPerson = !this.firstPerson;
-      this.rig.visible = !this.firstPerson;
-      this.viewModel.visible = this.firstPerson;
-      if (this.viewModel.parent === ctx.camera) ctx.camera.remove(this.viewModel);
-      if (this.firstPerson) {
-        ctx.camera.add(this.viewModel);
-        // re-anchor the camera ground clearance when entering FP
-        this.smoothCamMinY = 0;
+      // hardcore runs are first-person only — no third-person crutch
+      if (fpLocked) {
+        useGameStore.getState().addToast('Hardcore is first-person only.');
+      } else {
+        this.setFirstPerson(!this.firstPerson, ctx.camera);
+        useGameStore.getState().addToast(this.firstPerson ? 'First person.' : 'Third person.');
       }
-      useGameStore.getState().addToast(this.firstPerson ? 'First person.' : 'Third person.');
       sfx.play('ui', { volume: 0.4 });
     }
-    const [ldx, ldy] = consumeLook();
+    if (fpLocked && !this.firstPerson) this.setFirstPerson(true, ctx.camera);
+    const [ldxRaw, ldyRaw] = consumeLook();
+    // clamp per-frame deltas: pointer-lock re-entry and browser quirks can
+    // deliver one enormous stale delta, which reads as a rotation snap
+    const ldx = clamp(ldxRaw, -90, 90);
+    const ldy = clamp(ldyRaw, -90, 90);
     // touch drag-look arrives in pixels too; scale both the same
     this.camYaw -= ldx * 0.0026;
     // wrap yaw to [-PI, PI] — unbounded growth loses float precision and
@@ -357,6 +387,14 @@ export class Player {
       this.stamina = Math.min(100, this.stamina + regen * dt);
     }
 
+    // lean state: Q/E held (or mobile buttons) — computed before combat so
+    // shots and swings originate from the peeked position
+    {
+      const leanDir = (input.leanLeft ? -1 : 0) + (input.leanRight ? 1 : 0);
+      this.leanAmt = lerp(this.leanAmt, leanDir, Math.min(1, dt * 12));
+      if (Math.abs(this.leanAmt) < 0.001 && leanDir === 0) this.leanAmt = 0;
+    }
+
     // in first person the body follows the camera — swings go where you look
     if (this.firstPerson) {
       this.yaw = this.camYaw;
@@ -395,10 +433,13 @@ export class Player {
 
     // --- attacks (blocked while guarding) ---
     if (input.attackMelee && this.meleeCd <= 0 && this.blockBlend < 0.5) {
+      // leaning shifts the swing origin: you can hook a swing around a corner
+      const camRight = new THREE.Vector3(Math.cos(this.camYaw), 0, -Math.sin(this.camYaw));
+      const swingOrigin = this.pos.clone().addScaledVector(camRight, this.leanAmt * 0.55);
       const res = tryMelee({
         husks: ctx.husks,
         emitNoise: ctx.emitNoise,
-        playerPos: this.pos,
+        playerPos: swingOrigin,
         playerYaw: this.yaw,
         aimDir: new THREE.Vector3(),
         eyePos: new THREE.Vector3(),
@@ -409,6 +450,14 @@ export class Player {
         this.swingTotal = res.stats.swingTime;
         this.meleeCd = res.stats.swingTime + 0.16;
         this.attackT = res.stats.swingTime; // swing the arm — weapon or bare fist
+        // rebuild the trail to this weapon's exact sweep wedge (range × arc),
+        // shifted toward the lean like the swing origin is
+        this.swingTrail.geometry.dispose();
+        this.swingTrail.geometry = new THREE.RingGeometry(
+          0.9, res.stats.range, 24, 1,
+          -Math.PI / 2 - res.stats.halfArcRad, res.stats.halfArcRad * 2,
+        );
+        this.swingTrail.position.x = this.leanAmt * 0.55;
         // the same swing can take down fleeing wildlife
         const animalHits = ctx.animals.damageInArc(
           this.pos, this.yaw, res.stats.range, res.stats.halfArcRad,
@@ -464,16 +513,15 @@ export class Player {
     // --- camera ---
     const cam = ctx.camera;
     const cp = Math.cos(this.camPitch);
-    // lean: Q left, E right — shift the camera sideways + roll it
-    const leanDir = (input.leanLeft ? -1 : 0) + (input.leanRight ? 1 : 0);
-    const leanAmt = lerp((this.rig.userData.leanCamAmt as number) ?? 0, leanDir, Math.min(1, dt * 10));
-    this.rig.userData.leanCamAmt = leanAmt;
+    const leanAmt = this.leanAmt;
 
     if (this.firstPerson) {
-      // eye-level lens, no smoothing (lag reads as motion sickness in FP)
+      // eye-level lens; x/z stay glued to the body, only height is damped
       this.updateViewModel(dt, leanAmt);
-      const eyeH = (this.crouching ? 1.2 : 1.62) - this.landDip;
-      const eye = new THREE.Vector3(this.pos.x, this.pos.y + eyeH, this.pos.z);
+      const eyeH = (this.crouching ? 1.2 : 1.82) - this.landDip;
+      if (this.fpEyeYSmooth === 0) this.fpEyeYSmooth = this.pos.y + eyeH;
+      this.fpEyeYSmooth = lerp(this.fpEyeYSmooth, this.pos.y + eyeH, Math.min(1, dt * 20));
+      const eye = new THREE.Vector3(this.pos.x, this.fpEyeYSmooth, this.pos.z);
       const fwd = new THREE.Vector3(
         Math.sin(this.camYaw) * cp,
         Math.sin(this.camPitch),
@@ -491,13 +539,20 @@ export class Player {
       const target = new THREE.Vector3(this.pos.x, this.pos.y + camH, this.pos.z);
       // shift the target sideways along the camera's right vector so the lean peeks around cover
       const right = new THREE.Vector3(Math.cos(this.camYaw), 0, -Math.sin(this.camYaw));
-      target.addScaledVector(right, leanAmt * 0.9);
+      target.addScaledVector(right, leanAmt * 1.05);
+      // damped look target: collision push-outs and terrain jitter must not
+      // snap the view — aim rides on the smoothed point, not the raw position
+      if (!this.smoothInit) {
+        this.smoothTarget.copy(target);
+        this.smoothInit = true;
+      }
+      this.smoothTarget.lerp(target, Math.min(1, dt * 22));
       const off = new THREE.Vector3(
         -Math.sin(this.camYaw) * cp,
         -Math.sin(this.camPitch),
         -Math.cos(this.camYaw) * cp,
-      ).multiplyScalar(CAM_DIST);
-      const camPos = target.clone().add(off);
+      ).multiplyScalar(this.zoomDist);
+      const camPos = this.smoothTarget.clone().add(off);
       // smoothed ground clearance: the hard clamp snapped when the camera
       // swung over a hill or rock edge — ride over it instead
       const targetMinY = ctx.groundY(camPos.x, camPos.z) + 0.5;
@@ -507,12 +562,12 @@ export class Player {
       // impact punch: the camera jolts toward the player on every connect
       this.hitPunch = lerp(this.hitPunch, 0, Math.min(1, dt * 10));
       if (this.hitPunch > 0.001) {
-        const punchDir = target.clone().sub(camPos).normalize();
+        const punchDir = this.smoothTarget.clone().sub(camPos).normalize();
         camPos.addScaledVector(punchDir, this.hitPunch * 1.4);
       }
       cam.position.lerp(camPos, Math.min(1, dt * 18));
-      cam.lookAt(target);
-      cam.rotateZ(-leanAmt * 0.28); // roll the view with the lean
+      cam.lookAt(this.smoothTarget);
+      cam.rotateZ(-leanAmt * 0.32); // roll the view with the lean
     }
   }
 

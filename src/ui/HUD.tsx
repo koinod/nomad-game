@@ -239,8 +239,8 @@ export default function HUD() {
       {/* controls hint, desktop only */}
       {!('ontouchstart' in window) && (
         <div className="pointer-events-none absolute bottom-4 right-4 hidden text-right text-[11px] leading-relaxed text-[#8a94a3] md:block">
-          WASD move · Shift run · Space jump · C crouch · Q/E lean · V 1st/3rd
-          <br />LMB punch · RMB block/fire · E interact · G pack · Tab phone
+          WASD move · Shift run · Space jump · C crouch · Q/E lean · V 1st/3rd · wheel zoom
+          <br />LMB punch · RMB block/fire · F interact · G pack · Tab phone
         </div>
       )}
 
@@ -249,7 +249,7 @@ export default function HUD() {
         <div className="absolute bottom-24 left-1/2 -translate-x-1/2">
           <div className="flex items-center gap-2 rounded border border-[#232b36] bg-[#0b0e12]/85 px-4 py-2">
             <span className="rounded border border-[#e8b34b] px-2 py-0.5 font-mono text-sm text-[#e8b34b]">
-              E
+              F
             </span>
             <span className="text-sm text-[#d7dde5]">{interactPrompt}</span>
           </div>

@@ -54,7 +54,7 @@ interface VariantSpec {
 
 const VARIANTS: Record<VariantName, VariantSpec> = {
   ranch: {
-    tier: 'suburban', w: 9, d: 7.5, wallH: 2.7, wallColor: 0x9a8f7e, roof: 'pitched',
+    tier: 'suburban', w: 9, d: 7.5, wallH: 2.75, wallColor: 0x9a8f7e, roof: 'pitched',
     interiorWall: true, openFront: false,
     furniture: [
       { kind: 'fridge', lx: -3.3, lz: -2.9, rot: 0 },
@@ -65,7 +65,7 @@ const VARIANTS: Record<VariantName, VariantSpec> = {
     ],
   },
   bungalow: {
-    tier: 'suburban', w: 6.5, d: 6, wallH: 2.6, wallColor: 0x8a7f6a, roof: 'pitched',
+    tier: 'suburban', w: 6.5, d: 6, wallH: 2.7, wallColor: 0x8a7f6a, roof: 'pitched',
     interiorWall: false, openFront: false,
     furniture: [
       { kind: 'fridge', lx: -2.2, lz: -2.3, rot: 0 },
@@ -75,7 +75,7 @@ const VARIANTS: Record<VariantName, VariantSpec> = {
     ],
   },
   farmhouse: {
-    tier: 'suburban', w: 7, d: 9, wallH: 2.7, wallColor: 0x7a4a3a, roof: 'pitched',
+    tier: 'suburban', w: 7, d: 9, wallH: 2.8, wallColor: 0x7a4a3a, roof: 'pitched',
     interiorWall: true, openFront: false,
     furniture: [
       { kind: 'fridge', lx: -2.4, lz: -3.7, rot: 0 },
@@ -87,7 +87,7 @@ const VARIANTS: Record<VariantName, VariantSpec> = {
     ],
   },
   cabin: {
-    tier: 'camp', w: 5, d: 6, wallH: 2.4, wallColor: 0x6e5a3e, roof: 'shed',
+    tier: 'camp', w: 5, d: 6, wallH: 2.65, wallColor: 0x6e5a3e, roof: 'shed',
     interiorWall: false, openFront: false,
     furniture: [
       { kind: 'cooler', lx: -1.6, lz: -2.2, rot: 0 },
@@ -96,7 +96,7 @@ const VARIANTS: Record<VariantName, VariantSpec> = {
     ],
   },
   shack: {
-    tier: 'camp', w: 4, d: 5, wallH: 2.2, wallColor: 0x5a4a38, roof: 'shed',
+    tier: 'camp', w: 4, d: 5, wallH: 2.5, wallColor: 0x5a4a38, roof: 'shed',
     interiorWall: false, openFront: false,
     furniture: [
       { kind: 'crate', lx: -1.0, lz: -1.7, rot: 2 },
@@ -104,7 +104,7 @@ const VARIANTS: Record<VariantName, VariantSpec> = {
     ],
   },
   leanto: {
-    tier: 'camp', w: 4, d: 3.5, wallH: 2.0, wallColor: 0x6e5a3e, roof: 'shed',
+    tier: 'camp', w: 4, d: 3.5, wallH: 2.35, wallColor: 0x6e5a3e, roof: 'shed',
     interiorWall: false, openFront: true,
     furniture: [
       { kind: 'cooler', lx: -1.0, lz: -1.2, rot: 0 },
@@ -204,7 +204,8 @@ function buildOne(
   const segs: Seg[] = [];
   const hw = spec.w / 2;
   const hd = spec.d / 2;
-  const doorW = 1.1;
+  const doorW = 1.0; // 36" rough opening
+  const DOOR_H = 2.05; // 80" door
   const doorAt = (rng() - 0.5) * spec.w * 0.4; // local x of the front door
 
   // perimeter: south (front, +z) with door gap unless lean-to is open-front
@@ -232,12 +233,15 @@ function buildOne(
     const gz = (rng() - 0.5) * spec.d * 0.4;
     segs.push({ ax: ix, az: -hd + t, bx: ix, bz: gz - 0.55, hMul: 1 });
     segs.push({ ax: ix, az: gz + 0.55, bx: ix, bz: hd - t, hMul: 1 });
+    // header above the interior doorway (32" passage, 2.05m opening)
+    const iHead = box(1.1, wallTop - 2.05, t, wallCol);
+    iHead.position.set(ix, 2.05 + (wallTop - 2.05) / 2, gz);
+    group.add(iHead);
   }
   if (ruin) {
     for (const s of segs) s.hMul = 0.45 + rng() * 0.3;
   }
 
-  const LINTEL_Y = 2.05;
   for (const s of segs) {
     const len = Math.hypot(s.bx - s.ax, s.bz - s.az);
     if (len < 0.2) continue;
@@ -253,42 +257,102 @@ function buildOne(
         : aabb(s.ax - t / 2, s.az, s.bx + t / 2, s.bz),
     );
   }
-  // lintel over the front door (visual only — above head height)
+  // entry door: jambs, header, threshold, wall above, and a leaf swung open
+  // inward — real 36"×80" proportions (door opening never blocks; leaf never collides)
   if (!spec.openFront && !ruin) {
-    const lintel = box(doorW, wallTop - LINTEL_Y, t, wallCol);
-    lintel.position.set(doorAt, (LINTEL_Y + wallTop) / 2, hd);
-    group.add(lintel);
-    // door frame posts
-    for (const px of [gapLo, gapHi]) {
-      const post = box(0.08, LINTEL_Y, t + 0.04, 0x4a3826);
-      post.position.set(px, LINTEL_Y / 2, hd);
-      group.add(post);
+    const TRIMC = 0x4a3826;
+    const DOOR_COLORS = [0x3a5a6e, 0x6e3a3a, 0x6b5335, 0x3f5a3a];
+    for (const jx of [gapLo, gapHi]) {
+      const jamb = box(0.1, DOOR_H, t + 0.08, TRIMC);
+      jamb.position.set(jx, DOOR_H / 2, hd);
+      group.add(jamb);
     }
+    const header = box(doorW + 0.2, 0.14, t + 0.08, TRIMC);
+    header.position.set(doorAt, DOOR_H + 0.07, hd);
+    group.add(header);
+    const aboveH = wallTop - DOOR_H - 0.14;
+    if (aboveH > 0.05) {
+      const above = box(doorW, aboveH, t, wallCol);
+      above.position.set(doorAt, DOOR_H + 0.14 + aboveH / 2, hd);
+      group.add(above);
+    }
+    const thresh = box(doorW + 0.16, 0.07, t + 0.34, 0x5a5348);
+    thresh.position.set(doorAt, 0.035, hd);
+    group.add(thresh);
+    // the leaf, swung open against the inside wall
+    const hinge = new THREE.Group();
+    hinge.position.set(gapLo + 0.05, 0.07, hd - t / 2 - 0.03);
+    hinge.rotation.y = -1.95;
+    const slabW = doorW - 0.06;
+    const slabH = DOOR_H - 0.04;
+    const leaf = box(slabW, slabH, 0.05, DOOR_COLORS[Math.floor(rng() * DOOR_COLORS.length)]);
+    leaf.position.set(slabW / 2, slabH / 2, 0);
+    const knob = box(0.07, 0.07, 0.12, 0x2e2e2e);
+    knob.position.set(slabW - 0.12, slabH / 2 - 0.05, 0);
+    hinge.add(leaf, knob);
+    group.add(hinge);
   }
 
-  // windows: dark recesses on north/east/west walls (visual only)
-  if (!ruin) {
-    const winMat = 0x1c2126;
+  // windows: framed units with glass, mullion cross, and a sill —
+  // sill sits 0.95m above the floor, per residential convention
+  const addWindow = (wx: number, wz: number, ry: number) => {
+    const g = new THREE.Group();
+    const TRIMC = 0x4a3826;
+    const W = 1.06;
+    const H = 1.26;
+    const cy = 1.64;
+    const ft = 0.09;
+    const top = box(W, ft, 0.1, TRIMC); top.position.set(0, H / 2 - ft / 2, 0);
+    const bot = box(W, ft, 0.1, TRIMC); bot.position.set(0, -H / 2 + ft / 2, 0);
+    const lf = box(ft, H - 2 * ft, 0.1, TRIMC); lf.position.set(-W / 2 + ft / 2, 0, 0);
+    const rt = box(ft, H - 2 * ft, 0.1, TRIMC); rt.position.set(W / 2 - ft / 2, 0, 0);
+    const glass = new THREE.Mesh(
+      new THREE.BoxGeometry(W - 2 * ft, H - 2 * ft, 0.04),
+      new THREE.MeshStandardMaterial({ color: 0x2a3540, roughness: 0.35, metalness: 0.4 }),
+    );
+    glass.castShadow = true;
+    const mv = box(0.05, H - 2 * ft, 0.06, TRIMC);
+    const mh = box(W - 2 * ft, 0.05, 0.06, TRIMC);
+    const sill = box(W + 0.14, 0.07, 0.2, TRIMC);
+    sill.position.set(0, -H / 2 - 0.035, 0.04);
+    g.add(top, bot, lf, rt, glass, mv, mh, sill);
+    g.position.set(wx, cy, wz);
+    g.rotation.y = ry;
+    group.add(g);
+  };
+  if (!ruin && p.variant !== 'leanto') {
     const nWin = 1 + Math.floor(rng() * 2);
     for (let i = 0; i < nWin; i++) {
-      const win = box(0.9, 0.9, 0.06, winMat);
-      win.position.set(-hw + ((i + 1) * spec.w) / (nWin + 1), 1.45, -hd - t / 2 - 0.025);
-      group.add(win);
+      addWindow(-hw + ((i + 1) * spec.w) / (nWin + 1), -hd - t / 2 - 0.03, 0);
     }
-    for (const sgn of [1, -1]) {
-      const win = box(0.9, 0.9, 0.06, winMat);
-      win.rotation.y = Math.PI / 2;
-      win.position.set(sgn * (hw + t / 2 + 0.025), 1.45, (rng() - 0.5) * spec.d * 0.5);
-      group.add(win);
-    }
+    addWindow(hw + t / 2 + 0.03, (rng() - 0.5) * spec.d * 0.5, Math.PI / 2);
+    addWindow(-hw - t / 2 - 0.03, (rng() - 0.5) * spec.d * 0.5, Math.PI / 2);
+    // front wall: flank the entry when the wall runs are long enough
+    const leftRun = doorAt - doorW / 2 + hw;
+    if (leftRun > 2.6) addWindow(-hw + leftRun / 2, hd + t / 2 + 0.03, 0);
+    const rightRun = hw - doorAt - doorW / 2;
+    if (rightRun > 2.6) addWindow(hw - rightRun / 2, hd + t / 2 + 0.03, 0);
   }
 
-  // floor slab
+  // floor slab (local coords — the group sits at base height)
   const floorTop = base + 0.14;
   const slab = box(spec.w - t, 0.14, spec.d - t, 0x5a5348);
-  slab.position.set(0, base + 0.07, 0);
+  slab.position.set(0, 0.07, 0);
   group.add(slab);
   floors.push({ ...aabb(-hw + t / 2, -hd + t / 2, hw - t / 2, hd - t / 2), y: floorTop });
+
+  // foundation skirt: ties the house to sloped terrain, hides the gap under walls
+  const skirt = box(spec.w + 0.24, 0.55, spec.d + 0.24, 0x55504a);
+  skirt.position.set(0, -0.14, 0);
+  group.add(skirt);
+  // corner boards: trim that visually connects the wall runs
+  if (!ruin) {
+    for (const [ccx, ccz] of [[-hw, -hd], [hw, -hd], [-hw, hd], [hw, hd]] as [number, number][]) {
+      const cb = box(0.14, wallTop, 0.14, 0x4a3826);
+      cb.position.set(ccx, wallTop / 2 - 0.3, ccz);
+      group.add(cb);
+    }
+  }
 
   // roof
   if (spec.roof !== 'none') {
@@ -304,6 +368,16 @@ function buildOne(
         panel.position.set(0, wallTop + rise / 2, (sgn * hd) / 2);
         roofGroup.add(panel);
       }
+      // fascia along the eaves + ridge cap: the roof reads as connected,
+      // not two slabs floating over the walls
+      for (const sgn of [1, -1]) {
+        const fascia = box(spec.w + 0.9, 0.2, 0.07, 0x4a3826);
+        fascia.position.set(0, wallTop - 0.03, sgn * (hd + 0.3));
+        roofGroup.add(fascia);
+      }
+      const ridge = box(spec.w + 0.8, 0.1, 0.36, roofCol);
+      ridge.position.set(0, wallTop + rise, 0);
+      roofGroup.add(ridge);
       // gable caps
       for (const sgn of [1, -1]) {
         const shape = new THREE.Shape();
@@ -329,6 +403,9 @@ function buildOne(
       panel.rotation.x = a;
       panel.position.set(0, wallTop + rise / 2 - 0.1, 0);
       roofGroup.add(panel);
+      const fascia = box(spec.w + 0.7, 0.2, 0.07, 0x4a3826);
+      fascia.position.set(0, wallTop - 0.12, hd + 0.22);
+      roofGroup.add(fascia);
     }
     group.add(roofGroup);
     roofs.push({ bounds: aabb(-hw, -hd, hw, hd), group: roofGroup });

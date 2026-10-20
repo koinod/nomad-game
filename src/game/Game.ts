@@ -80,6 +80,11 @@ export class Game {
   private onCanvasClick = () => this.handleCanvasClick();
   private onResize = () => this.handleResize();
   private onPointerLockChange = () => this.handleLockChange();
+  private onWheel = (e: WheelEvent) => {
+    if (!this.player) return;
+    // scroll: pull the third-person camera in/out (2.5m .. 9m)
+    this.player.zoomDist = Math.max(2.5, Math.min(9, this.player.zoomDist + e.deltaY * 0.01));
+  };
   private onContextMenu = (e: Event) => e.preventDefault();
 
   constructor(canvas: HTMLCanvasElement) {
@@ -193,6 +198,7 @@ export class Game {
     document.addEventListener('pointerlockchange', this.onPointerLockChange);
     this.canvas.addEventListener('click', this.onCanvasClick);
     this.canvas.addEventListener('contextmenu', this.onContextMenu);
+    this.canvas.addEventListener('wheel', this.onWheel, { passive: true });
 
     this.lastNight = this.isNight();
     ambience.start();
@@ -243,6 +249,7 @@ export class Game {
     document.removeEventListener('pointerlockchange', this.onPointerLockChange);
     this.canvas.removeEventListener('click', this.onCanvasClick);
     this.canvas.removeEventListener('contextmenu', this.onContextMenu);
+    this.canvas.removeEventListener('wheel', this.onWheel);
     ambience.stop();
     this.husks?.dispose();
     this.animals?.dispose();
@@ -661,14 +668,13 @@ export class Game {
         input.crouch = true;
         break;
       case 'KeyE':
-        input.interact = true; // tap: interact (E to open crates stays)
-        input.leanRight = true; // held: lean right
+        input.leanRight = true; // held: lean right (F is interact now)
         break;
       case 'KeyQ':
         input.leanLeft = true; // held: lean left
         break;
       case 'KeyF':
-        input.attackMelee = true;
+        input.interact = true;
         break;
       case 'Tab':
       case 'KeyP':
