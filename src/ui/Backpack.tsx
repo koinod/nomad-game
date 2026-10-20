@@ -357,7 +357,7 @@ export default function Backpack() {
                                         return `${have}/${c.qty} ${ITEMS[c.itemId]?.name ?? c.itemId}`;
                                       })
                                       .join(' · ')
-                                  : `Needs a ${STATION_LABEL[st]} — ${st === 'industrial' ? 'build one in a claimed base' : st === 'chemistry' ? 'one at the relay station' : 'at Jonah\u2019s camp or in town'}`}
+                                  : `Needs a ${STATION_LABEL[st]} — ${st === 'industrial' ? 'at the marina Machine Shop' : st === 'chemistry' ? 'one at the relay station' : 'at Jonah\u2019s camp or in town'}`}
                               </div>
                             </div>
                             <button

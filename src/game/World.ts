@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { makeFbm, makeNoise2D, mulberry32, clamp, lerp, smoothstep } from './rng';
 import { buildHouses, houseFootprints, type HouseResult } from './Houses';
+import { buildPoiBuildings, poiFootprints, type PoiBuildResult } from './PoiBuildings';
 import type { BiomeId } from './Game';
 import type { StationId } from '../data/items';
 import type { Collider } from './Colliders';
@@ -123,6 +124,7 @@ export interface PoiDef {
 /** Suggested x per INTERFACES.md; z resolved against real terrain. */
 export const POI_DEFS: PoiDef[] = [
   { id: 'shore_camp', x: -560, zGuess: 250 },
+  { id: 'marina', x: -605, zGuess: 80 },
   { id: 'jonah_camp', x: -380, zGuess: 60 },
   { id: 'wreck', x: -220, zGuess: 150 },
   { id: 'town', x: 40, zGuess: 0 },
@@ -165,6 +167,7 @@ export class World {
   readonly rng: () => number;
   poiPositions: Record<string, [number, number]> = {};
   houses!: HouseResult;
+  poiBuildings!: PoiBuildResult;
   // physical crafting stations: { station, x, z } + their colliders
   stations: { station: StationId; x: number; z: number }[] = [];
   stationColliders: Collider[] = [];
@@ -198,6 +201,12 @@ export class World {
     this.buildScatter();
     // enterable houses with loot, collision, and floor rects
     this.houses = buildHouses(this.scene, this.seed, this.poiPositions, (x, z) => heightAt(x, z));
+    // POI-scale buildings: strip mall, gas station, warehouse, school, barn, boathouse
+    this.poiBuildings = buildPoiBuildings(
+      this.scene,
+      this.poiPositions,
+      (x, z) => heightAt(x, z),
+    );
     this.buildStations();
     this.buildCampfires();
     this.buildWreck();
@@ -323,7 +332,8 @@ export class World {
   /** Flatten a terrain pad under each house footprint (corners measured on
    *  raw terrain before any pad exists). */
   private setupHousePads(): void {
-    const pads = houseFootprints(this.poiPositions).map((f) => {
+    const footprints = [...houseFootprints(this.poiPositions), ...poiFootprints(this.poiPositions)];
+    const pads = footprints.map((f) => {
       const corners = [
         heightAt(f.cx - f.hw, f.cz - f.hd),
         heightAt(f.cx + f.hw, f.cz - f.hd),
@@ -603,10 +613,29 @@ export class World {
       m.castShadow = true;
       return m;
     };
-    const place = (station: StationId, x: number, z: number, kind: 'bench' | 'chem') => {
+    const place = (station: StationId, x: number, z: number, kind: 'bench' | 'chem' | 'shop') => {
       const y = this.groundY(x, z);
       const g = new THREE.Group();
-      if (kind === 'bench') {
+      if (kind === 'shop') {
+        // Machine Shop: heavy steel table, engine block, hoist frame, tire stack
+        const top = mk(2.2, 0.12, 1.1, 0x4a5058); top.position.y = 0.9;
+        g.add(top);
+        for (const [lx, lz] of [[-1, -0.45], [1, -0.45], [-1, 0.45], [1, 0.45]] as [number, number][]) {
+          const leg = mk(0.1, 0.9, 0.1, 0x33383e); leg.position.set(lx, 0.45, lz); g.add(leg);
+        }
+        const block = mk(0.7, 0.5, 0.5, 0x2e3238); block.position.set(-0.5, 1.2, 0); g.add(block);
+        const post1 = mk(0.12, 2.2, 0.12, 0x6a7078); post1.position.set(0.6, 1.1, -0.4); g.add(post1);
+        const post2 = mk(0.12, 2.2, 0.12, 0x6a7078); post2.position.set(0.6, 1.1, 0.4); g.add(post2);
+        const beam = mk(0.12, 0.12, 1.0, 0x6a7078); beam.position.set(0.6, 2.2, 0); g.add(beam);
+        const tireGeo = new THREE.TorusGeometry(0.32, 0.13, 8, 14);
+        for (let i = 0; i < 3; i++) {
+          const tire = new THREE.Mesh(tireGeo, new THREE.MeshStandardMaterial({ color: 0x1e1e22, roughness: 1 }));
+          tire.rotation.x = Math.PI / 2;
+          tire.position.set(1.6, 0.14 + i * 0.26, 0.3);
+          tire.castShadow = true;
+          g.add(tire);
+        }
+      } else if (kind === 'bench') {
         const top = mk(1.9, 0.09, 0.95, 0x6b4a2f); top.position.y = 0.92;
         const board = mk(1.9, 0.8, 0.06, 0x4a3826); board.position.set(0, 1.45, -0.42); board.rotation.x = -0.08;
         g.add(top, board);
@@ -650,6 +679,8 @@ export class World {
     place('workbench', tx - 15, tz + 2, 'bench');
     const [rx, rz] = this.poi('relay_station');
     place('chemistry', rx + 5, rz + 6, 'chem');
+    const [mx, mz] = this.poi('marina');
+    place('industrial', mx + 8, mz - 4, 'shop');
   }
 
   private buildWreck(): void {

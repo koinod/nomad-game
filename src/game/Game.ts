@@ -132,10 +132,14 @@ export class Game {
     // register POIs (contract)
     useGameStore.getState().setPoiPositions(this.world.poiPositions);
 
-    // houses: colliders, floor rects, roofs, furniture containers
-    this.houseColliders = [...this.world.houses.colliders, ...this.world.stationColliders];
-    this.houseFloors = this.world.houses.floors;
-    this.houseRoofs = this.world.houses.roofs;
+    // houses + POI buildings: colliders, floor rects, roofs, containers
+    this.houseColliders = [
+      ...this.world.houses.colliders,
+      ...this.world.poiBuildings.colliders,
+      ...this.world.stationColliders,
+    ];
+    this.houseFloors = [...this.world.houses.floors, ...this.world.poiBuildings.floors];
+    this.houseRoofs = [...this.world.houses.roofs, ...this.world.poiBuildings.roofs];
 
     // snapshot world diff
     const snap = opts.snapshot ?? null;
@@ -193,7 +197,7 @@ export class Game {
         setCamp: (id) => { this.lastCampId = id; },
       },
       this.world.poiPositions,
-      [...buildContainerDefs(this.world.poiPositions), ...this.world.houses.containers],
+      [...buildContainerDefs(this.world.poiPositions), ...this.world.houses.containers, ...this.world.poiBuildings.containers],
     );
 
     // shadow flags for world + husk + interactable meshes (idempotent)
