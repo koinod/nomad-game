@@ -7,6 +7,8 @@ import { FACTIONS, repTier } from '../data/factions';
 import { SKILLS, TREES, PERKS, xpToNext } from '../data/skills';
 import { traitName, moraleBand, type SurvivorJob } from '../data/survivors';
 import { FACILITIES, baseHeat, heatBand } from '../data/base';
+import { DISPATCH_POIS, DISPATCH_TASKS, dispatchDurationMin, poiName, riskChance } from '../data/dispatch';
+import type { DispatchTask } from '../store/types';
 import { UPGRADES, canInstallUpgrade } from '../data/upgrades';
 import { MODULE_DEFS } from '../data/trailerData';
 import { VEHICLE_DEFS } from '../game/Vehicles';
@@ -25,6 +27,15 @@ function fmtDate(ts: number): string {
     ' ' +
     d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
   );
+}
+
+/** Absolute game minutes -> "Day 3 · 14:20". */
+function fmtAbs(absMin: number): string {
+  const day = Math.floor(absMin / 1440) + 1;
+  const m = Math.floor(absMin % 1440);
+  const hh = String(Math.floor(m / 60)).padStart(2, '0');
+  const mm = String(m % 60).padStart(2, '0');
+  return `Day ${day} · ${hh}:${mm}`;
 }
 
 /* ---------------- LOADOUT tab ---------------- */
@@ -290,6 +301,7 @@ function WorldMap() {
   const poiPositions = useGameStore((s) => s.poiPositions);
   const pos = useGameStore((s) => s.pos);
   const quests = useGameStore((s) => s.quests);
+  const scouted = useGameStore((s) => s.scouted);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -321,11 +333,25 @@ function WorldMap() {
     ];
     const st = useGameStore.getState();
 
-    // POIs
+    // POIs — wave 3: scouted POIs get a ring: gold = rich pickings,
+    // orange = picked over, gray = picked clean (from the Scout census)
     ctx.font = '8px sans-serif';
     for (const [id, [x, z]] of Object.entries(st.poiPositions)) {
       if (id.startsWith('npc:')) continue; // NPCs drawn via their POI
       const [px, py] = toPx(x, z);
+      const scout = st.scouted[id];
+      if (scout) {
+        ctx.strokeStyle =
+          scout.containers === 0 || scout.looted >= scout.containers
+            ? 'rgba(138,148,163,0.9)'
+            : scout.looted / scout.containers > 0.5
+              ? 'rgba(217,131,79,0.95)'
+              : 'rgba(232,179,75,0.95)';
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.arc(px, py, 5, 0, Math.PI * 2);
+        ctx.stroke();
+      }
       ctx.fillStyle = '#d7dde5';
       ctx.fillRect(px - 1.5, py - 1.5, 3, 3);
       ctx.fillStyle = 'rgba(215,221,229,0.85)';
@@ -387,7 +413,7 @@ function WorldMap() {
     ctx.strokeStyle = '#0b0e12';
     ctx.lineWidth = 1;
     ctx.stroke();
-  }, [poiPositions, pos, quests]);
+  }, [poiPositions, pos, quests, scouted]);
 
   const g = getGame();
   return (
@@ -405,7 +431,8 @@ function WorldMap() {
         </div>
       )}
       <p className="text-xs leading-relaxed text-[#8a94a3]">
-        Amber ring marks your current objective. The triangle is you.
+        Amber ring marks your current objective. The triangle is you. Scouted places get a ring too:
+        gold is rich, orange is picked over, gray is picked clean.
         {useGameStore((s) => s.flags)['sat_uplink'] && (
           <span className="text-[#57c7d4]"> SAT UPLINK LIVE — fleet tracked: amber diamonds are vehicles, cyan squares are trailers.</span>
         )}
@@ -490,12 +517,32 @@ function LogTab() {
   const battery = useGameStore((s) => s.battery);
   const saveSlots = useGameStore((s) => s.saveSlots);
   const saveToSlot = useGameStore((s) => s.saveToSlot);
+  const journal = useGameStore((s) => s.journal);
   const canSave = DIFFICULTIES[difficulty].saveAnywhere;
 
   const auto = saveSlots.find((m) => m.slot === 'auto');
 
   return (
     <div className="nomad-scroll flex h-full flex-col gap-4 overflow-y-auto">
+      {/* journal — dispatch reports + the day's record (wave 3) */}
+      <section>
+        <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Journal</h3>
+        {journal.length === 0 && (
+          <p className="text-sm text-[#8a94a3]">Nothing written yet. Dispatch reports and each day's record land here.</p>
+        )}
+        {journal.map((e) => (
+          <div key={e.id} className="mb-2 rounded border border-[#232b36] bg-[#0b0e12] p-2.5">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-sm font-medium text-[#d7dde5]">{e.title}</span>
+              <span className="shrink-0 font-mono text-[10px] text-[#8a94a3]">{fmtAbs(e.atMin)}</span>
+            </div>
+            {e.lines.map((ln, i) => (
+              <p key={i} className="mt-0.5 text-xs leading-relaxed text-[#8a94a3]">{ln}</p>
+            ))}
+          </div>
+        ))}
+      </section>
+
       {/* quests */}
       <section>
         <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Quests</h3>
@@ -670,20 +717,29 @@ function SkillsTab() {
 function CrewSection() {
   const survivors = useGameStore((s) => s.survivors);
   const assignJob = useGameStore((s) => s.assignJob);
+  const dispatches = useGameStore((s) => s.dispatches);
   return (
       <section>
         <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Crew ({survivors.length})</h3>
         {survivors.length === 0 && (
           <p className="text-sm text-[#8a94a3]">Nobody yet. There are people out there — Elena at the lighthouse, Mateo near the relay, Lina in the dunes.</p>
         )}
-        {survivors.map((sv) => (
+        {survivors.map((sv) => {
+          const out = dispatches.find((d) => d.survivorId === sv.id);
+          return (
           <div key={sv.id} className="mb-2 rounded border border-[#232b36] bg-[#0b0e12] p-2.5">
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium text-[#d7dde5]">{sv.name}</span>
               <span className="text-[11px] text-[#8a94a3]">{sv.background} · {sv.age}</span>
             </div>
+            {out && (
+              <div className="mt-1 rounded border border-[#e8b34b]/50 bg-[#e8b34b]/10 px-2 py-1 text-[11px] text-[#e8b34b]">
+                Out — {out.task} run to {poiName(out.destPoiId)} · back {fmtAbs(out.etaMin)}
+              </div>
+            )}
             <div className="mt-0.5 text-[11px] text-[#8a94a3]">
-              {sv.traits.map(traitName).join(' · ') || 'No notable traits'} · HP {sv.hp}
+              {sv.traits.map(traitName).join(' · ') || 'No notable traits'} · HP {Math.round(sv.hp)}
+              {sv.status !== 'healthy' ? ` · ${sv.status}` : ''}
             </div>
             <div className="mt-1 flex items-center gap-2">
               <span className="text-[11px] text-[#8a94a3]">Morale {sv.morale} ({moraleBand(sv.morale)})</span>
@@ -695,8 +751,9 @@ function CrewSection() {
               {JOBS.map((j) => (
                 <button
                   key={j}
+                  disabled={!!out}
                   onClick={() => { sfx.play('ui'); assignJob(sv.id, j); }}
-                  className={`rounded border px-1.5 py-0.5 text-[10px] ${sv.job === j ? 'border-[#e8b34b] text-[#e8b34b]' : 'border-[#232b36] text-[#8a94a3]'}`}
+                  className={`rounded border px-1.5 py-0.5 text-[10px] disabled:cursor-not-allowed disabled:opacity-40 ${sv.job === j ? 'border-[#e8b34b] text-[#e8b34b]' : 'border-[#232b36] text-[#8a94a3]'}`}
                 >
                   {j}
                 </button>
@@ -706,7 +763,8 @@ function CrewSection() {
               Best: {Object.entries(sv.skills).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${k} ${v}`).join(' · ')}
             </div>
           </div>
-        ))}
+          );
+        })}
       </section>
   );
 }
@@ -776,19 +834,184 @@ function CharacterTab() {
 
 /* ---------------- TEAM app ---------------- */
 
-function TeamTab() {
+function DispatchSection() {
+  const survivors = useGameStore((s) => s.survivors);
+  const fleet = useGameStore((s) => s.fleet);
+  const trailerFleet = useGameStore((s) => s.trailerFleet);
+  const dispatches = useGameStore((s) => s.dispatches);
+  const scouted = useGameStore((s) => s.scouted);
+  const poiPositions = useGameStore((s) => s.poiPositions);
   const base = useGameStore((s) => s.base);
+  const pos = useGameStore((s) => s.pos);
+  const daysElapsed = useGameStore((s) => s.daysElapsed);
+  const timeMinutes = useGameStore((s) => s.timeMinutes);
+  const startDispatch = useGameStore((s) => s.startDispatch);
+  const recallDispatch = useGameStore((s) => s.recallDispatch);
+  const [selSv, setSelSv] = useState<string | null>(null);
+  const [selVeh, setSelVeh] = useState<string | null>(null);
+  const [selTrl, setSelTrl] = useState<string | null>(null);
+  const [selTask, setSelTask] = useState<DispatchTask>('scavenge');
+  const [selDest, setSelDest] = useState<string | null>(null);
+
+  const now = daysElapsed * 1440 + timeMinutes;
+  const outSv = new Set(dispatches.map((d) => d.survivorId));
+  const outVeh = new Set(dispatches.map((d) => d.vehicleDefId));
+  const outTrl = new Set(dispatches.map((d) => d.trailerDefId).filter(Boolean));
+  const availSv = survivors.filter((sv) => !outSv.has(sv.id));
+  const availVeh = fleet.filter((f) => !outVeh.has(f.defId));
+  const sv = availSv.find((x) => x.id === selSv) ?? availSv[0];
+  const veh = availVeh.find((f) => f.defId === selVeh) ?? availVeh[0];
+  const towable = veh ? trailerFleet.filter((t) => t.hitchedTo === veh.defId && !outTrl.has(t.defId)) : [];
+  const trl = towable.find((t) => t.defId === selTrl) ?? null;
+  const dests = DISPATCH_POIS.filter((p) => poiPositions[p.id]);
+  const dest = dests.find((p) => p.id === selDest) ?? null;
+
+  const origin = (base && poiPositions[base.poiId]) || [pos[0], pos[2]];
+  const distM = dest && poiPositions[dest.id]
+    ? Math.round(Math.hypot(poiPositions[dest.id][0] - origin[0], poiPositions[dest.id][1] - origin[1]))
+    : 0;
+  const heat = base ? baseHeat(base.facilities, survivors.length, daysElapsed) : 0;
+  const eta = sv && dest ? dispatchDurationMin(distM, sv.skills.driver ?? 0, selTask) : 0;
+  const risk = dest ? Math.round(riskChance(distM, heat, selTask) * 100) : 0;
+  const canGo = !!sv && !!veh && !!dest && sv.hp >= 30;
+
+  const pick = (active: boolean) =>
+    `rounded border px-2 py-1 text-left text-[11px] transition-colors ${
+      active ? 'border-[#e8b34b] text-[#e8b34b]' : 'border-[#232b36] text-[#d7dde5] hover:border-[#8a94a3]'
+    }`;
+
+  return (
+    <section className="rounded border border-[#232b36] bg-[#0b0e12] p-3">
+      <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Dispatch — send crew out (P5)</h3>
+
+      {dispatches.map((d) => {
+        const who = survivors.find((x) => x.id === d.survivorId);
+        const pct = Math.max(0, Math.min(100, Math.round(((now - d.departMin) / Math.max(1, d.etaMin - d.departMin)) * 100)));
+        return (
+          <div key={d.id} className="mb-2 rounded border border-[#232b36] bg-[#12161c] p-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm text-[#d7dde5]">
+                {who?.name ?? 'Crew'} — {d.task} · {poiName(d.destPoiId)}
+              </span>
+              <button
+                onClick={() => { sfx.play('ui'); recallDispatch(d.id); }}
+                className="shrink-0 rounded border border-[#232b36] px-2 py-0.5 text-[11px] text-[#d9534f] hover:border-[#d9534f]"
+              >
+                Recall
+              </button>
+            </div>
+            <div className="mt-1.5 h-1.5 overflow-hidden rounded bg-[#232b36]">
+              <div className="h-full bg-[#e8b34b]" style={{ width: `${pct}%` }} />
+            </div>
+            <div className="mt-1 text-[11px] text-[#8a94a3]">Back {fmtAbs(d.etaMin)} · {d.distM} m each way</div>
+          </div>
+        );
+      })}
+
+      {survivors.length === 0 ? (
+        <p className="text-sm text-[#8a94a3]">No crew to send. Recruit someone first — people are waiting out there.</p>
+      ) : availSv.length === 0 ? (
+        <p className="text-sm text-[#8a94a3]">Everyone is out already.</p>
+      ) : (
+        <div className="flex flex-col gap-2.5">
+          <div>
+            <div className="mb-1 text-[11px] text-[#8a94a3]">Survivor</div>
+            <div className="flex flex-wrap gap-1">
+              {availSv.map((x) => (
+                <button key={x.id} onClick={() => { sfx.play('ui'); setSelSv(x.id); }} className={pick(sv?.id === x.id)}>
+                  {x.name} <span className="text-[#8a94a3]">· scav {x.skills.scavenging ?? 0} · drv {x.skills.driver ?? 0}{x.hp < 30 ? ' · too hurt' : ''}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="mb-1 text-[11px] text-[#8a94a3]">Vehicle</div>
+            <div className="flex flex-wrap gap-1">
+              {availVeh.length === 0 && <span className="text-[11px] text-[#8a94a3]">No vehicles available.</span>}
+              {availVeh.map((f) => (
+                <button key={f.defId} onClick={() => { sfx.play('ui'); setSelVeh(f.defId); setSelTrl(null); }} className={pick(veh?.defId === f.defId)}>
+                  {f.name} <span className="text-[#8a94a3]">· {f.storageCapKg} kg · cond {f.condPct}%</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          {towable.length > 0 && (
+            <div>
+              <div className="mb-1 text-[11px] text-[#8a94a3]">Trailer (hitched to it now)</div>
+              <div className="flex flex-wrap gap-1">
+                <button onClick={() => { sfx.play('ui'); setSelTrl(null); }} className={pick(!trl)}>None</button>
+                {towable.map((t) => (
+                  <button key={t.defId} onClick={() => { sfx.play('ui'); setSelTrl(t.defId); }} className={pick(trl?.defId === t.defId)}>
+                    {t.name} <span className="text-[#8a94a3]">· +{t.storageCapKg} kg</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div>
+            <div className="mb-1 text-[11px] text-[#8a94a3]">Task</div>
+            <div className="flex flex-col gap-1">
+              {DISPATCH_TASKS.map((t) => (
+                <button key={t.id} onClick={() => { sfx.play('ui'); setSelTask(t.id); }} className={pick(selTask === t.id)}>
+                  <span className="font-medium">{t.name}</span>
+                  <span className="block text-[10px] text-[#8a94a3]">{t.blurb}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="mb-1 text-[11px] text-[#8a94a3]">Destination</div>
+            <div className="flex flex-wrap gap-1">
+              {dests.map((p) => (
+                <button key={p.id} onClick={() => { sfx.play('ui'); setSelDest(p.id); }} className={pick(dest?.id === p.id)}>
+                  {p.name}
+                </button>
+              ))}
+            </div>
+          </div>
+          {sv && veh && dest && (
+            <p className="text-[11px] leading-relaxed text-[#8a94a3]">
+              {sv.name} takes the {veh.name}{trl ? ` + ${trl.name}` : ''} to {dest.name}: {distM} m each way,
+              back around {fmtAbs(now + eta)}. Husk-risk ≈{risk}% — a bad run comes home hurt, with the
+              vehicle worse for it. Loot rides in the vehicle{trl ? ' and trailer' : ''}; what doesn't fit stays behind.
+            </p>
+          )}
+          <button
+            disabled={!canGo}
+            onClick={() => {
+              if (!sv || !veh || !dest) return;
+              sfx.play('quest');
+              startDispatch(sv.id, veh.defId, trl?.defId ?? null, selTask, dest.id);
+            }}
+            className="rounded border border-[#e8b34b] bg-[#e8b34b]/10 px-3 py-2 text-sm font-medium text-[#e8b34b] transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Send {sv ? sv.name : 'crew'} out
+          </button>
+        </div>
+      )}
+
+      {Object.values(scouted).length > 0 && (
+        <div className="mt-3 border-t border-[#232b36] pt-2">
+          <div className="mb-1 text-[11px] font-semibold text-[#8a94a3]">Scout intel</div>
+          {Object.values(scouted).map((r) => (
+            <div key={r.poiId} className="flex justify-between text-[11px] text-[#8a94a3]">
+              <span className="text-[#d7dde5]">{poiName(r.poiId)}</span>
+              <span>
+                {r.looted}/{r.containers} emptied · {fmtAbs(r.atMin)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function TeamTab() {
   return (
     <div className="nomad-scroll flex h-full flex-col gap-4 overflow-y-auto">
       <CrewSection />
-      <section className="rounded border border-[#232b36] bg-[#0b0e12] p-3">
-        <h3 className="mb-1 text-xs font-semibold text-[#8a94a3]">Dispatch</h3>
-        <p className="text-sm text-[#8a94a3]">
-          {base
-            ? 'Crew run their jobs at base each day. Sending equipped survivors out on vehicle expeditions is the next system on the board (P5) — gear, a vehicle, a task, and whatever they bring back. Or don\u2019t.'
-            : 'Claim a home base (Shore Camp, Jonah\u2019s Camp, or the lighthouse) to give the crew a home to work from. Expedition dispatch — survivors out in vehicles with real gear — lands with the trailer & cargo pass.'}
-        </p>
-      </section>
+      <DispatchSection />
     </div>
   );
 }
@@ -937,6 +1160,8 @@ function VehiclesTab() {
   const vehicle = useGameStore((s) => s.vehicle);
   const fleet = useGameStore((s) => s.fleet);
   const trailerFleet = useGameStore((s) => s.trailerFleet);
+  const dispatches = useGameStore((s) => s.dispatches);
+  const survivors = useGameStore((s) => s.survivors);
   const inventory = useGameStore((s) => s.inventory);
   const repairVehicle = useGameStore((s) => s.repairVehicle);
   const installUpgrade = useGameStore((s) => s.installUpgrade);
@@ -1006,7 +1231,10 @@ function VehiclesTab() {
       <section>
         <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Fleet ({fleet.length}) — tap one to work on it</h3>
         <div className="flex flex-col gap-1.5">
-          {fleet.map((f) => (
+          {fleet.map((f) => {
+            const out = dispatches.find((d) => d.vehicleDefId === f.defId);
+            const outWho = out ? survivors.find((x) => x.id === out.survivorId) : undefined;
+            return (
             <button
               key={f.defId}
               onClick={() => setSelId(f.defId)}
@@ -1021,9 +1249,16 @@ function VehiclesTab() {
                 {f.tiresFlat > 0 && <span className="text-[#d9534f]"> · ⚠ {f.tiresFlat} flat</span>}
                 {f.upgrades.length > 0 && <> · {f.upgrades.length} upgrade{f.upgrades.length > 1 ? 's' : ''}</>}
                 {f.hitchedTrailer && <> · towing {TRAILER_NAME[f.hitchedTrailer] ?? f.hitchedTrailer}</>}
+                {' '}· {f.loc}
               </div>
+              {out && (
+                <div className="mt-0.5 text-[11px] text-[#e8b34b]">
+                  Out — {out.task} to {poiName(out.destPoiId)} with {outWho?.name ?? 'crew'} · back {fmtAbs(out.etaMin)}
+                </div>
+              )}
             </button>
-          ))}
+            );
+          })}
           {fleet.length === 0 && <p className="text-sm text-[#8a94a3]">No vehicles found yet.</p>}
         </div>
       </section>

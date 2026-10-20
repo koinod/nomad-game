@@ -4,7 +4,8 @@ import { PERKS as PERKS_ALL } from '../data/skills';
 import { MODS as MODS_ALL, magSizeOf } from '../data/mods';
 import { UPGRADES as UPGRADE_DEFS } from '../data/upgrades';
 import { MODULE_DEFS } from '../data/trailerData';
-import { FACILITIES as FACILITY_DEFS } from '../data/base';
+import { FACILITIES as FACILITY_DEFS, baseHeat } from '../data/base';
+import { dispatchDurationMin, poiName, resolveDispatch } from '../data/dispatch';
 import { TRAITS as TRAIT_DEFS } from '../data/survivors';
 import { QUESTS } from '../data/quests';
 import { DIFFICULTIES } from './types';
@@ -118,6 +119,14 @@ interface GameState {
   baseQueue: BaseBuildOrder[];
   dayStats: { kills: number; crafts: number; pickups: number };
   addJournal: (title: string, lines: string[]) => void;
+  startDispatch: (
+    survivorId: string,
+    vehicleDefId: string,
+    trailerDefId: string | null,
+    task: import('./types').DispatchTask,
+    destPoiId: string,
+  ) => void;
+  recallDispatch: (id: string) => void;
   moveInvItem: (uid: string, gx: number, gy: number, rot: boolean) => void;
   arrangeInventory: (order: 'size' | 'category') => void;
   moveStorageItem: (index: number, gx: number, gy: number, rot: boolean) => void;
@@ -245,6 +254,110 @@ interface GameState {
 const initialEquipped: Equipped = { melee: null, ranged: null, pack: null };
 
 export const useGameStore = create<GameState>()((set, get) => {
+  /** Wave 3: settle every dispatch whose ETA has passed. Runs off
+   *  advanceTime, so it ticks while playing, fast-forwarding, or sleeping.
+   *  Side effects (loot into the returning vehicle's storage, condition
+   *  damage, survivor injury) go through the engine/store like any other. */
+  const resolveDueDispatches = () => {
+    const s = get();
+    if (s.dispatches.length === 0) return;
+    const now = s.daysElapsed * 1440 + s.timeMinutes;
+    const due = s.dispatches.filter((d) => now >= d.etaMin);
+    if (due.length === 0) return;
+    set({ dispatches: s.dispatches.filter((d) => now < d.etaMin) });
+    for (const d of due) {
+      const st = get();
+      const sv = st.survivors.find((x) => x.id === d.survivorId);
+      if (!sv) continue;
+      const eng = getGame();
+      const vehName = st.fleet.find((f) => f.defId === d.vehicleDefId)?.name ?? d.vehicleDefId;
+      const heat = st.base ? baseHeat(st.base.facilities, st.survivors.length, st.daysElapsed) : 0;
+      const veh = st.fleet.find((f) => f.defId === d.vehicleDefId);
+      const trl = d.trailerDefId ? st.trailerFleet.find((t) => t.defId === d.trailerDefId) : undefined;
+      const freeKg =
+        Math.max(0, (veh?.storageCapKg ?? 60) - (veh?.storageUsedKg ?? 0)) +
+        (trl ? Math.max(0, trl.storageCapKg - trl.storageUsedKg) : 0);
+      const out = resolveDispatch({
+        task: d.task,
+        destPoiId: d.destPoiId,
+        distM: d.distM,
+        heat,
+        scavenging: sv.skills.scavenging ?? 0,
+        driver: sv.skills.driver ?? 0,
+        combat: sv.skills.combat ?? 0,
+        traits: sv.traits,
+        freeKg,
+        rng: Math.random,
+      });
+      const lines: string[] = [];
+      if (out.eventText) lines.push(out.eventText);
+
+      if (d.task === 'scout') {
+        const census = eng?.scoutPoi(d.destPoiId);
+        if (census) {
+          set({ scouted: { ...get().scouted, [d.destPoiId]: { poiId: d.destPoiId, atMin: now, containers: census.total, looted: census.looted } } });
+          const verdict =
+            census.total === 0 ? 'Nothing searchable stands there.'
+            : census.looted >= census.total ? 'Picked clean — every container is empty.'
+            : census.looted / census.total > 0.5 ? 'Picked over — the easy finds are gone.'
+            : 'Rich pickings — most of it is still there.';
+          lines.push(`${poiName(d.destPoiId)}: ${census.total} containers standing, ${census.looted} already emptied. ${verdict}`);
+        } else {
+          lines.push('The scout report came back garbled — no usable intel.');
+        }
+      }
+
+      // loot delivery: vehicle storage first, then the trailer's, then
+      // the player's own pack; whatever fits nowhere stayed behind
+      let leftKg = out.leftBehindKg;
+      const brought: string[] = [];
+      for (const stack of out.loot) {
+        let placed = false;
+        if (eng) {
+          placed = !eng.storagePutItem('vehicle', d.vehicleDefId, { uid: newUid(), itemId: stack.itemId, qty: stack.qty });
+          if (!placed && d.trailerDefId) {
+            placed = !eng.storagePutItem('trailer', d.trailerDefId, { uid: newUid(), itemId: stack.itemId, qty: stack.qty });
+          }
+        }
+        if (!placed) placed = st.addItem(stack.itemId, stack.qty, true);
+        if (placed) brought.push(`${stack.qty}× ${ITEMS[stack.itemId]?.name ?? stack.itemId}`);
+        else leftKg += (ITEMS[stack.itemId]?.weight ?? 1) * stack.qty;
+      }
+      if (d.task !== 'scout') {
+        lines.push(
+          brought.length > 0
+            ? `Brought back: ${brought.join(', ')} — loaded into the ${vehName}.`
+            : 'Came back empty-handed.',
+        );
+      }
+      if (leftKg > 0.05) lines.push(`Left behind ≈${leftKg.toFixed(1)} kg that would not fit.`);
+
+      // vehicle wear + survivor hurt
+      if (out.vehicleDamage > 0 && eng) {
+        const tireLine = eng.damageVehicle(d.vehicleDefId, out.vehicleDamage);
+        lines.push(`The ${vehName} took a beating (−${Math.round(out.vehicleDamage * 100)}% condition).`);
+        if (tireLine) lines.push(tireLine);
+      }
+      if (out.survivorHpLoss > 0) lines.push(`${sv.name} came back hurt (−${out.survivorHpLoss} HP).`);
+      set({
+        survivors: get().survivors.map((x) => {
+          if (x.id !== sv.id) return x;
+          const hp = Math.max(5, x.hp - out.survivorHpLoss);
+          return {
+            ...x,
+            hp,
+            status: hp < 45 && x.status === 'healthy' ? ('injured' as const) : x.status,
+            morale: Math.max(0, Math.min(100, x.morale + out.moraleDelta)),
+          };
+        }),
+      });
+      const taskName = d.task === 'scavenge' ? 'Scavenge' : d.task === 'scout' ? 'Scout' : 'Escort run';
+      get().addJournal(`${taskName} — ${poiName(d.destPoiId)}`, lines);
+      get().addToast(`${sv.name} is back from ${poiName(d.destPoiId)}. Report in the Log.`);
+      get().addSkillXp('leadership', 4);
+    }
+  };
+
   const api: GameState = {
     screen: 'title',
     difficulty: 'survivor',
@@ -557,6 +670,7 @@ export const useGameStore = create<GameState>()((set, get) => {
       const rested = Math.max(0, s.restedMinutesLeft - minutes);
       if (s.restedMinutesLeft > 0 && rested === 0) s.addToast('The well-rested feeling fades.');
       set({ timeMinutes: (s.timeMinutes + minutes) % 1440, restedMinutesLeft: rested });
+      resolveDueDispatches();
     },
 
     advanceDay: () => set((s) => ({ daysElapsed: s.daysElapsed + 1 })),
@@ -1131,6 +1245,66 @@ export const useGameStore = create<GameState>()((set, get) => {
         atMin, title, lines,
       };
       set({ journal: [entry, ...s.journal].slice(0, 60) });
+    },
+
+    startDispatch: (survivorId, vehicleDefId, trailerDefId, task, destPoiId) => {
+      const s = get();
+      const sv = s.survivors.find((x) => x.id === survivorId);
+      if (!sv) return;
+      if (s.dispatches.some((d) => d.survivorId === survivorId)) {
+        s.addToast(`${sv.name} is already out.`);
+        return;
+      }
+      if (s.dispatches.some((d) => d.vehicleDefId === vehicleDefId)) {
+        s.addToast('That vehicle is already out on a dispatch.');
+        return;
+      }
+      if (trailerDefId && s.dispatches.some((d) => d.trailerDefId === trailerDefId)) {
+        s.addToast('That trailer is already out on a dispatch.');
+        return;
+      }
+      if (sv.hp < 30) {
+        s.addToast(`${sv.name} is too hurt to send out (HP ${Math.round(sv.hp)}).`);
+        return;
+      }
+      if (s.vehicle?.uid === vehicleDefId) {
+        s.addToast('You are sitting in that one.');
+        return;
+      }
+      const dest = s.poiPositions[destPoiId];
+      if (!dest) {
+        s.addToast('No route plotted there yet.');
+        return;
+      }
+      const origin = (s.base && s.poiPositions[s.base.poiId]) || [s.pos[0], s.pos[2]];
+      const distM = Math.round(Math.hypot(dest[0] - origin[0], dest[1] - origin[1]));
+      const now = s.daysElapsed * 1440 + s.timeMinutes;
+      const etaMin = now + dispatchDurationMin(distM, sv.skills.driver ?? 0, task);
+      const d: Dispatch = {
+        id: `d${Date.now().toString(36)}${(uidCounter++).toString(36)}`,
+        survivorId, vehicleDefId, trailerDefId, task, destPoiId,
+        departMin: now, etaMin, distM, status: 'out',
+      };
+      set({ dispatches: [...s.dispatches, d] });
+      const vehName = s.fleet.find((f) => f.defId === vehicleDefId)?.name ?? vehicleDefId;
+      const taskName = task === 'scavenge' ? 'Scavenge' : task === 'scout' ? 'Scout' : 'Escort run';
+      s.addJournal(`Dispatch — ${taskName} to ${poiName(destPoiId)}`, [
+        `${sv.name} rolled out in the ${vehName}${trailerDefId ? ' with a trailer in tow' : ''}. ${distM} m each way.`,
+      ]);
+      s.addToast(`${sv.name} dispatched to ${poiName(destPoiId)}.`);
+      sfx.play('quest', { volume: 0.5 });
+    },
+
+    recallDispatch: (id) => {
+      const s = get();
+      const d = s.dispatches.find((x) => x.id === id);
+      if (!d) return;
+      const sv = s.survivors.find((x) => x.id === d.survivorId);
+      set({ dispatches: s.dispatches.filter((x) => x.id !== id) });
+      s.addJournal(`Recalled — ${poiName(d.destPoiId)}`, [
+        `${sv?.name ?? 'The crew'} turned around and came home early. Nothing to show for the fuel.`,
+      ]);
+      s.addToast(`${sv?.name ?? 'Crew'} recalled.`);
     },
 
     moveInvItem: (uid, gx, gy, rot) => {
