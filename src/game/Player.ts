@@ -775,7 +775,7 @@ export class Player {
           // 1.96m tall — sink the body so the head lands in the glass
           // band, not through the roof (per-vehicle roof heights)
           gy = ({
-            semi: 0.28, semi_day: 0.28, boxtruck: 0.24, van: 0.0, v03_hauler: -0.72, sprinter: -0.6, goliath: 0.12, tank: 0.55,
+            semi: 0.28, semi_day: 0.28, boxtruck: 0.24, van: 0.0, v03_hauler: -0.72, sprinter: 0.06, goliath: 0.12, tank: 0.55,
             f250: 0.12, pickup: 0.06, bronco: 0.06, mustang: -0.28, marsh_buggy: -0.21, sedan: -0.14,
           } as Record<string, number>)[seat.id] ?? -0.66;
         }
