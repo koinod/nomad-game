@@ -747,7 +747,13 @@ export class Player {
           lx = W * 0.21; // driver's seat, left-hand drive (+X = vehicle left)
           const cabForward = seat.id === 'van' || seat.id === 'boxtruck' || seat.id === 'semi' || seat.id === 'apc';
           lz = cabForward ? L * 0.24 : L * 0.03;
-          gy = seat.id === 'semi' ? 0.5 : seat.id === 'boxtruck' || seat.id === 'apc' ? 0.32 : seat.id === 'van' ? 0.22 : -0.02;
+          // group origin is at the avatar's FEET and the avatar stands
+          // 1.96m tall — sink the body so the head lands in the glass
+          // band, not through the roof (per-vehicle roof heights)
+          gy = ({
+            semi: -0.41, boxtruck: -0.72, van: -0.72, apc: 0.12,
+            f250: -0.4, pickup: -0.5, bronco: -0.55, mustang: -0.68,
+          } as Record<string, number>)[seat.id] ?? -0.66;
         }
       }
       const c = Math.cos(seat.heading);

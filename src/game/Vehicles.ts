@@ -26,7 +26,7 @@ export const VEHICLE_DEFS: VehicleDef[] = [
   { id: 'atv', name: 'ATV', kind: 'atv', length: 2.1, width: 1.1, fuelMax: 15, burnClass: 0.6, topSpeed: 16, noiseDrive: 42, color: 0x4a5230 },
   { id: 'skiff', name: 'Skiff', kind: 'skiff', length: 5.5, width: 2.0, fuelMax: 24, burnClass: 0.9, topSpeed: 13, noiseDrive: 38, color: 0xd8d8d0, water: true },
   { id: 'sedan', name: 'Sedan', kind: 'car', length: 4.7, width: 1.8, fuelMax: 40, burnClass: 1.0, topSpeed: 12, noiseDrive: 45, color: 0x5a6a7a },
-  { id: 'mustang', name: 'Mustang', kind: 'car', length: 4.8, width: 1.9, fuelMax: 45, burnClass: 1.1, topSpeed: 24, noiseDrive: 55, color: 0x8a1e1e },
+  { id: 'mustang', name: 'Mustang Dark Horse', kind: 'car', length: 4.8, width: 1.9, fuelMax: 45, burnClass: 1.1, topSpeed: 24, noiseDrive: 55, color: 0x2f4d7d },
   { id: 'van', name: 'Utility Van', kind: 'car', length: 5.2, width: 2.0, fuelMax: 55, burnClass: 1.3, topSpeed: 14, noiseDrive: 50, color: 0xb8b8b0 },
   { id: 'bronco', name: 'Bronco 4x4', kind: 'car', length: 4.6, width: 1.9, fuelMax: 55, burnClass: 1.3, topSpeed: 15, noiseDrive: 55, color: 0x4a5a3a },
   { id: 'pickup', name: 'Pickup', kind: 'car', length: 5.3, width: 1.9, fuelMax: 60, burnClass: 1.3, topSpeed: 14, noiseDrive: 55, color: 0x3a4a5a },
@@ -96,8 +96,8 @@ function buildCarBody(g: THREE.Group, def: VehicleDef, v: Vehicle): void {
   if (def.id === 'van' || def.id === 'boxtruck') {
     // tall box body
     box(g, W, 1.5, L * 0.62, body, 0, 1.05, -L * 0.16);
-    box(g, W * 0.98, 0.75, L * 0.3, body, 0, 0.68, L * 0.32);
-    box(g, W * 0.92, 0.5, 0.08, glass(), 0, 0.72, L * 0.47);
+    box(g, W * 0.98, 1.0, L * 0.3, body, 0, 0.8, L * 0.32);
+    box(g, W * 0.92, 0.55, 0.08, glass(), 0, 0.98, L * 0.47);
   } else if (def.id === 'semi') {
     box(g, W, 1.5, 1.6, body, 0, 1.25, L * 0.28);
     box(g, W * 0.9, 0.5, 0.08, glass(), 0, 1.35, L * 0.28 + 0.8);
@@ -141,10 +141,54 @@ function buildCarBody(g: THREE.Group, def: VehicleDef, v: Vehicle): void {
     spare.position.set(0, 0.95, -L / 2 - 0.12);
     g.add(spare);
   } else if (def.id === 'mustang') {
-    box(g, W, 0.5, L * 0.55, body, 0, 0.55, L * 0.2); // long hood
-    box(g, W * 0.94, 0.5, L * 0.4, body, 0, 0.82, -L * 0.2); // fastback cabin
-    box(g, W * 0.86, 0.36, L * 0.34, glass(), 0, 0.85, -L * 0.18);
-    box(g, W * 0.7, 0.08, 0.3, mat(0x1e1e22), 0, 0.95, -L * 0.46); // spoiler
+    // 2026 Mustang Dark Horse, built from Ian's model sheet: Blue Ember,
+    // long vented hood, slim DRL headlights over a wide honeycomb grille,
+    // fastback roofline with a sloped rear glass, muscular rear haunches,
+    // tri-bar taillights, GT wing, quad exhausts.
+    const dark = mat(0x0c0d10, 0.85, 0.1);
+    const trim = mat(0x16181c, 0.7, 0.2);
+    box(g, W, 0.52, L, body, 0, 0.52, 0); // base body
+    box(g, W * 0.97, 0.3, L * 0.44, body, 0, 0.88, L * 0.26); // long hood
+    // hood vent + slats
+    box(g, W * 0.42, 0.05, L * 0.2, dark, 0, 1.04, L * 0.3);
+    box(g, W * 0.42, 0.02, 0.05, trim, 0, 1.06, L * 0.24);
+    box(g, W * 0.42, 0.02, 0.05, trim, 0, 1.06, L * 0.36);
+    // face: wide grille, pony badge, lower intake, splitter
+    box(g, W * 0.74, 0.34, 0.08, dark, 0, 0.64, L * 0.5);
+    box(g, 0.18, 0.11, 0.03, mat(0xb9c0c8, 0.35, 0.7), 0, 0.64, L * 0.545); // pony
+    box(g, W * 0.62, 0.2, 0.06, dark, 0, 0.31, L * 0.5);
+    box(g, W * 1.0, 0.07, 0.3, trim, 0, 0.15, L * 0.46); // splitter
+    // slim headlights + amber DRL strips
+    for (const sgn of [1, -1]) {
+      box(g, 0.44, 0.09, 0.06, dark, sgn * W * 0.33, 0.84, L * 0.49);
+      box(g, 0.4, 0.03, 0.02, mat(0xd88f2a, 0.4, 0), sgn * W * 0.33, 0.87, L * 0.525);
+    }
+    // fastback cabin: set well back, glass band, sloped rear glass to deck
+    box(g, W * 0.9, 0.46, L * 0.42, body, 0, 1.0, -L * 0.13);
+    box(g, W * 0.84, 0.32, L * 0.38, glass(), 0, 1.08, -L * 0.12);
+    box(g, W * 0.8, 0.06, L * 0.26, body, 0, 1.27, -L * 0.18); // roof panel
+    const rearGlass = box(g, W * 0.78, 0.04, L * 0.3, glass(), 0, 1.08, -L * 0.33);
+    rearGlass.rotation.x = -0.62; // the fastback slope
+    // rear haunches + rocker skirts + mirrors
+    box(g, W * 1.03, 0.36, L * 0.3, body, 0, 0.74, -L * 0.33);
+    for (const sgn of [1, -1]) {
+      box(g, 0.06, 0.15, L * 0.42, trim, sgn * (W / 2 + 0.01), 0.27, -L * 0.02);
+      box(g, 0.07, 0.1, 0.12, trim, sgn * (W / 2 + 0.05), 1.14, L * 0.06);
+    }
+    // tail: black decklid panel, tri-bar lights, diffuser, quad exhausts
+    box(g, W * 0.82, 0.27, 0.05, dark, 0, 0.8, -L * 0.5);
+    const tailMat = mat(0x9e1622, 0.35, 0.1);
+    for (const sgn of [1, -1]) {
+      for (let i = 0; i < 3; i++) {
+        box(g, 0.06, 0.2, 0.03, tailMat, sgn * (W * 0.2 + i * 0.1), 0.8, -L * 0.53);
+      }
+      box(g, 0.09, 0.07, 0.07, mat(0x9aa2ac, 0.3, 0.8), sgn * W * 0.3, 0.27, -L * 0.51);
+      box(g, 0.09, 0.07, 0.07, mat(0x9aa2ac, 0.3, 0.8), sgn * W * 0.19, 0.27, -L * 0.51);
+    }
+    box(g, W * 0.72, 0.15, 0.08, dark, 0, 0.22, -L * 0.5); // diffuser
+    // GT wing on uprights
+    for (const sgn of [1, -1]) box(g, 0.06, 0.24, 0.1, trim, sgn * W * 0.3, 1.05, -L * 0.45);
+    box(g, W * 0.88, 0.05, 0.34, trim, 0, 1.19, -L * 0.46);
   } else {
     // sedan
     box(g, W, 0.55, L, body, 0, 0.58, 0);
