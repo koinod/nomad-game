@@ -43,21 +43,50 @@ function ControlButton({
   );
 }
 
-/** PUBG-style weapon slots: equipped primary/secondary, tap to swing/fire. */
+/** PUBG-style weapon slots: equipped primary/secondary, tap to swing/fire.
+ *  The third slot is the grenade throw affordance: it shows the equipped
+ *  throwable (or the first one in the pack), and tapping it auto-equips a
+ *  grenade into the melee slot if needed, then throws via the normal
+ *  melee-attack path (Combat.tryMelee routes thrown items to Game's
+ *  projectile sim). */
 function WeaponBar() {
   const equipped = useGameStore((s) => s.equipped);
   const inventory = useGameStore((s) => s.inventory);
   const melee = equipped.melee ? inventory.find((i) => i.uid === equipped.melee) : undefined;
   const ranged = equipped.ranged ? inventory.find((i) => i.uid === equipped.ranged) : undefined;
+  const nadeUid = equipped.melee && melee && ITEMS[melee.itemId]?.thrown ? melee.uid : undefined;
+  const nadeItem = nadeUid ? inventory.find((i) => i.uid === nadeUid) : undefined;
+  const nadeDef = nadeItem ? ITEMS[nadeItem.itemId] : undefined;
+  const nadeQty = nadeItem?.qty ?? 0;
+  // first throwable in the pack, for auto-equip when none is equipped
+  const nadeInPack = inventory.find((i) => ITEMS[i.itemId]?.thrown);
+  const nadeInPackDef = nadeInPack ? ITEMS[nadeInPack.itemId] : undefined;
+
+  const throwGrenade = () => {
+    const s = useGameStore.getState();
+    const mUid = s.equipped.melee;
+    const mIt = mUid ? s.inventory.find((i) => i.uid === mUid) : undefined;
+    const mDef = mIt ? ITEMS[mIt.itemId] : undefined;
+    if (!mDef?.thrown) {
+      const nade = s.inventory.find((i) => ITEMS[i.itemId]?.thrown);
+      if (!nade) {
+        s.addToast('No grenades in your pack.');
+        return;
+      }
+      s.equipUid(nade.uid);
+    }
+    input.attackMelee = true;
+  };
 
   const slot = (
     tag: string,
     name: string | null,
+    sub: string | null,
     onFire: () => void,
   ) => (
     <button
       aria-label={`${tag} weapon: ${name ?? 'none'}`}
-      className="flex h-14 w-32 flex-col items-start justify-center rounded border border-[#232b36] bg-[#0b0e12]/85 px-3 active:border-[#e8b34b]"
+      className="flex h-12 w-24 flex-col items-start justify-center rounded border border-[#232b36] bg-[#0b0e12]/85 px-2.5 active:border-[#e8b34b]"
       style={{ touchAction: 'none' }}
       onTouchStart={(e) => {
         e.preventDefault();
@@ -67,18 +96,25 @@ function WeaponBar() {
       onContextMenu={(e) => e.preventDefault()}
     >
       <span className="text-[10px] uppercase tracking-wide text-[#8a94a3]">{tag}</span>
-      <span className="w-full truncate text-left text-sm text-[#d7dde5]">{name ?? '—'}</span>
+      <span className="w-full truncate text-left text-xs text-[#d7dde5]">{name ?? '—'}</span>
+      {sub && <span className="text-[10px] text-[#8a94a3]">{sub}</span>}
     </button>
   );
 
   return (
-    <div className="absolute bottom-24 left-1/2 flex -translate-x-1/2 gap-2">
-      {slot('Primary', ranged ? ITEMS[ranged.itemId]?.name ?? null : null, () => {
+    <div className="absolute bottom-6 left-1/2 flex -translate-x-1/2 gap-2">
+      {slot('Primary', ranged ? ITEMS[ranged.itemId]?.name ?? null : null, null, () => {
         input.attackRanged = true;
       })}
-      {slot('Secondary', melee ? ITEMS[melee.itemId]?.name ?? null : null, () => {
+      {slot('Secondary', melee ? ITEMS[melee.itemId]?.name ?? null : null, null, () => {
         input.attackMelee = true;
       })}
+      {slot(
+        'Throw',
+        nadeDef ? nadeDef.name : nadeInPackDef ? nadeInPackDef.name : null,
+        nadeDef ? `×${nadeQty} · tap to throw` : nadeInPackDef ? 'in pack · tap to throw' : null,
+        throwGrenade,
+      )}
     </div>
   );
 }
@@ -163,6 +199,17 @@ export default function TouchControls() {
 
   return (
     <div className="absolute inset-0 z-20" style={{ touchAction: 'none', overscrollBehavior: 'contain' }}>
+      {/* safe-area wrapper: every zone anchors inside the notch/home-indicator
+          insets so controls never sit under the Dynamic Island or gesture bar */}
+      <div
+        className="relative h-full w-full"
+        style={{
+          paddingTop: 'env(safe-area-inset-top)',
+          paddingRight: 'env(safe-area-inset-right)',
+          paddingBottom: 'env(safe-area-inset-bottom)',
+          paddingLeft: 'env(safe-area-inset-left)',
+        }}
+      >
       {/* look area: right half */}
       <div
         className="absolute bottom-0 right-0 top-0 w-1/2"
@@ -312,6 +359,7 @@ export default function TouchControls() {
 
       {/* fullscreen toggle */}
       <FullscreenButton />
+      </div>
     </div>
   );
 }

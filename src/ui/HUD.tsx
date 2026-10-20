@@ -1,8 +1,44 @@
 import { useEffect, useState } from 'react';
 import { useGameStore } from '../store/gameStore';
+import { input } from '../game/input';
 import { ITEMS } from '../data/items';
 import { QUESTS } from '../data/quests';
 import { sfx } from '../systems/audio';
+
+const isTouch = typeof window !== 'undefined' && 'ontouchstart' in window;
+
+/** Noise meter: loudest recent sound, decays toward silence (engine-owned). */
+function NoiseMeter({ pill }: { pill?: boolean }) {
+  const noiseLevel = useGameStore((s) => s.noiseLevel);
+  const loud = noiseLevel > 60;
+  const audible = noiseLevel > 25;
+  const label = loud ? 'LOUD' : audible ? 'audible' : 'quiet';
+  const labelColor = loud ? 'text-[#d9534f]' : audible ? 'text-[#e8b34b]' : 'text-[#8a94a3]';
+  const fill = loud ? 'bg-[#d9534f]' : audible ? 'bg-[#e8b34b]' : 'bg-[#3b6a8a]';
+  if (pill) {
+    return (
+      <div
+        className="flex items-center gap-2 rounded-full border border-[#232b36] bg-[#0b0e12]/85 px-3 py-1.5"
+        aria-label={`Noise: ${label}`}
+      >
+        <span className="text-xs">🔊</span>
+        <div className="h-1.5 w-16 overflow-hidden rounded bg-[#232b36]">
+          <div className={`h-full rounded ${fill}`} style={{ width: `${Math.round(noiseLevel)}%` }} />
+        </div>
+        <span className={`text-[11px] font-semibold uppercase tracking-wider ${labelColor}`}>{label}</span>
+      </div>
+    );
+  }
+  return (
+    <>
+      <div className="mb-1 mt-2 flex items-center justify-between text-xs text-[#8a94a3]">
+        <span>Noise</span>
+        <span className={labelColor}>{label}</span>
+      </div>
+      <Bar value={noiseLevel} max={100} fill={fill} bg="bg-[#232b36]" />
+    </>
+  );
+}
 
 function Bar({
   value,
@@ -64,6 +100,29 @@ function Clock() {
   );
 }
 
+function AmmoCounter() {
+  const rangedUid = useGameStore((s) => s.equipped.ranged);
+  const inventory = useGameStore((s) => s.inventory);
+  const inst = rangedUid ? inventory.find((i) => i.uid === rangedUid) : undefined;
+  const def = inst ? ITEMS[inst.itemId] : undefined;
+  if (!inst || !def || def.magSize == null || !def.ammoId) return null;
+  const cap = Math.round(def.magSize * (inst.mods?.includes('extended_mag') ? 1.5 : 1));
+  const loaded = inst.loaded ?? cap;
+  const reserve = inventory
+    .filter((i) => i.itemId === def.ammoId)
+    .reduce((a, i) => a + i.qty, 0);
+  return (
+    <div className="absolute bottom-24 right-4 rounded border border-[#232b36] bg-[#0b0e12]/80 px-3 py-1.5 text-right">
+      <div className={`font-mono text-lg leading-none ${loaded === 0 ? 'text-[#d9534f]' : 'text-[#d7dde5]'}`}>
+        {loaded}<span className="text-xs text-[#8a94a3]"> / {cap}</span>
+      </div>
+      <div className="mt-0.5 text-[10px] uppercase tracking-wider text-[#8a94a3]">
+        {loaded === 0 ? (reserve > 0 ? 'R — reload' : 'no ammo') : `reserve ${reserve}`}
+      </div>
+    </div>
+  );
+}
+
 function Crosshair() {
   const meleeTarget = useGameStore((s) => s.meleeTarget);
   const hitmark = useGameStore((s) => s.hitmark);
@@ -116,8 +175,9 @@ function Hotbar() {
   const hotbar = useGameStore((s) => s.hotbar);
   const inventory = useGameStore((s) => s.inventory);
   const useHotbar = useGameStore((s) => s.useHotbar);
+  // touch: compact vertical strip for the right thumb; desktop: bottom-center row
   return (
-    <div className="flex gap-2">
+    <div className={isTouch ? 'flex flex-col gap-2' : 'flex gap-2'}>
       {hotbar.map((uid, i) => {
         const item = uid ? inventory.find((x) => x.uid === uid) : undefined;
         const def = item ? ITEMS[item.itemId] : undefined;
@@ -129,7 +189,11 @@ function Hotbar() {
               useHotbar(i);
             }}
             aria-label={`Hotbar ${i + 1}${def ? `: use ${def.name}` : ''}`}
-            className="flex h-14 w-16 flex-col items-center justify-center rounded border border-[#232b36] bg-[#0b0e12]/80 px-1 transition-colors hover:border-[#e8b34b]"
+            className={
+              isTouch
+                ? 'flex h-11 w-12 flex-col items-center justify-center rounded border border-[#232b36] bg-[#0b0e12]/80 px-1 active:border-[#e8b34b]'
+                : 'flex h-14 w-16 flex-col items-center justify-center rounded border border-[#232b36] bg-[#0b0e12]/80 px-1 transition-colors hover:border-[#e8b34b]'
+            }
           >
             <span className="text-[10px] text-[#8a94a3]">{i + 1}</span>
             <span className="w-full truncate text-center text-xs text-[#d7dde5]">
@@ -213,12 +277,30 @@ export default function HUD() {
   const stamina = useGameStore((s) => s.stamina);
   const maxStamina = useGameStore((s) => s.maxStamina);
   const interactPrompt = useGameStore((s) => s.interactPrompt);
-  const noiseLevel = useGameStore((s) => s.noiseLevel);
   const search = useGameStore((s) => s.search);
   const lowHp = hp / maxHp < 0.3 && hp > 0;
+  // engine prompts carry the desktop "[F] " prefix; the key cap is rendered
+  // adaptively (F on desktop, USE on touch) so strip it from the text.
+  const promptText = interactPrompt?.replace(/^\[F\] /, '') ?? null;
+  const promptKey = isTouch ? 'USE' : 'F';
+  // "Pick safe (locked)" should read as picking, not searching
+  const searchIsPick = search?.label.startsWith('Pick') ?? false;
+  const searchSubject = (search?.label ?? '')
+    .replace(/^Search /, '')
+    .replace(/^Pick /, '');
 
   return (
     <div className="pointer-events-none absolute inset-0 z-20">
+      {/* safe-area wrapper so HUD elements clear the notch/home indicator */}
+      <div
+        className="relative h-full w-full"
+        style={{
+          paddingTop: 'env(safe-area-inset-top)',
+          paddingRight: 'env(safe-area-inset-right)',
+          paddingBottom: 'env(safe-area-inset-bottom)',
+          paddingLeft: 'env(safe-area-inset-left)',
+        }}
+      >
       {lowHp && (
         <div
           className="absolute inset-0"
@@ -228,11 +310,12 @@ export default function HUD() {
         />
       )}
 
-      {/* hold-to-search progress */}
+      {/* hold-to-search progress + explicit cancel (tap = input.interact edge,
+          which the engine now treats as a cancel while searching) */}
       {search && (
         <div className="absolute left-1/2 top-[58%] w-64 -translate-x-1/2">
           <div className="mb-1 text-center text-xs uppercase tracking-wider text-[#d7dde5]">
-            Searching {search.label.replace(/^Search /, '').replace(/^Pick /, '')}…
+            {searchIsPick ? 'Picking' : 'Searching'} {searchSubject}…
           </div>
           <div className="h-2 overflow-hidden rounded bg-[#232b36]">
             <div
@@ -240,14 +323,25 @@ export default function HUD() {
               style={{ width: `${Math.round(search.frac * 100)}%` }}
             />
           </div>
+          <div className="mt-2 flex justify-center">
+            <button
+              onClick={() => {
+                input.interact = true;
+              }}
+              aria-label="Cancel search"
+              className="pointer-events-auto rounded border border-[#232b36] bg-[#0b0e12]/85 px-4 py-1.5 text-xs uppercase tracking-wider text-[#8a94a3] active:border-[#d9534f] active:text-[#d9534f]"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
 
       {/* crosshair */}
       <Crosshair />
 
-      {/* vitals, top-left */}
-      <div className="absolute left-4 top-4 w-56">
+      {/* vitals, top-left — compact on touch (noise lives in its own pill) */}
+      <div className={`absolute left-4 top-4 ${isTouch ? 'w-40' : 'w-56'}`}>
         <div className="mb-1 flex items-center justify-between text-xs text-[#8a94a3]">
           <span>Health</span>
           <span className="font-mono">
@@ -259,19 +353,15 @@ export default function HUD() {
           <span>Stamina</span>
         </div>
         <Bar value={stamina} max={maxStamina} fill="bg-[#e8b34b]" bg="bg-[#232b36]" />
-        <div className="mb-1 mt-2 flex items-center justify-between text-xs text-[#8a94a3]">
-          <span>Noise</span>
-          <span className={noiseLevel > 60 ? 'text-[#d9534f]' : noiseLevel > 25 ? 'text-[#e8b34b]' : ''}>
-            {noiseLevel > 60 ? 'LOUD' : noiseLevel > 25 ? 'audible' : 'quiet'}
-          </span>
-        </div>
-        <Bar
-          value={noiseLevel}
-          max={100}
-          fill={noiseLevel > 60 ? 'bg-[#d9534f]' : noiseLevel > 25 ? 'bg-[#e8b34b]' : 'bg-[#3b6a8a]'}
-          bg="bg-[#232b36]"
-        />
+        {!isTouch && <NoiseMeter />}
       </div>
+
+      {/* noise pill, touch only — top-center, clear of the combat cluster */}
+      {isTouch && (
+        <div className="absolute left-1/2 top-4 -translate-x-1/2">
+          <NoiseMeter pill />
+        </div>
+      )}
 
       {/* clock + battery, top-right */}
       <div className="absolute right-4 top-4 flex items-center gap-3">
@@ -284,11 +374,19 @@ export default function HUD() {
         <QuestTracker />
       </div>
 
-      {/* hotbar, bottom-center */}
-      <div className="pointer-events-auto absolute bottom-4 left-1/2 -translate-x-1/2">
-        <Hotbar />
-      </div>
+      {/* hotbar: desktop bottom-center row; touch right-edge vertical strip
+          for the right thumb (bottom-center is the weapon bar's zone) */}
+      {isTouch ? (
+        <div className="pointer-events-auto absolute right-3 top-[38%]">
+          <Hotbar />
+        </div>
+      ) : (
+        <div className="pointer-events-auto absolute bottom-4 left-1/2 -translate-x-1/2">
+          <Hotbar />
+        </div>
+      )}
       <VehiclePanel />
+      <AmmoCounter />
 
       {/* controls hint, desktop only */}
       {!('ontouchstart' in window) && (
@@ -298,19 +396,27 @@ export default function HUD() {
         </div>
       )}
 
-      {/* interact prompt, above hotbar */}
-      {interactPrompt && (
-        <div className="absolute bottom-24 left-1/2 -translate-x-1/2">
+      {/* interact prompt: desktop bottom-center; touch right side above the
+          USE button so it never sits under the weapon bar */}
+      {promptText && (
+        <div
+          className={
+            isTouch
+              ? 'absolute bottom-[19rem] right-6'
+              : 'absolute bottom-24 left-1/2 -translate-x-1/2'
+          }
+        >
           <div className="flex items-center gap-2 rounded border border-[#232b36] bg-[#0b0e12]/85 px-4 py-2">
             <span className="rounded border border-[#e8b34b] px-2 py-0.5 font-mono text-sm text-[#e8b34b]">
-              F
+              {promptKey}
             </span>
-            <span className="text-sm text-[#d7dde5]">{interactPrompt}</span>
+            <span className="text-sm text-[#d7dde5]">{promptText}</span>
           </div>
         </div>
       )}
 
       <Toasts />
+      </div>
     </div>
   );
 }
