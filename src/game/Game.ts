@@ -668,10 +668,18 @@ export class Game {
       }
     }
 
-    // hold-to-search: the timer runs while the player stays close and unhurt
+    // hold-to-search: the timer runs while the player stays close and unhurt.
+    // Tapping interact (F on desktop, USE on touch) while searching cancels it —
+    // the press is consumed so the prompt block below doesn't restart the search.
     if (this.searching) {
       const q = this.searching;
-      const moved = Math.hypot(player.pos.x - q.x, player.pos.z - q.z);
+      if (input.interact) {
+        input.interact = false;
+        this.searching = null;
+        s.setSearch(null);
+        s.addToast('Search cancelled.');
+      } else {
+        const moved = Math.hypot(player.pos.x - q.x, player.pos.z - q.z);
       if (moved > 2 || s.hp < q.hp) {
         this.searching = null;
         s.setSearch(null);
@@ -701,6 +709,7 @@ export class Game {
           s.setSearch(null);
           this.interact!.useById(q.id);
         }
+      }
       }
     }
 
@@ -1181,7 +1190,9 @@ export class Game {
         : undefined;
       if (rangedIt) {
         const def = ITEMS[rangedIt.itemId];
-        const hasAmmo = def?.ammoId != null && s.inventory.some((i) => i.itemId === def.ammoId);
+        const hasAmmo =
+          def?.ammoId != null &&
+          ((rangedIt.loaded ?? 0) > 0 || s.inventory.some((i) => i.itemId === def.ammoId));
         if (hasAmmo) input.attackRanged = true;
         else input.attackMelee = true; // dry gun: bash with it
       } else {

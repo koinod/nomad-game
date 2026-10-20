@@ -16,6 +16,7 @@ export const ITEMS: Record<string, ItemDef> = {
   pistol: {
     id: 'pistol', name: '9mm pistol', category: 'weapon-ranged', weight: 1.1, slots: 2, stack: 1,
     desc: 'Old service pistol. Loud — everything hears it.', damage: 34, range: 45, ammoId: 'ammo_9mm',
+    magSize: 12, reloadSec: 1.4, modSlots: ['muzzle', 'magazine', 'underbarrel'],
   },
   ammo_9mm: {
     id: 'ammo_9mm', name: '9mm rounds', category: 'ammo', weight: 0.02, slots: 1, stack: 60,
@@ -96,10 +97,12 @@ export const ITEMS: Record<string, ItemDef> = {
   shotgun: {
     id: 'shotgun', name: 'Pump shotgun', category: 'weapon-ranged', weight: 3.2, slots: 3, stack: 1,
     desc: 'Six pellets of room-clearing certainty. Devastating up close.', damage: 11, range: 24, ammoId: 'shells', pellets: 6, spread: 0.055,
+    magSize: 6, reloadSec: 2.2, modSlots: ['magazine', 'underbarrel'],
   },
   hunting_rifle: {
     id: 'hunting_rifle', name: 'Hunting rifle', category: 'weapon-ranged', weight: 3.6, slots: 3, stack: 1,
     desc: 'Bolt-action, scoped. One careful shot ends most problems.', damage: 58, range: 95, ammoId: 'ammo_rifle',
+    magSize: 5, reloadSec: 2.4, modSlots: ['optic', 'muzzle', 'magazine', 'underbarrel'],
   },
   shells: {
     id: 'shells', name: 'Shotgun shells', category: 'ammo', weight: 0.05, slots: 1, stack: 24,
@@ -185,31 +188,37 @@ export const ITEMS: Record<string, ItemDef> = {
     id: 'flare_gun', name: 'Flare gun', category: 'weapon-ranged', weight: 0.7, slots: 2, stack: 1,
     desc: 'Burns bright. So does everything it hits.', damage: 30, range: 35, ammoId: 'flare',
     spread: 0.03, cooldown: 1.2, noiseRadius: 45,
+    magSize: 1, reloadSec: 1.0, modSlots: [],
   },
   revolver: {
     id: 'revolver', name: 'Revolver', category: 'weapon-ranged', weight: 1.0, slots: 2, stack: 1,
     desc: 'Six chambers of argument.', damage: 42, range: 40, ammoId: 'ammo_9mm',
     spread: 0.05, cooldown: 0.65, noiseRadius: 80,
+    magSize: 6, reloadSec: 2.0, modSlots: [],
   },
   crossbow: {
     id: 'crossbow', name: 'Crossbow', category: 'weapon-ranged', weight: 2.4, slots: 3, stack: 1,
     desc: 'Whispers. Reloads like it means it.', damage: 60, range: 55, ammoId: 'bolts',
     spread: 0.015, cooldown: 1.6, noiseRadius: 12,
+    magSize: 1, reloadSec: 1.6, modSlots: [],
   },
   smg: {
     id: 'smg', name: 'SMG', category: 'weapon-ranged', weight: 2.0, slots: 3, stack: 1,
     desc: 'Eats 9mm for breakfast.', damage: 16, range: 38, ammoId: 'ammo_9mm',
     spread: 0.09, cooldown: 0.22, noiseRadius: 80,
+    magSize: 30, reloadSec: 2.2, modSlots: ['optic', 'muzzle', 'magazine', 'underbarrel'],
   },
   carbine: {
     id: 'carbine', name: 'Carbine', category: 'weapon-ranged', weight: 2.6, slots: 3, stack: 1,
     desc: 'The middle of every argument.', damage: 34, range: 70, ammoId: 'ammo_556',
     spread: 0.04, cooldown: 0.35, noiseRadius: 80,
+    magSize: 20, reloadSec: 2.0, modSlots: ['optic', 'muzzle', 'magazine', 'underbarrel'],
   },
   dmr: {
     id: 'dmr', name: 'DMR', category: 'weapon-ranged', weight: 4.2, slots: 4, stack: 1,
     desc: 'Reaches out and reminds them.', damage: 75, range: 110, ammoId: 'ammo_556',
     spread: 0.02, cooldown: 1.1, noiseRadius: 80,
+    magSize: 10, reloadSec: 2.2, modSlots: ['optic', 'muzzle', 'magazine', 'underbarrel'],
   },
   ammo_556: {
     id: 'ammo_556', name: '5.56 rounds', category: 'ammo', weight: 0.02, slots: 1, stack: 60,
@@ -233,6 +242,27 @@ export const ITEMS: Record<string, ItemDef> = {
     id: 'boombox', name: 'Boombox', category: 'weapon-melee', weight: 3.5, slots: 3, stack: 1,
     desc: 'Equip and throw: plays for 20 seconds. Everything hears it.', damage: 0,
     thrown: { aoe: 0, dmg: 0, fuse: 0.1, decoySec: 20 },
+  },
+  // --- weapon attachments (SYSTEMS_SPEC §3): bench-crafted, bench-attached ---
+  reflex_sight: {
+    id: 'reflex_sight', name: 'Reflex sight', category: 'mod', weight: 0.2, slots: 1, stack: 3,
+    desc: 'An optic: mounts on rifles and pistols. Down-sights cone −30%.',
+  },
+  suppressor: {
+    id: 'suppressor', name: 'Suppressor', category: 'mod', weight: 0.4, slots: 1, stack: 3,
+    desc: 'Threads onto the muzzle. 80m of noise becomes 25m.',
+  },
+  extended_mag: {
+    id: 'extended_mag', name: 'Extended magazine', category: 'mod', weight: 0.3, slots: 1, stack: 3,
+    desc: 'Magazine capacity ×1.5 for the gun it\u2019s fitted to.',
+  },
+  foregrip: {
+    id: 'foregrip', name: 'Foregrip', category: 'mod', weight: 0.3, slots: 1, stack: 3,
+    desc: 'Underbarrel grip: spread ×0.75 at every stance.',
+  },
+  laser_sight: {
+    id: 'laser_sight', name: 'Laser sight', category: 'mod', weight: 0.2, slots: 1, stack: 3,
+    desc: 'Underbarrel laser: hip-fire tightens up.',
   },
   molotov: {
     id: 'molotov', name: 'Molotov', category: 'weapon-melee', weight: 0.5, slots: 1, stack: 3,
@@ -366,6 +396,31 @@ export const STATION_RECIPES: Record<string, FieldRecipe> = {
     id: 'r_reload_shells', name: 'Reload shells', station: 'workbench',
     components: [{ itemId: 'scrap', qty: 2 }],
     resultId: 'shells', resultQty: 4,
+  },
+  r_reflex: {
+    id: 'r_reflex', name: 'Reflex sight', station: 'workbench',
+    components: [{ itemId: 'gun_parts', qty: 2 }, { itemId: 'scrap', qty: 1 }],
+    resultId: 'reflex_sight', resultQty: 1,
+  },
+  r_suppressor: {
+    id: 'r_suppressor', name: 'Suppressor', station: 'workbench',
+    components: [{ itemId: 'gun_parts', qty: 3 }],
+    resultId: 'suppressor', resultQty: 1,
+  },
+  r_extmag: {
+    id: 'r_extmag', name: 'Extended magazine', station: 'workbench',
+    components: [{ itemId: 'gun_parts', qty: 2 }],
+    resultId: 'extended_mag', resultQty: 1,
+  },
+  r_foregrip: {
+    id: 'r_foregrip', name: 'Foregrip', station: 'workbench',
+    components: [{ itemId: 'gun_parts', qty: 1 }, { itemId: 'wood', qty: 1 }],
+    resultId: 'foregrip', resultQty: 1,
+  },
+  r_laser: {
+    id: 'r_laser', name: 'Laser sight', station: 'workbench',
+    components: [{ itemId: 'gun_parts', qty: 2 }, { itemId: 'wire', qty: 1 }],
+    resultId: 'laser_sight', resultQty: 1,
   },
   // --- Chemistry Station ---
   r_medkit: {

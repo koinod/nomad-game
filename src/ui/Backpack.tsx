@@ -5,6 +5,7 @@
 import { useState } from 'react';
 import { useGameStore } from '../store/gameStore';
 import { ITEMS, FIELD_RECIPES, STATION_RECIPES, STATION_LABEL } from '../data/items';
+import { MODS } from '../data/mods';
 import { carryLimitKg, encumbranceTier, totalWeightKg } from '../store/inventoryUtils';
 import { sfx } from '../systems/audio';
 
@@ -47,6 +48,7 @@ const CATEGORY_LABEL: Record<string, string> = {
   tool: 'Tool',
   pack: 'Pack',
   key: 'Key items',
+  mod: 'Attachments',
 };
 
 export default function Backpack() {
@@ -72,6 +74,9 @@ export default function Backpack() {
   const craftRecipe = useGameStore((s) => s.craftRecipe);
   const nearStation = useGameStore((s) => s.nearStation);
   const countItem = useGameStore((s) => s.countItem);
+  const attachMod = useGameStore((s) => s.attachMod);
+  const detachMod = useGameStore((s) => s.detachMod);
+  const atBench = nearStation === 'workbench';
   const [selected, setSelected] = useState<string | null>(null);
   const [query, setQuery] = useState('');
 
@@ -277,6 +282,44 @@ export default function Backpack() {
                       }}
                     />
                   </div>
+                  {selDef.category === 'weapon-ranged' && selDef.modSlots && selDef.modSlots.length > 0 && (
+                    <div className="mt-3 border-t border-[#232b36] pt-2">
+                      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a3]">
+                        Attachments {atBench ? '' : '— fit at a Weapons Bench'}
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        {selDef.modSlots.map((slot) => {
+                          const attached = (sel.mods ?? []).find((id) => MODS[id]?.slot === slot);
+                          return (
+                            <div key={slot} className="flex items-center justify-between gap-2 text-xs">
+                              <span className="text-[#8a94a3] capitalize">{slot}</span>
+                              {attached ? (
+                                <>
+                                  <span className="flex-1 text-[#d7dde5]">{MODS[attached]?.name ?? attached}</span>
+                                  {atBench && <Act label="Remove" fn={() => detachMod(sel.uid, attached)} />}
+                                </>
+                              ) : (
+                                <span className="flex-1 text-[#5a6472]">empty</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {atBench && (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {inventory
+                            .filter((i) => i.itemId in MODS)
+                            .map((mi) => (
+                              <Act
+                                key={mi.uid}
+                                label={`Fit ${MODS[mi.itemId]?.name} (${MODS[mi.itemId]?.gunPartsCost} parts)`}
+                                fn={() => attachMod(sel.uid, mi.uid)}
+                              />
+                            ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <div className="mt-2 flex items-center gap-2">
                     <span className="text-xs text-[#8a94a3]">Hotbar:</span>
                     {[0, 1, 2].map((i) => (

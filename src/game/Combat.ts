@@ -5,6 +5,7 @@ import { ITEMS } from '../data/items';
 import { useGameStore } from '../store/gameStore';
 import { sfx } from '../systems/audio';
 import type { HuskManager } from './Husks';
+import { modNoiseMult, modSpreadMult } from '../data/mods';
 
 export interface CombatHooks {
   husks: HuskManager;
@@ -156,24 +157,37 @@ export function tryRanged(h: CombatHooks): RangedResult {
     return miss;
   }
   const s = useGameStore.getState();
-  const ammoUid = s.inventory.find((i) => i.itemId === def.ammoId)?.uid;
-  if (!ammoUid) {
-    useGameStore.getState().addToast('No ammo.');
-    sfx.play('ui', { volume: 0.4 });
-    return miss;
+  const inst = s.equipped.ranged ? s.inventory.find((i) => i.uid === s.equipped.ranged) : undefined;
+  const mods = inst?.mods ?? [];
+  if (def.magSize != null) {
+    // magazine-fed: rounds come from the mag, not straight from the pack
+    const loaded = inst?.loaded ?? 0;
+    if (loaded <= 0) {
+      s.addToast('Magazine empty — R to reload.');
+      sfx.play('ui', { volume: 0.4 });
+      return miss;
+    }
+    if (inst) s.setLoaded(inst.uid, loaded - 1);
+  } else {
+    const ammoUid = s.inventory.find((i) => i.itemId === def.ammoId)?.uid;
+    if (!ammoUid) {
+      useGameStore.getState().addToast('No ammo.');
+      sfx.play('ui', { volume: 0.4 });
+      return miss;
+    }
+    s.removeItem(ammoUid, 1);
   }
-  s.removeItem(ammoUid, 1);
 
   sfx.play('shot', { volume: 1 });
   h.flashMuzzle();
-  h.emitNoise(h.playerPos.x, h.playerPos.z, def.noiseRadius ?? 80); // per-weapon: the crossbow whispers, rifles carry
+  h.emitNoise(h.playerPos.x, h.playerPos.z, (def.noiseRadius ?? 80) * modNoiseMult(mods)); // suppressor: the loud problem, solved
 
   const range = def.range ?? 45;
   const pellets = def.pellets ?? 1;
   // accuracy is calculated from stance: hip fire sprays, shoulder aim settles,
   // down-sights is nearly true. Weapon base spread scales the cone.
   const aimMult = h.aimLevel === 2 ? 0.18 : h.aimLevel === 1 ? 0.8 : 2.4;
-  const spread = (def.spread ?? 0.045) * aimMult + (h.aimLevel === 2 ? 0.002 : 0.006);
+  const spread = (def.spread ?? 0.045) * aimMult * modSpreadMult(mods, h.aimLevel) + (h.aimLevel === 2 ? 0.002 : 0.006);
   let hit = false;
   let killed = false;
   for (let p = 0; p < pellets; p++) {

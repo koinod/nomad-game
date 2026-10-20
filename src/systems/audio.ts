@@ -4,7 +4,7 @@
 
 export type SfxName =
   | 'swing' | 'shot' | 'hit' | 'hurt' | 'pickup' | 'ui'
-  | 'step' | 'quest' | 'eat' | 'phone' | 'switch' | 'beacon';
+  | 'step' | 'quest' | 'eat' | 'phone' | 'switch' | 'beacon' | 'craft';
 
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
@@ -167,6 +167,12 @@ export const sfx = {
           // deep swell
           osc('sine', 58, { t0: now, peak: 0.4 * v, attack: 0.6, decay: 1.4 });
           osc('sine', 116, { t0: now + 0.15, peak: 0.16 * v, attack: 0.5, decay: 1.2 });
+          break;
+        case 'craft':
+          // metallic ratchet clicks, three quick ticks
+          [0, 0.07, 0.14].forEach((dt) =>
+            noise({ filterType: 'highpass', freq: 2400, e: { t0: now + dt, peak: 0.16 * v, decay: 0.03 } }),
+          );
           break;
       }
     } catch {

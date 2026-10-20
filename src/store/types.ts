@@ -36,7 +36,7 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyDef> = {
 // ---------- inventory ----------
 export type ItemCategory =
   | 'weapon-melee' | 'weapon-ranged' | 'ammo' | 'food' | 'medical'
-  | 'material' | 'tool' | 'key' | 'pack';
+  | 'material' | 'tool' | 'key' | 'pack' | 'mod';
 
 export interface ItemDef {
   id: string;
@@ -58,12 +58,17 @@ export interface ItemDef {
   thrown?: { aoe: number; dmg: number; fuse: number; fire?: boolean; blind?: number; smoke?: boolean; lure?: number; decoySec?: number }; // grenades
   cooldown?: number; // ranged: seconds between shots
   noiseRadius?: number; // ranged: gunshot noise in meters (default 80)
+  magSize?: number; // ranged: magazine capacity (rounds loaded at once)
+  reloadSec?: number; // ranged: seconds to reload
+  modSlots?: ('optic' | 'muzzle' | 'magazine' | 'underbarrel')[]; // ranged: attachable slots
 }
 
 export interface InvItem {
   uid: string;
   itemId: string;
   qty: number;
+  mods?: string[]; // attached mod itemIds (ranged weapons, per instance)
+  loaded?: number; // rounds currently in the magazine (ranged weapons)
 }
 
 export interface Equipped {

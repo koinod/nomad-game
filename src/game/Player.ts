@@ -12,6 +12,8 @@ import { sfx } from '../systems/audio';
 import type { HuskManager } from './Husks';
 import { clamp, lerp } from './rng';
 import { useGameStore } from '../store/gameStore';
+import { ITEMS } from '../data/items';
+import { magSizeOf } from '../data/mods';
 
 export interface PlayerCtx {
   groundY: (x: number, z: number) => number;
@@ -59,6 +61,7 @@ export class Player {
   private idleT = 0;
   private attackT = 0; // melee swing timer (arm anim)
   private recoilT = 0; // ranged recoil timer (arm anim)
+  private reloadT = 0; // seconds left on the current reload
   private vel = new THREE.Vector3(); // horizontal velocity (smoothed)
   private vy = 0; // vertical velocity
   private grounded = true;
@@ -497,6 +500,41 @@ export class Player {
     // classic procedural touch that sells weight better than limbs alone
     if (moving && this.attackT <= 0 && this.blockBlend < 0.5) {
       this.rig.rotation.y = Math.sin(this.walkPhase) * 0.09;
+    }
+
+    // --- reload (R): timed; rounds move from the pack into the magazine ---
+    {
+      const s = useGameStore.getState();
+      const rInst = s.equipped.ranged ? s.inventory.find((i) => i.uid === s.equipped.ranged) : undefined;
+      const rDef = rInst ? ITEMS[rInst.itemId] : undefined;
+      if (this.reloadT > 0) {
+        this.reloadT -= dt;
+        if (this.reloadT <= 0 && rInst && rDef?.magSize != null && rDef.ammoId) {
+          const cap = magSizeOf(rDef.magSize, rInst.mods ?? []);
+          const need = cap - (rInst.loaded ?? 0);
+          let moved = 0;
+          while (moved < need) {
+            const stack = [...useGameStore.getState().inventory]
+              .reverse()
+              .find((i) => i.itemId === rDef.ammoId && i.qty > 0);
+            if (!stack) break;
+            const take = Math.min(stack.qty, need - moved);
+            useGameStore.getState().removeItem(stack.uid, take);
+            moved += take;
+          }
+          if (moved > 0) {
+            useGameStore.getState().setLoaded(rInst.uid, (rInst.loaded ?? 0) + moved);
+            sfx.play('ui', { volume: 0.5 });
+          }
+        }
+      } else if (input.refuel && rInst && rDef?.magSize != null && rDef.ammoId) {
+        const cap = magSizeOf(rDef.magSize, rInst.mods ?? []);
+        if ((rInst.loaded ?? 0) < cap && s.inventory.some((i) => i.itemId === rDef.ammoId && i.qty > 0)) {
+          this.reloadT = rDef.reloadSec ?? 1.8;
+          sfx.play('ui', { volume: 0.35 });
+          input.refuel = false;
+        }
+      }
     }
 
     // --- attacks (blocked while guarding) ---

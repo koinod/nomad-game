@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { ITEMS, FIELD_RECIPES, STATION_RECIPES, STATION_LABEL } from '../data/items';
 import { PERKS as PERKS_ALL } from '../data/skills';
+import { MODS as MODS_ALL, magSizeOf } from '../data/mods';
 import { TRAITS as TRAIT_DEFS } from '../data/survivors';
 import { QUESTS } from '../data/quests';
 import { DIFFICULTIES } from './types';
@@ -129,6 +130,9 @@ interface GameState {
   removeItem: (uid: string, qty: number) => boolean;
   countItem: (itemId: string) => number;
   equipUid: (uid: string) => void;
+  setLoaded: (uid: string, n: number) => void;
+  attachMod: (weaponUid: string, modUid: string) => void;
+  detachMod: (weaponUid: string, modId: string) => void;
   unequipSlot: (slot: keyof Equipped) => void;
   useItemUid: (uid: string) => void;
   dropUid: (uid: string) => void;
@@ -400,8 +404,85 @@ export const useGameStore = create<GameState>()((set, get) => {
         : def.category === 'weapon-ranged' ? 'ranged'
         : def.category === 'pack' ? 'pack' : null;
       if (!slot) { s.addToast(`${def.name} can't be equipped.`); return; }
-      set({ equipped: { ...s.equipped, [slot]: uid } });
+      // a freshly equipped gun starts with a full magazine
+      if (slot === 'ranged' && def.magSize != null && it.loaded === undefined) {
+        set({
+          inventory: s.inventory.map((i) =>
+            i.uid === uid ? { ...i, loaded: magSizeOf(def.magSize!, i.mods ?? []) } : i,
+          ),
+        });
+      }
+      set({ equipped: { ...get().equipped, [slot]: uid } });
       s.addToast(`Equipped ${def.name}.`);
+    },
+
+    setLoaded: (uid, n) => {
+      const s = get();
+      set({ inventory: s.inventory.map((i) => (i.uid === uid ? { ...i, loaded: n } : i)) });
+    },
+
+    attachMod: (weaponUid, modUid) => {
+      const s = get();
+      if (s.nearStation !== 'workbench') {
+        s.addToast('Attachments are fitted at a Weapons Bench.');
+        return;
+      }
+      const w = s.inventory.find((i) => i.uid === weaponUid);
+      const m = s.inventory.find((i) => i.uid === modUid);
+      const wdef = w ? ITEMS[w.itemId] : undefined;
+      const mdef = m ? MODS_ALL[m.itemId] : undefined;
+      if (!w || !m || !wdef || !mdef) return;
+      if (!wdef.modSlots?.includes(mdef.slot)) {
+        s.addToast(`The ${wdef.name} has no ${mdef.slot} mount.`);
+        return;
+      }
+      const cur = w.mods ?? [];
+      if (cur.some((id) => MODS_ALL[id]?.slot === mdef.slot)) {
+        s.addToast(`The ${mdef.slot} mount is taken — detach the current one first.`);
+        return;
+      }
+      let cost = mdef.gunPartsCost;
+      if (s.perks.includes('me_gunsmith')) cost = Math.max(1, Math.ceil(cost * 0.5));
+      if (s.countItem('gun_parts') < cost) {
+        s.addToast(`Fitting costs ${cost} gun parts.`);
+        return;
+      }
+      // pay in gun parts (tail stacks first), consume the mod item, attach
+      let left = cost;
+      while (left > 0) {
+        const gp = [...get().inventory].reverse().find((i) => i.itemId === 'gun_parts');
+        if (!gp) break;
+        const take = Math.min(gp.qty, left);
+        s.removeItem(gp.uid, take);
+        left -= take;
+      }
+      s.removeItem(modUid, 1);
+      set({
+        inventory: get().inventory.map((i) =>
+          i.uid === weaponUid ? { ...i, mods: [...(i.mods ?? []), m.itemId] } : i,
+        ),
+      });
+      s.addToast(`Fitted the ${mdef.name} to the ${wdef.name}.`);
+      s.addSkillXp('mechanics', 5);
+      sfx.play('craft', { volume: 0.5 });
+    },
+
+    detachMod: (weaponUid, modId) => {
+      const s = get();
+      if (s.nearStation !== 'workbench') {
+        s.addToast('Attachments come off at a Weapons Bench.');
+        return;
+      }
+      const w = s.inventory.find((i) => i.uid === weaponUid);
+      if (!w?.mods?.includes(modId)) return;
+      set({
+        inventory: s.inventory.map((i) =>
+          i.uid === weaponUid ? { ...i, mods: (i.mods ?? []).filter((x) => x !== modId) } : i,
+        ),
+      });
+      s.addItem(modId, 1, true);
+      s.addToast(`Removed the ${MODS_ALL[modId]?.name ?? modId}.`);
+      sfx.play('ui', { volume: 0.4 });
     },
 
     unequipSlot: (slot) => {
