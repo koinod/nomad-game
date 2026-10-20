@@ -120,6 +120,8 @@ export interface Opening {
   w: number; // opening width
   type: 'door' | 'window' | 'bay' | 'slider';
   h?: number; // opening height (door 2.1, bay ~3.0, slider 2.1)
+  sill?: number; // window sill height override (high shop windows)
+  head?: number; // window head height override
   leaf?: boolean; // swing doors get a leaf (default true for 'door')
   leafColor?: number;
   swing?: 'L' | 'R'; // which jamb the leaf hinges on (default 'L' = low-axis side)
@@ -368,8 +370,8 @@ export class Kit {
       const o1 = o.at + o.w / 2;
       if (o.type === 'window') {
         // sill wall below + header above; the wall never stops being a wall
-        const sillY = story * KIT.WALL_H + KIT.WIN_SILL;
-        const headY = story * KIT.WALL_H + KIT.WIN_HEAD;
+        const sillY = story * KIT.WALL_H + (o.sill ?? KIT.WIN_SILL);
+        const headY = story * KIT.WALL_H + (o.head ?? KIT.WIN_HEAD);
         segBox(o0, o1, y0, sillY, opts.color);
         segBox(o0, o1, headY, y1, opts.color);
         if (collide) segCollider(o0, o1);
@@ -566,7 +568,7 @@ export class Kit {
     color: number;
     trim?: number;
     door?: { face: Face; at: number; w?: number; kind?: 'door' | 'slider'; leafColor?: number; swing?: 'L' | 'R' };
-    windows?: { face: Face; at: number; w?: number }[];
+    windows?: { face: Face; at: number; w?: number; sill?: number; head?: number }[];
     open?: Face[]; // faces with NO wall (posts carry the roof instead)
     bays?: { face: Face; at: number; w: number; h?: number; shut?: boolean }[];
     h?: number;
@@ -596,7 +598,7 @@ export class Kit {
         });
       }
       for (const wn of opts.windows ?? []) {
-        if (wn.face === face) openings.push({ at: wn.at, w: wn.w ?? 1.2, type: 'window' });
+        if (wn.face === face) openings.push({ at: wn.at, w: wn.w ?? 1.2, type: 'window', sill: wn.sill, head: wn.head });
       }
       for (const b of opts.bays ?? []) {
         if (b.face === face) openings.push({ at: b.at, w: b.w, type: 'bay', h: b.h, shut: b.shut });
@@ -945,6 +947,11 @@ export class Kit {
     });
   }
 
+  /** Attach a detail mesh (signage decals, one-off props) in LOCAL space. */
+  addDetail(mesh: THREE.Object3D): void {
+    this.local.add(mesh);
+  }
+
   /** A plain world-anchored container (crate on the ground, pump island…). */
   container(opts: {
     id: string; lx: number; lz: number; loot: HuskLootEntry[];
@@ -970,6 +977,14 @@ export class Kit {
   npcPoint(lx: number, lz: number): void {
     const [wx, wz] = this.pt(lx, lz);
     this.npcPoints.push({ x: wx, z: wz });
+  }
+
+  /** A collider with no mesh and no loot: pumps, tire stacks, benches —
+   *  props the player must walk around. Pair with box() for the visual. */
+  obstacle(lx: number, lz: number, hx: number, hz: number, story = 0): void {
+    const c = this.aabb(lx - hx, lz - hz, lx + hx, lz + hz);
+    if (story > 0) c.minY = this.baseY + floorTopLocal(story) - 0.55;
+    this.colliders.push(c);
   }
 
   /** Register an entrance with no leaf (open-front buildings) so the

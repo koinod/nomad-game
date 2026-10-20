@@ -12,7 +12,7 @@ import * as THREE from 'three';
 import { FURNITURE_LOOT, type HuskLootEntry } from '../data/items';
 import type { Collider, FloorRect } from './Colliders';
 import type { ContainerDef } from './Interact';
-import type { PoiBuildResult } from './PoiBuildings';
+import type { PoiBuildResult } from './PoiBuildingsV4';
 
 type GroundY = (x: number, z: number) => number;
 
@@ -171,7 +171,7 @@ export class AB {
     }
   }
   result(): PoiBuildResult {
-    return { group: this.group, colliders: this.colliders, floors: this.floors, containers: this.containers, roofs: this.roofs };
+    return { group: this.group, colliders: this.colliders, floors: this.floors, containers: this.containers, roofs: this.roofs, buildings: [] };
   }
 }
 
@@ -866,7 +866,7 @@ export function buildAirbase(
   pois: Record<string, [number, number]>,
   groundY: GroundY,
 ): PoiBuildResult {
-  const out: PoiBuildResult = { group: new THREE.Group(), colliders: [], floors: [], containers: [], roofs: [] };
+  const out: PoiBuildResult = { group: new THREE.Group(), colliders: [], floors: [], containers: [], roofs: [], buildings: [] };
   const [ax, az] = pois['airbase'] ?? [0, 0];
   mergeInto(out, buildDepot(ax, az, groundY));
   mergeInto(out, buildHangar(ax, az, groundY));
@@ -932,7 +932,7 @@ export function buildCarrier(
   scene: THREE.Scene,
   pois: Record<string, [number, number]>,
 ): PoiBuildResult {
-  const out: PoiBuildResult = { group: new THREE.Group(), colliders: [], floors: [], containers: [], roofs: [] };
+  const out: PoiBuildResult = { group: new THREE.Group(), colliders: [], floors: [], containers: [], roofs: [], buildings: [] };
   const [ax, az] = pois['carrier'] ?? [-688, 48];
   const b = new AB(ax, az, 0);
   const D = CARRIER_DECK_Y;
