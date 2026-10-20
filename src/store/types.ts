@@ -92,6 +92,17 @@ export interface ItemDef {
   magSize?: number; // ranged: magazine capacity (rounds loaded at once)
   reloadSec?: number; // ranged: seconds to reload
   modSlots?: ('optic' | 'muzzle' | 'magazine' | 'underbarrel')[]; // ranged: attachable slots
+  // ---- wave 2: weapon handling + ballistics (see src/game/gunMath.ts) ----
+  fireMode?: 'semi' | 'auto' | 'bolt' | 'pump' | 'single'; // ranged: trigger behavior
+  recoil?: number; // ranged: camera pitch kick per shot, radians
+  recoilDrift?: number; // ranged: max horizontal kick per shot, radians (random walk)
+  bloomPerShot?: number; // ranged: bloom added per shot (0..1 scale)
+  bloomMax?: number; // ranged: extra spread (radians) at full bloom
+  adsTime?: number; // ranged: seconds for the hip -> sights transition
+  sway?: number; // ranged: ADS sway amplitude class (scaled in gunMath)
+  projectileSpeed?: number; // ranged: m/s — set = true projectile with drop, unset = hitscan
+  pen?: number; // ammo: armor penetration class 0..2 (vs armored husks)
+  disassembly?: { itemId: string; qty: number }[]; // bench yield when stripped for parts
 }
 
 export interface InvItem {
