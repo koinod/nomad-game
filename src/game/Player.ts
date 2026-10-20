@@ -44,6 +44,11 @@ export interface PlayerCtx {
   emitNoise: (x: number, z: number, radius: number) => void;
   onAnimalKill: (kill: AnimalKill & { id: string; min: number; max: number }) => void;
   onThrow: (itemId: string) => void; // grenades: Game owns the projectile sim
+  onProjectile?: ( // long guns: Game owns the round's flight
+    origin: THREE.Vector3,
+    dir: THREE.Vector3,
+    shot: { damage: number; pen: number; weaponId: string },
+  ) => void;
   fx?: import('./Fx').Fx; // combat feedback particles/tracers (Game-owned)
   camera: THREE.PerspectiveCamera;
   colliders: readonly Collider[]; // house walls + furniture
@@ -245,6 +250,14 @@ export class Player {
   flashMuzzle(): void {
     this.muzzleT = 0.09;
     this.muzzle.intensity = 26;
+  }
+
+  /** Feedback for a projectile round that just landed (Game reports it —
+   *  the hitmark, camera punch and kill XP mirror the hitscan path). */
+  registerShotFeedback(killed: boolean, head: boolean): void {
+    useGameStore.getState().setHitmark(killed ? 'kill' : head ? 'headshot' : 'hit');
+    this.hitPunch = killed ? 0.3 : head ? 0.24 : 0.18;
+    if (killed) useGameStore.getState().addSkillXp('combat', 8);
   }
 
   /** Eye position + aim dir for hitscan (camera-driven). Leaning shifts the
@@ -694,6 +707,7 @@ export class Player {
         flashMuzzle: () => this.flashMuzzle(),
         aimLevel: this.aimLevel,
         groundY: ctx.groundY,
+        onProjectile: ctx.onProjectile,
         adsBlend: this.adsBlend,
         bloom: this.bloom,
         moveSpeedNorm: this.speedNorm,
@@ -745,10 +759,11 @@ export class Player {
           );
           this.hitPunch = fired.killed ? 0.3 : fired.headshot ? 0.24 : 0.18;
           if (fired.killed) useGameStore.getState().addSkillXp('combat', 8);
-        } else {
-          // a miss can still drop a rabbit or deer downrange
-          const rdef = equippedRangedDef();
-          ctx.animals.raycastShot(eye, dir, rdef?.range ?? 45, rdef?.damage ?? 20, (kill) =>
+        } else if (!fired.projectile) {
+          // a miss can still drop a rabbit or deer downrange (hitscan only —
+          // projectile rounds report their own verdict when they land)
+          const rdef2 = equippedRangedDef();
+          ctx.animals.raycastShot(eye, dir, rdef2?.range ?? 45, rdef2?.damage ?? 20, (kill) =>
             ctx.onAnimalKill(kill),
           );
         }

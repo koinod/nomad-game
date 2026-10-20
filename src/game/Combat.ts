@@ -26,6 +26,11 @@ export interface CombatHooks {
   onThrow?: (itemId: string) => void; // grenades: hand off to Game's projectile sim
   groundY?: (x: number, z: number) => number; // tracer endpoints + dust on misses
   fx?: CombatFx; // impact puffs + tracers (Game-owned Fx, optional in tests)
+  onProjectile?: ( // true projectiles for the long guns (Game-owned sim)
+    origin: THREE.Vector3,
+    dir: THREE.Vector3,
+    shot: { damage: number; pen: number; weaponId: string },
+  ) => void;
   adsBlend?: number; // 0 hip .. 0.55 shoulder .. 1 sights — eased aim state
   bloom?: number; // 0..1 sustained-fire bloom (Player-owned)
   moveSpeedNorm?: number; // 0..1 of sprint speed — firing on the move
@@ -160,6 +165,7 @@ export interface RangedResult {
   killed: boolean;
   headshot: boolean; // any pellet found the head
   damage: number; // total damage dealt (drives tick volume + puff size)
+  projectile?: boolean; // a true round is in flight — the verdict lands later
 }
 
 /** Fire the equipped ranged weapon. */
@@ -217,6 +223,24 @@ export function tryRanged(h: CombatHooks): RangedResult {
     const r0 = new THREE.Vector3().crossVectors(baseDir, new THREE.Vector3(0, 1, 0)).normalize();
     const u0 = new THREE.Vector3().crossVectors(r0, baseDir).normalize();
     baseDir.addScaledVector(r0, h.sway.x).addScaledVector(u0, h.sway.y).normalize();
+  }
+  // long guns throw a true round: it leaves now, the verdict lands when
+  // it does. Ammo, noise and the flash already happened above.
+  if (def.projectileSpeed && h.onProjectile) {
+    const dir = baseDir.clone();
+    if (spread > 0) {
+      const right = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0)).normalize();
+      const up = new THREE.Vector3().crossVectors(right, dir).normalize();
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.sqrt(Math.random()) * spread;
+      dir.addScaledVector(right, Math.cos(a) * r).addScaledVector(up, Math.sin(a) * r).normalize();
+    }
+    h.onProjectile(h.eyePos.clone().addScaledVector(dir, 0.3), dir, {
+      damage: def.damage ?? 20,
+      pen: def.ammoId ? (ITEMS[def.ammoId]?.pen ?? 0) : 0,
+      weaponId: def.id,
+    });
+    return { fired: true, hit: false, killed: false, headshot: false, damage: 0, projectile: true };
   }
   let hit = false;
   let killed = false;

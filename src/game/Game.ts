@@ -12,6 +12,8 @@ import { World, heightAt, biomeAt, initTerrainField } from './World';
 import { CARRIER_DECK_Y } from './Airbase';
 import { Player } from './Player';
 import { Fx } from './Fx';
+import { ProjectileManager } from './Projectiles';
+import { rangeFalloff } from './gunMath';
 import { HuskManager } from './Husks';
 import type { Husk, SpawnZone } from './Husks';
 import { InteractSystem, buildContainerDefs } from './Interact';
@@ -51,6 +53,7 @@ export class Game {
   private camera: THREE.PerspectiveCamera | null = null;
   private world: World | null = null;
   private fx: Fx | null = null;
+  private projectiles: ProjectileManager | null = null;
   private player: Player | null = null;
   private husks: HuskManager | null = null;
   private animals: AnimalManager | null = null;
@@ -151,6 +154,7 @@ export class Game {
     this.world = new World(this.scene, opts.seed);
     this.world.build();
     this.fx = new Fx(this.scene);
+    this.projectiles = new ProjectileManager(this.scene);
 
     // vehicles: the full roster parked around the island
     this.vehicles = new VehicleManager();
@@ -767,6 +771,14 @@ export class Game {
         useGameStore.getState().setNoiseLevel(Math.min(100, (eff / 80) * 100));
       },
       onThrow: (itemId: string) => this.throwGrenade(itemId),
+      onProjectile: (
+        origin: THREE.Vector3,
+        dir: THREE.Vector3,
+        shot: { damage: number; pen: number; weaponId: string },
+      ) => {
+        const speed = ITEMS[shot.weaponId]?.projectileSpeed ?? 120;
+        this.projectiles?.fire(origin, dir, speed, shot);
+      },
       fx: this.fx ?? undefined,
       onAnimalKill: (kill: { id: string; kind: string; x: number; z: number; min: number; max: number }) => {
         // gut the kill: raw meat appears where the animal fell
@@ -859,6 +871,30 @@ export class Game {
 
     // combat feedback particles + tracers ride every frame
     this.fx?.update(dt);
+
+    // long-gun rounds in flight: they land when they land, with the same
+    // falloff / headshot / feedback rules the hitscan path uses
+    this.projectiles?.update(
+      dt,
+      husks,
+      (x, z) => this.groundY(x, z),
+      (hit) => {
+        let dmg = rangeFalloff(hit.shot.damage, hit.dist);
+        if (hit.head) dmg *= 2;
+        const dealt = Math.round(dmg);
+        const kdir = hit.dir.clone();
+        kdir.y = 0;
+        if (kdir.lengthSq() < 0.001) kdir.set(0, 0, 1); else kdir.normalize();
+        const killed = hit.husk.damage(dealt, kdir, 1.2, false, { head: hit.head });
+        hit.husk.investigateAt(player.pos);
+        this.fx?.impactFlesh(hit.point, dealt, hit.head);
+        if (killed) sfx.play('killconfirm', { volume: 0.55 });
+        else if (hit.head) sfx.play('headshot', { volume: 0.9 });
+        else sfx.play('tick', { volume: 0.35 + Math.min(0.6, dealt / 90) });
+        player.registerShotFeedback(killed, hit.head);
+      },
+      (point) => this.fx?.impactDust(point),
+    );
 
     // thrown weapons: arc, bounce lightly off ground, blow on fuse
     for (let i = this.throwables.length - 1; i >= 0; i--) {
