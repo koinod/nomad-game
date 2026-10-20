@@ -85,6 +85,8 @@ export interface ItemDef {
   spread?: number; // radians of pellet jitter
   carryBonus?: number; // packs: extra kg
   packSlots?: number; // packs: extra slots
+  w?: number; // grid footprint, cells wide (unrotated) — wave 3 Tarkov grid
+  h?: number; // grid footprint, cells tall (unrotated)
   armor?: number; // fraction of damage mitigated while carried (vests, plates)
   thrown?: { aoe: number; dmg: number; fuse: number; fire?: boolean; blind?: number; smoke?: boolean; lure?: number; decoySec?: number }; // grenades
   cooldown?: number; // ranged: seconds between shots
@@ -113,6 +115,11 @@ export interface InvItem {
   loaded?: number; // rounds currently in the magazine (ranged weapons)
   condition?: number; // weapons: 0..100, undefined = pristine (wave 2 wear)
   jammed?: boolean; // weapons: action jammed — R works it clear
+  // wave 3 grid placement (optional: absent = auto-arranged on render).
+  // Rides the v3 save untouched — IndexedDB stores the instances as-is.
+  gx?: number; // grid column
+  gy?: number; // grid row
+  rot?: boolean; // footprint rotated 90°
 }
 
 export interface Equipped {

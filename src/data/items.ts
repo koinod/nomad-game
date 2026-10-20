@@ -635,3 +635,39 @@ const DISASSEMBLY: Record<string, { itemId: string; qty: number }[]> = {
 for (const [id, yields] of Object.entries(DISASSEMBLY)) {
   if (ITEMS[id]) ITEMS[id].disassembly = yields;
 }
+
+// Grid footprints (wave 3, Tarkov-style pack grid), assigned after the table
+// for the same reason as disassembly: the table stays a pure stat sheet.
+// Long guns run 5×2, handguns 2×2, trauma kit 2×2, small goods 1×1. A stack
+// occupies ONE footprint regardless of qty (the count rides as a badge).
+const FOOTPRINTS: Record<string, [number, number]> = {
+  // long guns
+  hunting_rifle: [5, 2], dmr: [5, 2], carbine: [5, 2], shotgun: [5, 2],
+  smg: [4, 2], crossbow: [4, 2],
+  // handguns
+  pistol: [2, 2], revolver: [2, 2], flare_gun: [2, 1],
+  // melee
+  pipe: [3, 1], machete: [3, 1], hatchet: [2, 1], baseball_bat: [3, 1],
+  combat_knife: [2, 1], sledgehammer: [4, 1], crowbar: [3, 1], fire_axe: [4, 1],
+  spear: [5, 1], riot_baton: [2, 1], boombox: [2, 2],
+  frag: [1, 1], smoke: [1, 1], molotov: [1, 1], flashbang: [1, 1], rock: [1, 1],
+  // medical / food
+  bandage: [1, 1], medkit: [2, 2], canned_food: [1, 1], raw_meat: [1, 1],
+  cooked_meat: [1, 1], water_bottle: [1, 1], produce: [1, 1],
+  // ammo + small goods
+  ammo_9mm: [1, 1], shells: [1, 1], ammo_rifle: [1, 1], ammo_556: [1, 1], bolts: [1, 1],
+  scrap: [1, 1], wire: [1, 1], cloth: [1, 1], chemicals: [1, 1], gun_parts: [1, 1],
+  valuables: [1, 1], lockpick: [1, 1], phone: [1, 1], relay_part: [1, 1], beacon_cell: [1, 1],
+  flare: [1, 1], fire_starter: [1, 1], gun_oil: [1, 1], cleaning_kit: [1, 1],
+  reflex_sight: [1, 1], suppressor: [1, 1], extended_mag: [1, 1], foregrip: [1, 1], laser_sight: [1, 1],
+  // bulky goods
+  fuel_can: [2, 2], tire: [2, 2], engine_part: [2, 2], armor_plate: [2, 2], tool_kit: [2, 2],
+  car_battery: [2, 1], wood: [2, 1], torch: [2, 1], riot_helmet: [2, 1],
+  armored_vest: [2, 2], pack_t1: [2, 2], pack_t2: [3, 2],
+};
+for (const [id, [w, h]] of Object.entries(FOOTPRINTS)) {
+  if (ITEMS[id]) {
+    ITEMS[id].w = w;
+    ITEMS[id].h = h;
+  }
+}
