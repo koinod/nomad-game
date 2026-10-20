@@ -8,13 +8,16 @@ import { sfx } from '../systems/audio';
 import { useGameStore } from '../store/gameStore';
 import { DIFFICULTIES } from '../store/types';
 
-export type HuskKind = 'shambler' | 'stalker';
+export type HuskKind = 'shambler' | 'stalker' | 'armored';
 export type HuskState =
   | 'idle' | 'wander' | 'investigate' | 'hunt' | 'attack' | 'return' | 'dead';
 
 const KIND_STATS: Record<HuskKind, { hp: number; speed: number; damage: number; color: number; height: number }> = {
   shambler: { hp: 40, speed: 2.3, damage: 12, color: 0x5d6b52, height: 1.8 },
   stalker: { hp: 30, speed: 3.6, damage: 9, color: 0x46465a, height: 1.95 },
+  // the carrier's guard pack: ship-security husks in plate carriers and
+  // helmets — 3x the HP of a shambler, slower, hits much harder
+  armored: { hp: 125, speed: 2.1, damage: 19, color: 0x3f4750, height: 1.92 },
 };
 
 export const HUSK_CAP = 14;
@@ -127,6 +130,25 @@ export class Husk {
     legR.position.x = 0.18;
     this.group.add(body, head, jaw, armL, armR, clawL, clawR, legL, legR);
     this.group.userData.limpPhase = vrnd() * Math.PI * 2; // asymmetric walk limp
+    if (this.kind === 'armored') {
+      // plate carrier over the torso, a helmet shell, shoulder pads —
+      // the silhouette reads MILITARY before it reads infected
+      const plateMat = new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.45 });
+      this.mats.push(plateMat);
+      const vest = new THREE.Mesh(new THREE.BoxGeometry(0.76, height * 0.42, 0.52), plateMat);
+      vest.position.set(0, height * 0.58, 0.02);
+      vest.rotation.x = 0.14;
+      this.group.add(vest);
+      const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.27, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), plateMat);
+      helmet.position.set(0.05, height * 0.95 + 0.03, 0.05);
+      helmet.rotation.z = 0.18;
+      this.group.add(helmet);
+      for (const sx of [-0.46, 0.46]) {
+        const pad = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.14, 0.3), plateMat);
+        pad.position.set(sx, height * 0.78, 0.08);
+        this.group.add(pad);
+      }
+    }
     if (vrnd() < 0.35) {
       const hat = new THREE.Mesh(
         new THREE.BoxGeometry(0.34, 0.11, 0.32),

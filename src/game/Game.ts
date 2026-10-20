@@ -9,6 +9,7 @@ import { QUESTS } from '../data/quests';
 import { input, resetEdgeTriggers } from './input';
 import { ITEMS } from '../data/items';
 import { World, heightAt, biomeAt, initTerrainField } from './World';
+import { CARRIER_DECK_Y } from './Airbase';
 import { Player } from './Player';
 import { HuskManager } from './Husks';
 import type { Husk, SpawnZone } from './Husks';
@@ -267,11 +268,15 @@ export class Game {
     this.player.camYaw = Math.PI * 0.9;
 
     // husks
+    const [carrierX, carrierZ] = this.world.poi('carrier');
     const zones: SpawnZone[] = [
       { id: 'forest', x: 180, z: 40, radius: 55, count: 3, kinds: ['shambler', 'stalker'] },
       { id: 'town', x: 40, z: 0, radius: 60, count: 4, kinds: ['shambler'] },
       { id: 'relay', x: 330, z: -40, radius: 42, count: 5, kinds: ['shambler', 'stalker'] },
       { id: 'dunes', x: 470, z: 150, radius: 55, count: 2, kinds: ['stalker'], nightOnly: true },
+      // the carrier's guard pack: six armored husks on that deck — the
+      // richest loot on the island is a fight, not a shopping trip
+      { id: 'carrier', x: carrierX, z: carrierZ, radius: 15, count: 6, kinds: ['armored', 'armored', 'stalker'] },
     ];
     this.husks = new HuskManager(this.scene, zones, opts.seed);
     this.husks.spawnInitial(this.deadHusks, (x, z) => this.groundY(x, z), this.isNight());
@@ -315,6 +320,13 @@ export class Game {
       crateAt('town', 100, 44, mk([['engine_part', 1], ['tire', 1], ['scrap', 4]]), 'Parts crate', 0x707880);
       crateAt('lighthouse_base', 6, -14, mk([['ammo_rifle', 3], ['bandage', 2], ['canned_food', 2]]), 'Supply crate', 0x565e4c);
       crateAt('wreck', -6, 12, mk([['car_battery', 1], ['scrap', 3], ['wire', 2]]), 'Salvage crate', 0x8a6d3b);
+      // aboard the carrier: physical freight on the well deck, riding at
+      // deck height rather than terrain height
+      const deckCrate = (dx: number, dz: number, contents: InvItem[], label: string, band: number) => {
+        this.crates.spawnCrate(this.scene!, carrierX + dx, carrierZ + dz, this.rng() * 3, () => CARRIER_DECK_Y, contents, label, band);
+      };
+      deckCrate(6, -5.5, mk([['reflex_sight', 1], ['extended_mag', 1], ['ammo_556', 2]]), 'Carrier supply crate', 0x4c5e54);
+      deckCrate(-14, 5, mk([['armor_plate', 2], ['gun_parts', 2], ['engine_part', 1]]), 'Carrier parts crate', 0x707880);
     }
 
     // shadow flags for world + husk + interactable meshes (idempotent)
@@ -1738,6 +1750,16 @@ export class Game {
         if (Math.hypot(quarter.x - px, quarter.z - pz) < 2.2) {
           return { label: `[F] ${t.doorOpen ? 'Close' : 'Open'} the ${t.def.name} doors`, run: () => this.toggleTrailerDoors(t) };
         }
+      }
+    }
+    // the carrier's bunk room: a sleep point aboard the ship
+    {
+      const cp = this.world ? this.world.poi('carrier') : null;
+      if (cp && Math.hypot(px - (cp[0] - 36), pz - (cp[1] - 4)) < 4.5 && this.player!.pos.y > 2) {
+        return {
+          label: '[F] Sleep in the carrier bunk',
+          run: () => { this.lastSafe = [px, pz]; this.lastCampId = null; s.openSleep(); },
+        };
       }
     }
     // vehicle doors (box-truck roll door, sprinter rear doors)

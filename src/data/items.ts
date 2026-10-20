@@ -296,6 +296,14 @@ export interface HuskLootEntry {
 }
 
 export const HUSK_LOOT: Record<string, HuskLootEntry[]> = {
+  // the carrier's armored guard pack drops military salvage
+  carrier: [
+    { id: 'ammo_556', min: 3, max: 8, chance: 0.55 },
+    { id: 'gun_parts', min: 1, max: 2, chance: 0.35 },
+    { id: 'armor_plate', min: 1, max: 1, chance: 0.22 },
+    { id: 'bandage', min: 1, max: 1, chance: 0.4 },
+    { id: 'ammo_9mm', min: 4, max: 9, chance: 0.3 },
+  ],
   forest: [
     { id: 'cloth', min: 1, max: 2, chance: 0.6 },
     { id: 'bandage', min: 1, max: 1, chance: 0.25 },

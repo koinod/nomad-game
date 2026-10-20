@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { makeFbm, makeNoise2D, mulberry32, clamp, lerp, smoothstep } from './rng';
 import { buildHouses, houseFootprints, type HouseResult } from './Houses';
 import { buildPoiBuildings, poiFootprints, type PoiBuildResult } from './PoiBuildings';
-import { airbaseFootprints, buildAirbase } from './Airbase';
+import { airbaseFootprints, buildAirbase, buildCarrier, CARRIER_DECK_Y } from './Airbase';
 import type { BiomeId } from './Game';
 import type { StationId } from '../data/items';
 import type { Collider } from './Colliders';
@@ -239,6 +239,14 @@ export class World {
       this.poiBuildings.floors.push(...ab.floors);
       this.poiBuildings.containers.push(...ab.containers);
       this.poiBuildings.roofs.push(...ab.roofs);
+    }
+    {
+      const cr = buildCarrier(this.scene, this.poiPositions);
+      this.poiBuildings.group.add(cr.group);
+      this.poiBuildings.colliders.push(...cr.colliders);
+      this.poiBuildings.floors.push(...cr.floors);
+      this.poiBuildings.containers.push(...cr.containers);
+      this.poiBuildings.roofs.push(...cr.roofs);
     }
     this.buildStations();
     this.buildCampfires();
@@ -651,8 +659,8 @@ export class World {
       m.castShadow = true;
       return m;
     };
-    const place = (station: StationId, x: number, z: number, kind: 'bench' | 'chem' | 'shop') => {
-      const y = this.groundY(x, z);
+    const place = (station: StationId, x: number, z: number, kind: 'bench' | 'chem' | 'shop', yOverride?: number) => {
+      const y = yOverride ?? this.groundY(x, z);
       const g = new THREE.Group();
       if (kind === 'shop') {
         // Machine Shop: heavy steel table, engine block, hoist frame, tire stack
@@ -722,6 +730,9 @@ export class World {
     // the depot's Machine Shop: the fleet's home bay gets the real station
     const [ax, az] = this.poi('airbase');
     place('industrial', ax - 38, az + 24, 'shop');
+    // a workbench aboard the carrier, in the bunk room (deck height, not terrain)
+    const [kx, kz] = this.poi('carrier');
+    place('workbench', kx - 38.5, kz + 3.2, 'bench', CARRIER_DECK_Y + 0.06);
   }
 
   private buildWreck(): void {

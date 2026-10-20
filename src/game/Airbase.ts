@@ -885,3 +885,241 @@ export function buildAirbase(
   scene.add(out.group);
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// HEAVY LOGISTICS CARRIER — a beached landing ship off the marina, shipped
+// as a HIGH-TIER POI (Ian's static-now blessing; a drivable carrier is a
+// later wave). Lofted hull, walkable well deck with a stepped bow ramp,
+// a two-deck superstructure (bunk room below, glass bridge above), the
+// richest loot on the island, and an armored-husk guard pack (Game/Husks).
+
+/** Loft a hull along X: `sections` are (x, halfBeam) pairs; the profile
+ *  is a flat-deck D — vertical topsides, curved bilge, flat keel. */
+function hullLoft(sections: { x: number; hb: number }[], deckY: number, keelY: number, material: THREE.Material): THREE.Mesh {
+  const prof = (hb: number): [number, number][] => [
+    [hb, deckY], [hb, deckY - 1.9], [hb * 0.97, -0.6], [hb * 0.78, keelY + 0.5],
+    [0, keelY],
+    [-hb * 0.78, keelY + 0.5], [-hb * 0.97, -0.6], [-hb, deckY - 1.9], [-hb, deckY],
+  ];
+  const positions: number[] = [];
+  const indices: number[] = [];
+  sections.forEach((s, ri) => {
+    for (const [pz, py] of prof(s.hb)) positions.push(s.x, py, pz);
+    void ri;
+  });
+  const cols = 9;
+  for (let ri = 0; ri < sections.length - 1; ri++) {
+    for (let i = 0; i < cols - 1; i++) {
+      const a = ri * cols + i;
+      const b2 = a + 1;
+      const c = a + cols;
+      const d = b2 + cols;
+      indices.push(a, b2, c, b2, d, c);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, material);
+  (material as THREE.MeshStandardMaterial).side = THREE.DoubleSide;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+export function buildCarrier(
+  scene: THREE.Scene,
+  pois: Record<string, [number, number]>,
+): PoiBuildResult {
+  const out: PoiBuildResult = { group: new THREE.Group(), colliders: [], floors: [], containers: [], roofs: [] };
+  const [ax, az] = pois['carrier'] ?? [-688, 48];
+  const b = new AB(ax, az, 0);
+  const D = CARRIER_DECK_Y;
+  const hullM = mat(0x5d6862, 0.62, 0.35);
+  const deckM = mat(0x4c554e, 0.85, 0.15);
+  const rustM = mat(0x74523a, 0.9, 0.1);
+  const tealM = mat(0x39565c, 0.6, 0.3);
+  const darkM = mat(0x24282c, 0.85, 0.15);
+
+  // ---- hull (bow toward +X, the island) + transom ----
+  const hull = hullLoft([
+    { x: 43, hb: 0.5 }, { x: 40, hb: 4.4 }, { x: 34, hb: 7.2 }, { x: 24, hb: 8.35 },
+    { x: 12, hb: 8.5 }, { x: 0, hb: 8.5 }, { x: -12, hb: 8.5 }, { x: -24, hb: 8.4 },
+    { x: -34, hb: 8.15 }, { x: -42, hb: 7.9 },
+  ], D, -2.3, hullM);
+  b.group.add(hull);
+  b.box(0.3, D + 2.3, 15.8, hullM, -42.1, (D - 2.3) / 2, 0); // transom plate
+  for (const sgn of [1, -1]) {
+    for (let i = 0; i < 7; i++) {
+      const px = -30 + i * 10.5;
+      b.box(3.6, 1.5, 0.08, i % 2 ? rustM : mat(0x66706a, 0.7, 0.3), px, 0.6, sgn * 8.56);
+      b.box(0.5, 2.2, 0.06, rustM, px + 2.2, 1.7, sgn * 8.58);
+    }
+  }
+  for (const sgn of [1, -1]) {
+    const name = stencilPlane(['NOMAD'], 13);
+    name.position.set(16, 1.9, sgn * 8.62);
+    if (sgn < 0) name.rotation.y = Math.PI;
+    b.group.add(name);
+    const sub = stencilPlane(['HEAVY LOGISTICS CARRIER'], 15);
+    sub.position.set(-8, 1.75, sgn * 8.62);
+    if (sgn < 0) sub.rotation.y = Math.PI;
+    b.group.add(sub);
+  }
+
+  // ---- well deck: floor, tie-down lanes, bulwarks ----
+  b.floor(0, 0, 40, 8, D);
+  b.box(80, 0.1, 16, deckM, 0, D + 0.02, 0);
+  for (const laneZ of [-4.5, 0, 4.5]) {
+    b.box(74, 0.03, 0.28, darkM, -2, D + 0.09, laneZ);
+    for (let i = 0; i < 9; i++) b.box(0.5, 0.035, 0.9, darkM, -34 + i * 8.5, D + 0.09, laneZ);
+  }
+  for (const sgn of [1, -1]) {
+    b.box(78, 1.15, 0.22, hullM, -1, D + 0.57, sgn * 8.35);
+    b.box(78, 0.12, 0.4, tealM, -1, D + 1.2, sgn * 8.35); // teal cap rail
+    b.col(0, sgn * 8.35, 39.5, 0.3);
+    for (let i = 0; i < 8; i++) b.box(0.18, 1.15, 0.18, tealM, -36 + i * 10.5, D + 0.57, sgn * 8.35);
+  }
+  b.col(-41.5, 0, 0.4, 8.2);
+
+  // ---- stepped bow ramp down to the waterline (the gangway ashore) ----
+  [2.35, 1.6, 0.85, 0.12].forEach((sy, i) => {
+    const sx = 42 + i * 4;
+    b.floor(sx, 0, 2.1, 3.4, sy);
+    b.box(4.2, 0.22, 6.8, deckM, sx, sy - 0.1, 0);
+    for (const sgn of [1, -1]) b.box(4.2, 0.75, 0.2, hullM, sx, sy + 0.3, sgn * 3.45);
+  });
+
+  // ---- superstructure (stern): bunk deck + glass bridge ----
+  const S = { x: -35, hw: 6, hd: 6 };
+  const wallM = mat(0x707880, 0.6, 0.3);
+  b.box(12, 2.8, 0.25, wallM, S.x, D + 1.4, -S.hd + 0.12);
+  b.box(12, 2.8, 0.25, wallM, S.x, D + 1.4, S.hd - 0.12);
+  b.box(0.25, 2.8, 12, wallM, S.x - S.hw + 0.12, D + 1.4, 0);
+  b.box(0.25, 2.8, 4.9, wallM, S.x + S.hw - 0.12, D + 1.4, -3.55);
+  b.box(0.25, 2.8, 4.9, wallM, S.x + S.hw - 0.12, D + 1.4, 3.55);
+  b.box(0.25, 0.75, 1.3, wallM, S.x + S.hw - 0.12, D + 2.42, 0); // door header
+  b.col(S.x, -S.hd + 0.12, 6, 0.2);
+  b.col(S.x, S.hd - 0.12, 6, 0.2);
+  b.col(S.x - S.hw + 0.12, 0, 0.2, 6);
+  b.col(S.x + S.hw - 0.12, -3.55, 0.2, 2.5);
+  b.col(S.x + S.hw - 0.12, 3.55, 0.2, 2.5);
+  b.floor(S.x, 0, 5.8, 5.8, D + 0.06); // bunk-room floor
+  // bunk room: bunks + lockers (the workbench station is placed aboard by
+  // World.buildStations; the sleep point is the bunk corner, Game-side)
+  for (const bz of [-4.6, -3.4]) {
+    b.box(2.3, 0.14, 1.0, darkM, S.x - 3.6, D + 0.62, bz);
+    b.box(2.3, 0.14, 1.0, darkM, S.x - 3.6, D + 1.55, bz);
+    b.box(2.2, 0.1, 0.9, mat(0x59614f, 0.95, 0), S.x - 3.6, D + 0.72, bz);
+    b.box(2.2, 0.1, 0.9, mat(0x59614f, 0.95, 0), S.x - 3.6, D + 1.65, bz);
+    for (const px of [-4.7, -2.5]) b.box(0.1, 1.75, 0.95, darkM, S.x + px, D + 0.9, bz);
+  }
+  for (let i = 0; i < 3; i++) b.box(0.9, 1.9, 0.5, tealM, S.x - 5.2, D + 0.95, 1.2 + i * 1.15);
+  b.box(12, 0.14, 12, wallM, S.x, D + 2.87, 0); // deck-2 slab
+  // bridge: low walls + a full glass band + cap (scenic — the helm and
+  // chart table read through the glass; entry is via the bunk deck)
+  const B2 = D + 2.94;
+  b.box(11.6, 0.5, 0.25, wallM, S.x, B2 + 0.25, -S.hd + 0.12);
+  b.box(11.6, 0.5, 0.25, wallM, S.x, B2 + 0.25, S.hd - 0.12);
+  b.box(0.25, 0.5, 11.6, wallM, S.x - S.hw + 0.12, B2 + 0.25, 0);
+  b.box(0.25, 0.5, 11.6, wallM, S.x + S.hw - 0.12, B2 + 0.25, 0);
+  const bridgeGlassM = new THREE.MeshStandardMaterial({ color: 0x39505e, roughness: 0.08, metalness: 0.65, transparent: true, opacity: 0.42, side: THREE.DoubleSide });
+  for (const gg of [
+    b.box(11.6, 1.35, 0.14, bridgeGlassM, S.x, B2 + 1.18, -S.hd + 0.12),
+    b.box(11.6, 1.35, 0.14, bridgeGlassM, S.x, B2 + 1.18, S.hd - 0.12),
+    b.box(0.14, 1.35, 11.6, bridgeGlassM, S.x + S.hw - 0.12, B2 + 1.18, 0),
+    b.box(0.14, 1.35, 11.6, bridgeGlassM, S.x - S.hw + 0.12, B2 + 1.18, 0),
+  ]) gg.castShadow = false;
+  b.box(11.6, 0.42, 0.25, wallM, S.x, B2 + 2.06, -S.hd + 0.12);
+  b.box(11.6, 0.42, 0.25, wallM, S.x, B2 + 2.06, S.hd - 0.12);
+  b.box(0.25, 0.42, 11.6, wallM, S.x - S.hw + 0.12, B2 + 2.06, 0);
+  b.box(0.25, 0.42, 11.6, wallM, S.x + S.hw - 0.12, B2 + 2.06, 0);
+  b.box(2.6, 0.8, 0.5, darkM, S.x + 4.4, B2 + 0.45, 0); // helm console
+  const helmWheel = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.035, 8, 18), darkM);
+  helmWheel.position.set(S.x + 3.9, B2 + 1.05, 0);
+  helmWheel.rotation.y = Math.PI / 2;
+  b.group.add(helmWheel);
+  b.box(1.6, 0.75, 1.0, mat(0x6b5a41, 0.85, 0.05), S.x - 2.5, B2 + 0.4, -2.5); // chart table
+  // roof (registered for the interior hide rule) + mast + radar
+  const roofGroup = new THREE.Group();
+  const roofSlab = new THREE.Mesh(new THREE.BoxGeometry(12.4, 0.18, 12.4), wallM);
+  roofSlab.position.set(ax + S.x, B2 + 2.36, az);
+  roofSlab.castShadow = true;
+  roofGroup.add(roofSlab);
+  out.group.add(roofGroup);
+  out.roofs.push({ bounds: { x0: ax + S.x - 6.2, z0: az - 6.2, x1: ax + S.x + 6.2, z1: az + 6.2 }, group: roofGroup });
+  const mastPole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.1, 3.4, 8), darkM);
+  mastPole.position.set(S.x - 2, B2 + 4.1, 0);
+  mastPole.castShadow = true;
+  b.group.add(mastPole);
+  b.box(1.9, 0.08, 0.08, darkM, S.x - 2, B2 + 5.2, 0);
+  const radarBar = b.box(1.5, 0.09, 0.28, mat(0xd8dccf, 0.4, 0.3), S.x - 2, B2 + 4.35, 0);
+  radarBar.rotation.y = 0.5;
+
+  // ---- skiff cradle at the stern quarter (a weathered prop hull) ----
+  const cradleX = -33;
+  const cradleZ = 11.5;
+  for (const [px, pz] of [[-3.4, -1.6], [3.4, -1.6], [-3.4, 1.6], [3.4, 1.6]] as [number, number][]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 3.4, 8), darkM);
+    post.position.set(cradleX + px, 1.4, cradleZ + pz);
+    b.group.add(post);
+  }
+  for (const sgn of [1, -1]) b.box(7.4, 0.14, 0.3, darkM, cradleX, 2.6, cradleZ + sgn * 1.6);
+  const propSkiff = hullLoft([
+    { x: 3.1, hb: 0.2 }, { x: 2.4, hb: 0.85 }, { x: 0.5, hb: 1.05 }, { x: -1.5, hb: 1.05 }, { x: -3.0, hb: 0.95 },
+  ], 0.75, -0.35, mat(0x8a8d84, 0.8, 0.1));
+  propSkiff.position.set(cradleX, 2.35, cradleZ);
+  b.group.add(propSkiff);
+  b.box(1.9, 0.07, 0.35, mat(0x6b4a2f, 0.9, 0), cradleX, 2.85, cradleZ);
+
+  // ---- deck dressing ----
+  const crateM = mat(0x5d6855, 0.9, 0.05);
+  b.box(1.6, 1.1, 1.6, crateM, 22, D + 0.55, -5.6);
+  b.box(1.6, 1.1, 1.6, crateM, 22, D + 1.65, -5.6);
+  b.box(1.3, 0.9, 1.3, crateM, 24.2, D + 0.45, -5.4);
+  b.box(1.6, 1.1, 1.6, crateM, -18, D + 0.55, 5.8);
+  b.box(1.2, 0.85, 1.2, mat(0x707880, 0.75, 0.25), -16.2, D + 0.43, 5.6);
+  for (const [bx, bz] of [[14, 6.4], [15.1, 6.1], [14.5, 5.2]] as [number, number][]) {
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.88, 12), rustM);
+    barrel.position.set(bx, D + 0.44, bz);
+    barrel.castShadow = true;
+    b.group.add(barrel);
+  }
+  b.box(1.6, 0.9, 1.2, darkM, 36.5, D + 0.45, 0); // anchor windlass
+  const chainPile = new THREE.Mesh(new THREE.TorusGeometry(0.45, 0.16, 8, 14), darkM);
+  chainPile.rotation.x = Math.PI / 2;
+  chainPile.position.set(34.6, D + 0.14, 1.6);
+  b.group.add(chainPile);
+  for (const sgn of [1, -1]) {
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.09, 8, 16), mat(0xe3e0d5, 0.6, 0.05));
+    ring.position.set(-4, D + 0.75, sgn * 8.2);
+    b.group.add(ring);
+  }
+
+  // ---- the loot: the richest concentration on the island (chance-1
+  // rolls are guaranteed — this deck is a guarded vault, not a lottery)
+  const sure = (id: string, qty = 1): HuskLootEntry => ({ id, min: qty, max: qty, chance: 1 });
+  b.loot('carrier_armory', S.x - 1.5, -4.9, [
+    sure('dmr'), sure('reflex_sight'), sure('suppressor'), sure('ammo_556', 2), sure('armored_vest'),
+  ], 'Carrier armory safe', 'safe', { locked: true, searchTime: 6 });
+  b.loot('carrier_safe', S.x + 2.8, 4.7, [
+    sure('valuables', 2), sure('relay_part'), sure('beacon_cell'), sure('extended_mag'), sure('lockpick'),
+  ], 'Ship safe', 'safe', { locked: true, searchTime: 6 });
+  b.loot('carrier_crate_a', 12, -5.9, [
+    sure('carbine'), sure('ammo_556'), sure('foregrip'), sure('laser_sight'),
+  ], 'Weapons crate', 'crate', { searchTime: 3.5 });
+  b.loot('carrier_crate_b', -12, -6.1, [
+    sure('armor_plate', 2), sure('gun_parts', 2), sure('engine_part'), sure('car_battery'),
+  ], 'Parts crate', 'crate', { searchTime: 3.5 });
+  b.loot('carrier_crate_c', 4, 6.2, [
+    sure('medkit'), sure('bandage', 2), sure('riot_helmet'),
+  ], 'Medical crate', 'crate', { searchTime: 3.5 });
+  b.loot('carrier_toolbox', S.x + 7.6, 3.4, [
+    sure('tool_kit'), sure('tire'), sure('fuel_can'),
+  ], 'Deck toolbox', 'toolbox');
+
+  mergeInto(out, b);
+  scene.add(out.group);
+  return out;
+}
