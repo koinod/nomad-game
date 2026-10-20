@@ -4,7 +4,8 @@
 
 export type SfxName =
   | 'swing' | 'shot' | 'hit' | 'hurt' | 'pickup' | 'ui'
-  | 'step' | 'quest' | 'eat' | 'phone' | 'switch' | 'beacon' | 'craft';
+  | 'step' | 'quest' | 'eat' | 'phone' | 'switch' | 'beacon' | 'craft'
+  | 'tick' | 'killconfirm' | 'headshot' | 'thud' | 'jam' | 'dryfire';
 
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
@@ -173,6 +174,37 @@ export const sfx = {
           [0, 0.07, 0.14].forEach((dt) =>
             noise({ filterType: 'highpass', freq: 2400, e: { t0: now + dt, peak: 0.16 * v, decay: 0.03 } }),
           );
+          break;
+        case 'tick':
+          // hitmarker tick: a short, dry, high click the ear can count
+          osc('sine', 2150, { t0: now, peak: 0.16 * v, decay: 0.045 });
+          noise({ filterType: 'highpass', freq: 3200, e: { t0: now, peak: 0.1 * v, decay: 0.03 } });
+          break;
+        case 'headshot':
+          // the tick, plus a wet thock underneath — skull, not meat
+          osc('sine', 2400, { t0: now, peak: 0.18 * v, decay: 0.05 });
+          osc('sine', 320, { t0: now, peak: 0.4 * v, decay: 0.11, slideTo: 85 });
+          break;
+        case 'killconfirm':
+          // two-tone confirm: down then up, unmistakable in a fight
+          osc('square', 392, { t0: now, peak: 0.14 * v, decay: 0.07 });
+          osc('square', 587, { t0: now + 0.06, peak: 0.16 * v, decay: 0.13 });
+          break;
+        case 'thud':
+          // melee connect: deeper and heavier than the bullet 'hit'
+          osc('sine', 118, { t0: now, peak: 0.55 * v, decay: 0.17, slideTo: 44 });
+          noise({ filterType: 'lowpass', freq: 520, e: { t0: now, peak: 0.25 * v, decay: 0.12 } });
+          break;
+        case 'jam':
+          // a sick metallic clack-clunk: the action dies mid-cycle
+          noise({ filterType: 'highpass', freq: 2100, e: { t0: now, peak: 0.22 * v, decay: 0.035 } });
+          osc('square', 210, { t0: now + 0.05, peak: 0.16 * v, decay: 0.06, slideTo: 120 });
+          noise({ filterType: 'bandpass', freq: 700, q: 2, e: { t0: now + 0.05, peak: 0.18 * v, decay: 0.08 } });
+          break;
+        case 'dryfire':
+          // hammer on an empty chamber: one flat click
+          noise({ filterType: 'highpass', freq: 2000, e: { t0: now, peak: 0.2 * v, decay: 0.03 } });
+          osc('square', 420, { t0: now, peak: 0.08 * v, decay: 0.03, slideTo: 240 });
           break;
       }
     } catch {

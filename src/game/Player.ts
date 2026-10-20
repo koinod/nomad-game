@@ -605,8 +605,10 @@ export class Player {
       });
       if (fired.fired) {
         if (fired.hit) {
-          useGameStore.getState().setHitmark(fired.killed ? 'kill' : 'hit');
-          this.hitPunch = fired.killed ? 0.3 : 0.18;
+          useGameStore.getState().setHitmark(
+            fired.killed ? 'kill' : fired.headshot ? 'headshot' : 'hit',
+          );
+          this.hitPunch = fired.killed ? 0.3 : fired.headshot ? 0.24 : 0.18;
           if (fired.killed) useGameStore.getState().addSkillXp('combat', 8);
         } else {
           // a miss can still drop a rabbit or deer downrange

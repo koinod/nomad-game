@@ -6,6 +6,7 @@ import { useGameStore } from '../store/gameStore';
 import { sfx } from '../systems/audio';
 import type { HuskManager } from './Husks';
 import { modNoiseMult, modSpreadMult } from '../data/mods';
+import { rangeFalloff } from './gunMath';
 
 export interface CombatHooks {
   husks: HuskManager;
@@ -133,10 +134,10 @@ export function tryMelee(h: CombatHooks): MeleeResult {
     }
     const killed = t.husk.damage(Math.round(stats.damage * mult), dir, stats.knockback, true);
     t.husk.investigateAt(h.playerPos);
-    sfx.play('hit', { volume: 0.9 });
+    sfx.play('thud', { volume: 0.9 });
     if (killed) {
       kills++;
-      sfx.play('quest', { volume: 0.4 });
+      sfx.play('killconfirm', { volume: 0.5 });
     }
   }
   return { swung: true, hits: targets.length, kills, stats };
@@ -146,11 +147,13 @@ export interface RangedResult {
   fired: boolean;
   hit: boolean;
   killed: boolean;
+  headshot: boolean; // any pellet found the head
+  damage: number; // total damage dealt (drives tick volume + puff size)
 }
 
 /** Fire the equipped ranged weapon. */
 export function tryRanged(h: CombatHooks): RangedResult {
-  const miss: RangedResult = { fired: false, hit: false, killed: false };
+  const miss: RangedResult = { fired: false, hit: false, killed: false, headshot: false, damage: 0 };
   const def = equippedRangedDef();
   if (!def || def.category !== 'weapon-ranged' || !def.ammoId) {
     useGameStore.getState().addToast('No ranged weapon equipped.');
@@ -164,7 +167,7 @@ export function tryRanged(h: CombatHooks): RangedResult {
     const loaded = inst?.loaded ?? 0;
     if (loaded <= 0) {
       s.addToast('Magazine empty — R to reload.');
-      sfx.play('ui', { volume: 0.4 });
+      sfx.play('dryfire', { volume: 0.7 });
       return miss;
     }
     if (inst) s.setLoaded(inst.uid, loaded - 1);
@@ -172,7 +175,7 @@ export function tryRanged(h: CombatHooks): RangedResult {
     const ammoUid = s.inventory.find((i) => i.itemId === def.ammoId)?.uid;
     if (!ammoUid) {
       useGameStore.getState().addToast('No ammo.');
-      sfx.play('ui', { volume: 0.4 });
+      sfx.play('dryfire', { volume: 0.7 });
       return miss;
     }
     s.removeItem(ammoUid, 1);
@@ -190,6 +193,8 @@ export function tryRanged(h: CombatHooks): RangedResult {
   const spread = (def.spread ?? 0.045) * aimMult * modSpreadMult(mods, h.aimLevel) + (h.aimLevel === 2 ? 0.002 : 0.006);
   let hit = false;
   let killed = false;
+  let headshot = false;
+  let totalDamage = 0;
   for (let p = 0; p < pellets; p++) {
     // each pellet jitters around the aim dir — tight pattern, real spread feel
     const dir = h.aimDir.clone();
@@ -202,25 +207,29 @@ export function tryRanged(h: CombatHooks): RangedResult {
     }
     const res = h.husks.raycastShot(h.eyePos, dir, range);
     if (res) {
-      let dmg = def.damage ?? 20;
-      if (res.dist > 25) dmg *= Math.max(0.5, 1 - (res.dist - 25) / 50);
+      let dmg = rangeFalloff(def.damage ?? 20, res.dist);
       if (res.head) dmg *= 2;
+      const dealt = Math.round(dmg);
       const kdir = new THREE.Vector3(
         res.husk.group.position.x - h.playerPos.x,
         0,
         res.husk.group.position.z - h.playerPos.z,
       ).normalize();
-      const k = res.husk.damage(Math.round(dmg), kdir, 1.2, false);
+      const k = res.husk.damage(dealt, kdir, 1.2, false, { head: res.head });
       res.husk.investigateAt(h.playerPos);
-      sfx.play('hit', { volume: 0.9 });
       hit = true;
-      if (k) {
-        killed = true;
-        sfx.play('quest', { volume: 0.4 });
-      }
+      totalDamage += dealt;
+      if (res.head) headshot = true;
+      if (k) killed = true;
     }
   }
-  return { fired: true, hit, killed };
+  // one feedback voice per trigger pull, best result wins: a shotgun blast
+  // is one thud of information, not six overlapping ticks. Tick volume
+  // scales with damage dealt — falloff you can hear.
+  if (killed) sfx.play('killconfirm', { volume: 0.55 });
+  else if (headshot) sfx.play('headshot', { volume: 0.9 });
+  else if (hit) sfx.play('tick', { volume: 0.35 + Math.min(0.6, totalDamage / 90) });
+  return { fired: true, hit, killed, headshot, damage: totalDamage };
 }
 
 function equippedRangedDef() {

@@ -77,9 +77,9 @@ interface GameState {
 
   // crosshair feedback
   meleeTarget: boolean;
-  hitmark: { kind: 'hit' | 'kill'; at: number } | null;
+  hitmark: { kind: 'hit' | 'kill' | 'headshot'; at: number } | null;
   setMeleeTarget: (b: boolean) => void;
-  setHitmark: (kind: 'hit' | 'kill') => void;
+  setHitmark: (kind: 'hit' | 'kill' | 'headshot') => void;
 
   // crafting stations: which workstation the player is standing at (if any)
   nearStation: import('../data/items').StationId | null;

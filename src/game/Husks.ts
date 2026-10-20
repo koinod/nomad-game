@@ -3,6 +3,7 @@
 
 import * as THREE from 'three';
 import { mulberry32 } from './rng';
+import { staggerPower } from './gunMath';
 import { resolveCollisions, type Collider } from './Colliders';
 import { sfx } from '../systems/audio';
 import { useGameStore } from '../store/gameStore';
@@ -59,6 +60,8 @@ export class Husk {
   deathT = 0;
   lostSightT = 0;
   staggerT = 0; // heavy hits interrupt the attack windup
+  flinchT = 0; // procedural hit reaction clock (head snap + torso rock)
+  flinchPow = 0; // 0..1 — how hard this hit rocked the husk
   limpT = 0; // walk-cycle clock for the shuffle animation
   stunT = 0; // flashbang / concussion: no perception, no movement
   knock = new THREE.Vector3();
@@ -66,6 +69,8 @@ export class Husk {
   killReported = false;
   private mats: THREE.MeshStandardMaterial[] = [];
   private bodyMat!: THREE.MeshStandardMaterial;
+  private headMesh: THREE.Mesh | null = null;
+  private torsoMesh: THREE.Mesh | null = null;
 
   constructor(id: string, kind: HuskKind, x: number, z: number, zoneId: string, groundY: (x: number, z: number) => number) {
     this.id = id;
@@ -97,11 +102,13 @@ export class Husk {
     const body = new THREE.Mesh(new THREE.BoxGeometry(0.68, height * 0.58, 0.4), jacketMat);
     body.position.y = height * 0.55;
     body.rotation.x = 0.14;
+    this.torsoMesh = body;
     // head lolls to the side, jaw dropped
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 10, 8), skinMat);
     head.position.set(0.05, height * 0.95, 0.05);
     head.rotation.z = 0.18;
     head.name = 'head';
+    this.headMesh = head;
     const jaw = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.08, 0.14), darkMat);
     jaw.position.set(0.05, height * 0.95 - 0.24, 0.12);
     jaw.rotation.x = 0.35;
@@ -188,12 +195,23 @@ export class Husk {
   }
 
   /** Apply damage; returns true if this hit killed it. */
-  damage(amount: number, fromDir: THREE.Vector3, knockPower = 2.2, canStagger = false): boolean {
+  damage(
+    amount: number,
+    fromDir: THREE.Vector3,
+    knockPower = 2.2,
+    canStagger = false,
+    opts?: { head?: boolean },
+  ): boolean {
     if (!this.alive) return false;
     this.hp -= amount;
     this.flashT = 0.18;
     this.bodyMat.emissive.setHex(0xff2222);
     this.knock.addScaledVector(fromDir, knockPower);
+    // every connecting hit is FELT: the head snaps and the torso rocks,
+    // scaled by the hit's stagger power (headshots and heavies rock hardest)
+    const sp = staggerPower(amount, opts?.head ?? false);
+    this.flinchT = 0.24;
+    this.flinchPow = Math.max(this.flinchPow, sp);
     if (this.hp <= 0) {
       this.state = 'dead';
       this.deathT = 0;
@@ -208,6 +226,15 @@ export class Husk {
       this.attackCd = Math.max(this.attackCd, 0.9);
     } else if (canStagger && knockPower >= 3.4) {
       this.staggerT = Math.max(this.staggerT, 0.35);
+    }
+    // a heavy ranged hit (or any headshot) breaks the windup too — a DMR
+    // round to the chest is not something you swing through
+    if (!canStagger && sp >= 0.6) {
+      if (this.state === 'attack') {
+        this.state = 'hunt';
+        this.attackCd = Math.max(this.attackCd, 0.8);
+      }
+      this.staggerT = Math.max(this.staggerT, 0.32);
     }
     // getting hit draws attention (caller routes investigateAt at the attacker)
     if (this.state === 'idle' || this.state === 'wander' || this.state === 'return') {
@@ -245,6 +272,21 @@ export class Husk {
     if (this.flashT > 0) {
       this.flashT -= dt;
       if (this.flashT <= 0) this.bodyMat.emissive.setHex(0x000000);
+    }
+
+    // flinch: the hit lands on the body — head snaps back, torso rocks,
+    // both riding one jolt curve scaled by the hit's stagger power
+    if (this.flinchT > 0) {
+      this.flinchT -= dt;
+      const phase = 1 - Math.max(this.flinchT, 0) / 0.24;
+      const jolt = Math.sin(phase * Math.PI) * this.flinchPow;
+      if (this.headMesh) this.headMesh.rotation.x = -jolt * 0.85;
+      if (this.torsoMesh) this.torsoMesh.rotation.x = 0.14 - jolt * 0.42;
+      if (this.flinchT <= 0) {
+        this.flinchPow = 0;
+        if (this.headMesh) this.headMesh.rotation.x = 0;
+        if (this.torsoMesh) this.torsoMesh.rotation.x = 0.14;
+      }
     }
 
     // stagger: rock back on the heels, attacks can't land mid-stagger

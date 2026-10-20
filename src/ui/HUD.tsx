@@ -137,6 +137,7 @@ function Crosshair() {
   }, [hitmark]);
   const showMark = hitmark && Date.now() - hitmark.at < 190;
   const kill = hitmark?.kind === 'kill';
+  const headshot = hitmark?.kind === 'headshot';
   return (
     <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" aria-hidden>
       {/* center dot */}
@@ -161,9 +162,9 @@ function Crosshair() {
       {/* hitmarker X flash */}
       {showMark && (
         <div
-          className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-xl font-bold ${
-            kill ? 'text-[#d9534f]' : 'text-[#e8b34b]'
-          }`}
+          className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 font-bold ${
+            headshot ? 'text-2xl' : 'text-xl'
+          } ${kill ? 'text-[#d9534f]' : headshot ? 'text-[#ffd76a]' : 'text-[#e8b34b]'}`}
           style={{ textShadow: '0 0 6px rgba(0,0,0,0.8)' }}
         >
           ✕
