@@ -17,7 +17,7 @@ import { box, chrome, darkTrim, glassTint, lampMat, loftMesh, mat, tailMat, tube
 import { buildStallion, applyStallionUpgrades } from './carModels';
 import { buildBoxtruck, buildBronco, buildF250, buildPickup, buildSemi } from './truckModels';
 import { buildGoliath, buildSedan, buildSprinter, buildTank, buildV03, buildVan } from './vanModels';
-import { buildMarshBuggy } from './smallModels';
+import { buildATV, buildMarshBuggy, buildMotocross, buildSportbike } from './smallModels';
 import {
   cgHeightM, cornerRoll, effectiveSteerAngle, impactBounce, impactDamage,
   understeerK, vehicleMassKg, weightTransferPitch,
@@ -681,6 +681,9 @@ function buildCarBody(g: THREE.Group, def: VehicleDef, v: Vehicle): void {
 }
 
 function buildBike(g: THREE.Group, def: VehicleDef, v: Vehicle): void {
+  if (def.id === 'atv') { buildATV(g, def, v); return; }
+  if (def.id === 'sportbike') { buildSportbike(g, def, v); return; }
+  if (def.id === 'motocross') { buildMotocross(g, def, v); return; }
   const body = mat(def.color, 0.5, 0.4);
   const dark = darkTrim();
   if (def.kind === 'atv') {
