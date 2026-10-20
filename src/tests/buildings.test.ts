@@ -52,9 +52,11 @@ describe('the building QA gate', () => {
   it('passes every kit POI building in the world', () => {
     const world = buildWorld();
     // mall, convenience store, auto garage, school, boathouse, and the
-    // gas station's two structures (store + canopy). The town warehouse
-    // and Jonah's barn are keepers — legacy builds, not gated.
-    expect(world.poiBuildings.buildings.length).toBe(7);
+    // gas station's two structures (store + canopy), plus the six
+    // Stitch-template buildings (pharmacy, clinic, hardware, marine,
+    // police, warehouse utility). The town warehouse and Jonah's barn
+    // are keepers — legacy builds, not gated.
+    expect(world.poiBuildings.buildings.length).toBe(13);
     expectGate(world.poiBuildings.buildings, 'poi buildings');
   });
 

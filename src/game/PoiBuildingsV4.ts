@@ -359,6 +359,219 @@ function gasStation(cx: number, cz: number, groundY: GroundY): Kit[] {
   return [store, canopy];
 }
 
+// ------------------------------------------- Stitch templates (map phase 7)
+// The remaining unbuilt templates from the Stitch roster, placed at
+// sensible town/marina sites with their own loot identities.
+
+const MARINE_LOOT: HuskLootEntry[] = [
+  { id: 'fuel_can', min: 1, max: 1, chance: 0.5 },
+  { id: 'scrap', min: 1, max: 3, chance: 0.8 },
+  { id: 'wire', min: 1, max: 2, chance: 0.6 },
+  { id: 'cloth', min: 1, max: 2, chance: 0.4 },
+];
+const POLICE_LOOT: HuskLootEntry[] = [
+  { id: 'ammo_9mm', min: 4, max: 8, chance: 0.7 },
+  { id: 'ammo_shells', min: 2, max: 4, chance: 0.5 },
+  { id: 'ammo_556', min: 3, max: 6, chance: 0.4 },
+  { id: 'bandage', min: 1, max: 2, chance: 0.4 },
+];
+
+function pharmacy(cx: number, cz: number, groundY: GroundY): Kit {
+  const k = kitAt('pharmacy', cx, cz, 10, 8, 1, groundY);
+  const col = 0xdcd8d0;
+  k.foundation();
+  k.floorSlab(0);
+  k.wall({
+    axis: 'x', at: 4 - 0.15, from: -5, to: 5, story: 0, color: col, exterior: true,
+    openings: [
+      { at: 0, w: 1.4, type: 'slider', h: 2.1 },
+      { at: -3, w: 2.2, type: 'window', sill: 0.55, head: 2.45 },
+      { at: 3, w: 2.2, type: 'window', sill: 0.55, head: 2.45 },
+    ],
+  });
+  k.perimeter({
+    story: 0, color: col, open: ['S'],
+    windows: [{ face: 'N', at: -2.5 }, { face: 'N', at: 2.5 }, { face: 'E', at: 0 }, { face: 'W', at: 0 }],
+  });
+  k.roofFlat(0x6a6a6e, col);
+  k.box(9.6, 0.7, 0.1, 0x2e7a4a, 0, 2.68, 4.06);
+  // the green cross
+  k.box(0.62, 0.2, 0.06, 0x39c26a, -3.4, 2.68, 4.12);
+  k.box(0.2, 0.62, 0.06, 0x39c26a, -3.4, 2.68, 4.12);
+  const sign = decalPlane('PHARMACY', 5.5, 'rgba(240,246,240,0.97)', 50);
+  sign.position.set(0.6, 2.68, 4.12);
+  k.addDetail(sign);
+  k.furnish({ kind: 'cabinets', lx: -3.6, lz: -3.3, id: 'pharmacy_shelf_1', loot: PHARMACY, label: 'Search pharmacy shelf' });
+  k.furnish({ kind: 'cabinets', lx: 0, lz: -3.3, id: 'pharmacy_shelf_2', loot: PHARMACY, label: 'Search pharmacy shelf' });
+  k.furnish({ kind: 'cabinets', lx: 3.6, lz: -3.3, id: 'pharmacy_shelf_3', loot: PHARMACY, label: 'Search pharmacy shelf' });
+  k.furnish({
+    kind: 'fridge', lx: -4.2, lz: 1.5, id: 'pharmacy_fridge',
+    loot: [
+      { id: 'medkit', min: 1, max: 1, chance: 0.35 },
+      { id: 'bandage', min: 1, max: 3, chance: 0.8 },
+    ],
+    label: 'Search medical fridge',
+  });
+  k.furnish({ kind: 'bookshelf', lx: 4.2, lz: 2.8, id: 'pharmacy_counter', loot: PHARMACY, label: 'Search pharmacy counter' });
+  k.roomPoint(0, 1, 'pharmacy floor');
+  return k;
+}
+
+function clinic(cx: number, cz: number, groundY: GroundY): Kit {
+  const k = kitAt('clinic', cx, cz, 12, 9, 1, groundY);
+  const col = 0xe2ded4;
+  k.foundation();
+  k.floorSlab(0);
+  k.perimeter({
+    story: 0, color: col,
+    door: { face: 'S', at: -2, leafColor: 0x8e2f28 },
+    windows: [
+      { face: 'S', at: 2.5 }, { face: 'S', at: -4.8 },
+      { face: 'N', at: -3 }, { face: 'N', at: 3 },
+      { face: 'E', at: 0 }, { face: 'W', at: 0 },
+    ],
+  });
+  // exam rooms along the back, one door off the waiting room
+  k.divider({ axis: 'x', at: -1.5, from: -5.7, to: 5.7, color: col, doorAt: 3 });
+  k.roofFlat(0x6a6a6e, col);
+  k.box(11.6, 0.7, 0.1, 0xb03a2e, 0, 2.68, 4.56);
+  const sign = decalPlane('CLINIC', 5, 'rgba(245,242,235,0.97)', 54);
+  sign.position.set(0, 2.68, 4.62);
+  k.addDetail(sign);
+  k.furnish({ kind: 'cabinets', lx: -4.5, lz: -3.6, id: 'clinic_cabinets_1', loot: PHARMACY, label: 'Search clinic cabinet' });
+  k.furnish({ kind: 'cabinets', lx: 0.5, lz: -3.6, id: 'clinic_cabinets_2', loot: PHARMACY, label: 'Search clinic cabinet' });
+  k.furnish({
+    kind: 'fridge', lx: 5.2, lz: -3.4, id: 'clinic_fridge',
+    loot: [
+      { id: 'medkit', min: 1, max: 2, chance: 0.4 },
+      { id: 'bandage', min: 2, max: 3, chance: 0.85 },
+    ],
+    label: 'Search medical fridge',
+  });
+  k.furnish({ kind: 'cooler', lx: -5.2, lz: 2.5, id: 'clinic_supplies', loot: FURNITURE_LOOT.cooler.suburban });
+  k.furnish({ kind: 'crate', lx: 5.2, lz: 3.4, id: 'clinic_crate', loot: FURNITURE_LOOT.crate.suburban });
+  k.roomPoint(0, 2.8, 'waiting room');
+  k.roomPoint(-3, -3, 'exam room');
+  return k;
+}
+
+function hardwareStore(cx: number, cz: number, groundY: GroundY): Kit {
+  const k = kitAt('hardware', cx, cz, 12, 9, 1, groundY);
+  const col = 0x8a7f72;
+  k.foundation();
+  k.floorSlab(0);
+  k.wall({
+    axis: 'x', at: 4.5 - 0.15, from: -6, to: 6, story: 0, color: col, exterior: true,
+    openings: [
+      { at: -1.5, w: 1.6, type: 'slider', h: 2.1 },
+      { at: 3.2, w: 3.2, type: 'window', sill: 0.55, head: 2.45 },
+      { at: -4.6, w: 1.8, type: 'window', sill: 0.55, head: 2.45 },
+    ],
+  });
+  k.perimeter({
+    story: 0, color: col, open: ['S'],
+    windows: [{ face: 'N', at: -3 }, { face: 'N', at: 3 }, { face: 'E', at: 0 }, { face: 'W', at: 0 }],
+  });
+  k.roofFlat(0x5a5a5e, col);
+  k.box(11.6, 0.7, 0.1, 0x8a6a2a, 0, 2.68, 4.56);
+  const sign = decalPlane('HARDWARE', 6.5, 'rgba(240,238,230,0.97)', 50);
+  sign.position.set(0, 2.68, 4.62);
+  k.addDetail(sign);
+  k.furnish({ kind: 'bookshelf', lx: -4, lz: -3.6, id: 'hardware_shelf_1', loot: PARTS, label: 'Search parts shelf' });
+  k.furnish({ kind: 'bookshelf', lx: 0, lz: -3.6, id: 'hardware_shelf_2', loot: PARTS, label: 'Search parts shelf' });
+  k.furnish({ kind: 'cabinets', lx: 4, lz: -3.6, id: 'hardware_batteries', loot: BATTERIES, label: 'Search battery rack' });
+  k.furnish({ kind: 'toolbox', lx: -5.2, lz: 0.5, id: 'hardware_toolbox_1', loot: FURNITURE_LOOT.toolbox.suburban });
+  k.furnish({ kind: 'toolbox', lx: 5.2, lz: 0.5, id: 'hardware_toolbox_2', loot: FURNITURE_LOOT.toolbox.suburban });
+  k.furnish({ kind: 'crate', lx: 0, lz: 3.4, id: 'hardware_crate', loot: FURNITURE_LOOT.crate.suburban });
+  k.roomPoint(0, 0.5, 'hardware floor');
+  return k;
+}
+
+function marineStore(cx: number, cz: number, groundY: GroundY): Kit {
+  const k = kitAt('marine_store', cx, cz, 10, 7, 1, groundY);
+  const col = 0x6a7a86;
+  k.foundation();
+  k.floorSlab(0);
+  k.perimeter({
+    story: 0, color: col,
+    door: { face: 'S', at: 1.5, leafColor: 0x2e4a6e },
+    windows: [{ face: 'S', at: -2.5 }, { face: 'N', at: 0 }, { face: 'E', at: 0 }, { face: 'W', at: 0 }],
+  });
+  k.roofShed(0.7, 0x3a4a52, col);
+  const sign = decalPlane('MARINE SUPPLY', 5.5, 'rgba(238,240,242,0.95)', 42);
+  sign.position.set(0, 2.5, 3.56);
+  k.addDetail(sign);
+  k.furnish({ kind: 'crate', lx: -3.8, lz: -2.4, id: 'marine_crate_1', loot: MARINE_LOOT, label: 'Search marine crate' });
+  k.furnish({ kind: 'crate', lx: 0, lz: -2.6, id: 'marine_crate_2', loot: MARINE_LOOT, label: 'Search marine crate' });
+  k.furnish({ kind: 'cooler', lx: 3.8, lz: -2.4, id: 'marine_cooler', loot: FURNITURE_LOOT.cooler.camp });
+  k.furnish({ kind: 'toolbox', lx: -3.8, lz: 2.4, id: 'marine_toolbox', loot: FURNITURE_LOOT.toolbox.camp });
+  k.roomPoint(0, 0.5, 'marine store');
+  return k;
+}
+
+function policeSubstation(cx: number, cz: number, groundY: GroundY): Kit {
+  const k = kitAt('police', cx, cz, 12, 8, 1, groundY);
+  const col = 0x7a7f88;
+  k.foundation();
+  k.floorSlab(0);
+  k.perimeter({
+    story: 0, color: col,
+    door: { face: 'S', at: -3, leafColor: 0x2e3a4a },
+    windows: [
+      { face: 'S', at: 1.5, w: 1.0, sill: 1.2, head: 2.2 }, { face: 'S', at: 4.2, w: 1.0, sill: 1.2, head: 2.2 },
+      { face: 'N', at: -3, w: 1.0, sill: 1.2, head: 2.2 }, { face: 'N', at: 3, w: 1.0, sill: 1.2, head: 2.2 },
+      { face: 'E', at: 0, w: 1.0, sill: 1.2, head: 2.2 }, { face: 'W', at: 0, w: 1.0, sill: 1.2, head: 2.2 },
+    ],
+  });
+  // the cell block: a divider with a cell door, bunks behind it
+  k.divider({ axis: 'z', at: 2.5, from: -3.7, to: 0.5, color: col, doorAt: -1 });
+  k.roofFlat(0x4a4e55, col);
+  k.box(11.6, 0.6, 0.1, 0x2e3a4a, 0, 2.7, 4.06);
+  const sign = decalPlane('POLICE', 4.5, 'rgba(240,242,245,0.97)', 54);
+  sign.position.set(0, 2.7, 4.12);
+  k.addDetail(sign);
+  k.furnish({ kind: 'cabinets', lx: -5.2, lz: -3.3, id: 'police_armory', loot: POLICE_LOOT, label: 'Search armory locker' });
+  k.furnish({ kind: 'bookshelf', lx: -1.5, lz: -3.5, id: 'police_records', loot: FURNITURE_LOOT.bookshelf.suburban, label: 'Search records shelf' });
+  k.furnish({ kind: 'toolbox', lx: -5.2, lz: 2.8, id: 'police_toolbox', loot: FURNITURE_LOOT.toolbox.suburban });
+  k.furnish({ kind: 'crate', lx: 4.2, lz: 2.6, id: 'police_crate', loot: FURNITURE_LOOT.crate.suburban });
+  k.roomPoint(-3, 1, 'front office');
+  k.roomPoint(4.2, -1.5, 'cell block');
+  return k;
+}
+
+function warehouseUtility(cx: number, cz: number, groundY: GroundY): Kit {
+  const k = kitAt('warehouse_util', cx, cz, 12, 8, 1, groundY);
+  const col = 0x7a8a94;
+  k.foundation();
+  k.floorSlab(0);
+  k.wall({
+    axis: 'x', at: 4 - 0.15, from: -6, to: 6, story: 0, color: col, exterior: true,
+    openings: [
+      { at: -1.8, w: 3.4, type: 'bay', h: 3.0 },
+      { at: 3.4, w: 0.95, type: 'door', h: 2.1, leafColor: 0x5a6a74 },
+    ],
+  });
+  k.perimeter({
+    story: 0, color: col, open: ['S'],
+    windows: [
+      { face: 'N', at: -3, w: 1.4, sill: 2.0, head: 2.9 }, { face: 'N', at: 3, w: 1.4, sill: 2.0, head: 2.9 },
+      { face: 'E', at: 0 }, { face: 'W', at: 0 },
+    ],
+  });
+  k.roofGable(1.5, 0x4a5a63, col);
+  const sign = decalPlane('DEPOT STORAGE', 6, 'rgba(238,240,242,0.95)', 44);
+  sign.position.set(0.8, 2.55, 4.06);
+  k.addDetail(sign);
+  k.furnish({ kind: 'bookshelf', lx: 0.5, lz: -3.4, id: 'util_shelf', loot: PARTS, label: 'Search parts shelf' });
+  k.furnish({ kind: 'crate', lx: -4.5, lz: -3.2, id: 'util_crate_1', loot: PARTS, label: 'Search parts crate' });
+  k.furnish({ kind: 'crate', lx: -4.5, lz: 1.5, id: 'util_crate_2', loot: FURNITURE_LOOT.crate.suburban });
+  k.furnish({ kind: 'crate', lx: 4.6, lz: -3.2, id: 'util_crate_3', loot: FURNITURE_LOOT.crate.suburban });
+  k.furnish({ kind: 'barrel', lx: 4.8, lz: 1.8, id: 'util_barrel_1', loot: FURNITURE_LOOT.barrel.suburban });
+  k.furnish({ kind: 'barrel', lx: 3.6, lz: 2.8, id: 'util_barrel_2', loot: FURNITURE_LOOT.barrel.suburban });
+  k.roomPoint(0, 0.5, 'utility warehouse floor');
+  return k;
+}
+
 // ------------------------------------------------------------------ assembly
 
 export function poiFootprints(pois: Record<string, [number, number]>): PoiFootprint[] {
@@ -372,6 +585,12 @@ export function poiFootprints(pois: Record<string, [number, number]>): PoiFootpr
     [-30, 60, 10, 7], // school (pad covers the portico)
     [30, 48, 6.5, 5.5], // convenience store
     [130, 58, 8, 6.5], // auto garage
+    // map phase 7: the remaining Stitch templates
+    [52, 26, 5.5, 4.5], // pharmacy
+    [-44, 44, 6.5, 5], // clinic
+    [88, -18, 6.5, 5], // hardware store
+    [-8, -34, 6.5, 4.5], // police substation
+    [120, 20, 6.5, 4.5], // warehouse utility
   ];
   const out: PoiFootprint[] = town.map(([dx, dz, hw, hd]) => {
     const [cx, cz] = at('town', dx, dz);
@@ -389,6 +608,10 @@ export function poiFootprints(pois: Record<string, [number, number]>): PoiFootpr
   {
     const [cx, cz] = at('marina', 0, 0);
     out.push({ cx, cz, hw: 5.5, hd: 4 }); // boathouse
+  }
+  {
+    const [cx, cz] = at('marina', 16, 8);
+    out.push({ cx, cz, hw: 5.5, hd: 4 }); // marine store
   }
   return out;
 }
@@ -447,6 +670,19 @@ export function buildPoiBuildings(
   addKeeper(barn(m[0], m[1], groundY));
   m = at('marina', 0, 0);
   addKit(boathouse(m[0], m[1], groundY));
+  // map phase 7: the remaining Stitch templates as working POI buildings
+  m = at('town', 52, 26);
+  addKit(pharmacy(m[0], m[1], groundY));
+  m = at('town', -44, 44);
+  addKit(clinic(m[0], m[1], groundY));
+  m = at('town', 88, -18);
+  addKit(hardwareStore(m[0], m[1], groundY));
+  m = at('town', -8, -34);
+  addKit(policeSubstation(m[0], m[1], groundY));
+  m = at('town', 120, 20);
+  addKit(warehouseUtility(m[0], m[1], groundY));
+  m = at('marina', 16, 8);
+  addKit(marineStore(m[0], m[1], groundY));
   scene.add(out.group);
   return out;
 }
