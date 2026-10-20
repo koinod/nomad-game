@@ -137,6 +137,32 @@ describe('migrate()', () => {
     expect('slot' in out).toBe(false);
   });
 
+  it('passes wave-3 fields (dispatches / journal / scouted / baseQueue) through unchanged', () => {
+    const v3 = fullV2Snapshot();
+    const withWave3 = {
+      ...v3,
+      dispatches: [{
+        id: 'd1', survivorId: 'elena', vehicleDefId: 'pickup', trailerDefId: null,
+        task: 'scavenge' as const, destPoiId: 'town', departMin: 500, etaMin: 900,
+        distM: 640, status: 'out' as const,
+      }],
+      journal: [{ id: 'j1', atMin: 480, title: 'Day 1', lines: ['Washed ashore.'] }],
+      scouted: { town: { poiId: 'town', atMin: 700, containers: 9, looted: 2 } },
+      baseQueue: [{ facilityId: 'garden', readyMin: 1500 }],
+      // and a grid-placed inventory stack rides along untouched
+      inventory: [{ uid: 'g1', itemId: 'dmr', qty: 1, gx: 0, gy: 0, rot: false }],
+    };
+    const out = migrate({ ...withWave3, slot: '2' });
+    expect(out).toEqual(withWave3);
+  });
+
+  it('leaves wave-3 fields absent on an older v3 save (store defaults them)', () => {
+    const out = migrate({ ...fullV2Snapshot(), slot: '1' });
+    expect(out.dispatches).toBeUndefined();
+    expect(out.journal).toBeUndefined();
+    expect(out.baseQueue).toBeUndefined();
+  });
+
   it('round-trips: v0 -> v3 -> migrate again is stable', () => {
     const once = migrate(v0Snapshot());
     const twice = migrate({ ...once, slot: '1' });

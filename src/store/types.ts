@@ -20,6 +20,7 @@ export interface FleetEntry {
   upgrades: string[];
   tiresFlat: number;
   hitchedTrailer: string | null; // trailer defId being towed
+  loc: string; // wave 3: human location label ("At the depot", "Carrier deck", coords)
 }
 
 /** One trailer row for the phone's Vehicles app. */
@@ -233,6 +234,46 @@ export interface TrailerSave {
 }
 
 
+// ---- wave 3: team dispatch, phone journal, scout intel, base build queue ----
+
+export type DispatchTask = 'scavenge' | 'scout' | 'escort';
+
+export interface Dispatch {
+  id: string;
+  survivorId: string;
+  vehicleDefId: string;
+  trailerDefId: string | null;
+  task: DispatchTask;
+  destPoiId: string;
+  /** Absolute game minutes (daysElapsed * 1440 + timeMinutes). */
+  departMin: number;
+  /** Absolute game minutes when the crew rolls back in. */
+  etaMin: number;
+  distM: number;
+  status: 'out';
+}
+
+export interface JournalEntry {
+  id: string;
+  /** Absolute game minutes when the entry was written. */
+  atMin: number;
+  title: string;
+  lines: string[];
+}
+
+export interface ScoutReport {
+  poiId: string;
+  atMin: number;
+  containers: number; // searchable containers standing near the POI
+  looted: number; // ...of which already emptied
+}
+
+export interface BaseBuildOrder {
+  facilityId: string;
+  /** Absolute game minutes when construction completes. */
+  readyMin: number;
+}
+
 export interface SaveSnapshot {
   version: 3;
   savedAt: number;
@@ -261,6 +302,13 @@ export interface SaveSnapshot {
   vehicles: VehicleSave[];
   // v3: trailers — where they lie, what they're hitched to, what's inside
   trailers: TrailerSave[];
+  // wave 3 additions — OPTIONAL on the v3 snapshot: IndexedDB passthrough
+  // keeps them, older v3 saves simply lack them and the store defaults
+  // them on load. No version bump (same pattern as InvItem grid fields).
+  dispatches?: Dispatch[];
+  journal?: JournalEntry[];
+  scouted?: Record<string, ScoutReport>;
+  baseQueue?: BaseBuildOrder[];
 }
 
 export interface SaveMeta {

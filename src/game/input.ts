@@ -25,7 +25,7 @@ export interface InputState {
   phone: boolean; // edge-triggered
   backpack: boolean; // edge-triggered
   pause: boolean; // edge-triggered
-  hotbar: number; // 0 = none, 1..3 edge-triggered
+  hotbar: number; // 0 = none, 1..4 edge-triggered
 }
 
 export const input: InputState = {

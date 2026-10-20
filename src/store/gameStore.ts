@@ -11,10 +11,12 @@ import { DIFFICULTIES } from './types';
 import type {
   DifficultyId, Equipped, FleetEntry, InvItem, PhoneTab, QuestProgress, QuestStepType,
   SaveMeta, SaveSnapshot, Screen, ToastMsg, TrailerFleetEntry,
+  Dispatch, JournalEntry, ScoutReport, BaseBuildOrder,
 } from './types';
 import {
   carryLimitKg, encumbranceTier, slotLimit, totalWeightKg, usedSlots,
 } from './inventoryUtils';
+import { arrangeItems as arrangeGridItems, packGridDims } from './gridUtils';
 import { deleteSaveSlot, listSaveSlots, loadGameFromSlot, saveGameToSlot } from '../systems/save';
 import { sfx } from '../systems/audio';
 import { getGame } from '../game/instance';
@@ -108,6 +110,17 @@ interface GameState {
   claimBase: (poiId: string) => void;
   buildFacility: (facilityId: string) => void;
   baseTick: () => void;
+
+  // wave 3: team dispatch (P5 v1), phone journal, scout intel, build queue
+  dispatches: Dispatch[];
+  journal: JournalEntry[];
+  scouted: Record<string, ScoutReport>;
+  baseQueue: BaseBuildOrder[];
+  dayStats: { kills: number; crafts: number; pickups: number };
+  addJournal: (title: string, lines: string[]) => void;
+  moveInvItem: (uid: string, gx: number, gy: number, rot: boolean) => void;
+  arrangeInventory: (order: 'size' | 'category') => void;
+  moveStorageItem: (index: number, gx: number, gy: number, rot: boolean) => void;
 
   // hold-to-search: active search of a container / corpse / safe
   search: { id: string; label: string; frac: number } | null;
@@ -253,7 +266,7 @@ export const useGameStore = create<GameState>()((set, get) => {
 
     inventory: [],
     equipped: { ...initialEquipped },
-    hotbar: [null, null, null],
+    hotbar: [null, null, null, null],
 
     quests: [],
     doneQuests: [],
@@ -305,7 +318,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         timeMinutes: 480,
         daysElapsed: 0,
         playSeconds: 0,
-        inventory: [], equipped: { ...initialEquipped }, hotbar: [null, null, null],
+        inventory: [], equipped: { ...initialEquipped }, hotbar: [null, null, null, null],
         quests: [{ id: 'q_prologue', stepIndex: 0, progress: 0 }],
         doneQuests: [],
         flags: {},
@@ -331,6 +344,8 @@ export const useGameStore = create<GameState>()((set, get) => {
         perks: [],
         survivors: [],
         base: null,
+        dispatches: [], journal: [], scouted: {}, baseQueue: [],
+        dayStats: { kills: 0, crafts: 0, pickups: 0 },
       });
     },
 
@@ -1101,6 +1116,57 @@ export const useGameStore = create<GameState>()((set, get) => {
       if (made.length > 0) s.addToast(`Base produced: ${made.join(', ')}.`);
     },
 
+    // ---- wave 3 state: dispatch / journal / scout / build queue / grids ----
+    dispatches: [],
+    journal: [],
+    scouted: {},
+    baseQueue: [],
+    dayStats: { kills: 0, crafts: 0, pickups: 0 },
+
+    addJournal: (title, lines) => {
+      const s = get();
+      const atMin = s.daysElapsed * 1440 + s.timeMinutes;
+      const entry: JournalEntry = {
+        id: `j${Date.now().toString(36)}${(uidCounter++).toString(36)}`,
+        atMin, title, lines,
+      };
+      set({ journal: [entry, ...s.journal].slice(0, 60) });
+    },
+
+    moveInvItem: (uid, gx, gy, rot) => {
+      const s = get();
+      set({
+        inventory: s.inventory.map((i) => (i.uid === uid ? { ...i, gx, gy, rot } : i)),
+      });
+    },
+
+    arrangeInventory: (order) => {
+      const s = get();
+      const packItem = s.inventory.find((i) => i.uid === s.equipped.pack);
+      const dims = packGridDims(packItem?.itemId);
+      const { placed } = arrangeGridItems(s.inventory, dims.cols, dims.rows, order);
+      set({
+        inventory: s.inventory.map((i) => {
+          const p = placed.get(i.uid);
+          return p ? { ...i, gx: p.gx, gy: p.gy, rot: p.rot } : { ...i, gx: undefined, gy: undefined, rot: undefined };
+        }),
+      });
+      s.addToast(order === 'size' ? 'Pack arranged by size.' : 'Pack sorted by category.');
+    },
+
+    moveStorageItem: (index, gx, gy, rot) => {
+      const s = get();
+      if (!s.storageOpen) return;
+      const cur = s.storageItems[index];
+      if (!cur) return;
+      const eng = getGame();
+      if (!eng) return;
+      const err = eng.storageSetItem(s.storageOpen.kind, s.storageOpen.uid, index, { ...cur, gx, gy, rot });
+      if (!err) {
+        set({ storageItems: s.storageItems.map((it, i) => (i === index ? { ...it, gx, gy, rot } : it)) });
+      }
+    },
+
     openPhone: (tab) => {
       const s = get();
       if (!s.phoneUnlocked) { s.addToast('You don’t have a phone yet.'); return; }
@@ -1272,6 +1338,10 @@ export const useGameStore = create<GameState>()((set, get) => {
         base: s.base,
         vehicles: eng ? eng.getVehicleStates() : [],
         trailers: eng ? eng.getTrailerStates() : [],
+        dispatches: s.dispatches,
+        journal: s.journal,
+        scouted: s.scouted,
+        baseQueue: s.baseQueue,
       };
       try {
         await saveGameToSlot(slot, snapshot);
@@ -1300,7 +1370,8 @@ export const useGameStore = create<GameState>()((set, get) => {
         playSeconds: snap.playSeconds,
         inventory: snap.inventory,
         equipped: snap.equipped,
-        hotbar: snap.hotbar,
+        // wave 3: quick-use row is 4 slots; older saves carry 3 — pad
+        hotbar: [...snap.hotbar, null, null, null, null].slice(0, 4),
         quests: snap.quests,
         doneQuests: snap.doneQuests,
         flags: snap.flags,
@@ -1314,6 +1385,12 @@ export const useGameStore = create<GameState>()((set, get) => {
         perks: snap.perks,
         survivors: snap.survivors,
         base: snap.base,
+        // wave 3 fields: absent on older v3 saves — default them here
+        dispatches: snap.dispatches ?? [],
+        journal: snap.journal ?? [],
+        scouted: snap.scouted ?? {},
+        baseQueue: snap.baseQueue ?? [],
+        dayStats: { kills: 0, crafts: 0, pickups: 0 },
         pendingSnapshot: snap,
       });
       return true;

@@ -636,7 +636,7 @@ export class Game {
       }
       sfx.play('ui', { volume: 0.5 });
     }
-    if (input.hotbar >= 1 && input.hotbar <= 3 && s.screen === 'game' && !s.dialogue) {
+    if (input.hotbar >= 1 && input.hotbar <= 4 && s.screen === 'game' && !s.dialogue) {
       s.useHotbar(input.hotbar - 1);
     }
 
@@ -715,6 +715,24 @@ export class Game {
     this.fleetT += dt;
     if (this.fleetT > 1 && this.vehicles) {
       this.fleetT = 0;
+      const poiPos = this.world?.poiPositions ?? {};
+      const locOf = (x: number, z: number): string => {
+        let bestId: string | null = null;
+        let bestD = Infinity;
+        for (const [id, p] of Object.entries(poiPos)) {
+          if (id.startsWith('npc:')) continue;
+          const d = Math.hypot(p[0] - x, p[1] - z);
+          if (d < bestD) { bestD = d; bestId = id; }
+        }
+        if (bestId === 'carrier' && bestD < 90) return 'Carrier deck';
+        if (bestId === 'airbase' && bestD < 130) return 'At the depot';
+        if (bestId && bestD < 45) {
+          return bestId === 'lighthouse_base' || bestId === 'lighthouse_top'
+            ? 'At the lighthouse'
+            : `At ${bestId.replace(/_/g, ' ')}`;
+        }
+        return `${Math.round(x)}, ${Math.round(z)}`;
+      };
       s.setFleet(
         this.vehicles.vehicles.map((v) => ({
           defId: v.def.id,
@@ -722,6 +740,7 @@ export class Game {
           fuelPct: Math.round((v.fuel / v.def.fuelMax) * 100),
           condPct: Math.round(v.condition * 100),
           dist: Math.round(Math.hypot(v.group.position.x - player.pos.x, v.group.position.z - player.pos.z)),
+          loc: locOf(v.group.position.x, v.group.position.z),
           storageUsedKg: itemsWeightKg(v.storage),
           storageCapKg: storageCapKg(v.def.storageKg, v.upgrades),
           upgrades: [...v.upgrades],
@@ -1191,6 +1210,9 @@ export class Game {
       case 'Digit3':
         input.hotbar = 3;
         break;
+      case 'Digit4':
+        input.hotbar = 4;
+        break;
     }
     this.applyMoveKeys();
   }
@@ -1336,6 +1358,14 @@ export class Game {
   }
 
   private enterVehicle(v: Vehicle): void {
+    // wave 3: a vehicle out on a crew dispatch is not here to drive
+    const out = useGameStore.getState().dispatches.find(
+      (d) => d.status === 'out' && d.vehicleDefId === v.def.id,
+    );
+    if (out) {
+      useGameStore.getState().addToast(`The ${v.def.name} is out on a dispatch — check the Team app.`);
+      return;
+    }
     this.driving = v;
     this.wasFirstPerson = this.player!.firstPerson;
     // first person stays first person: driveUpdate renders the
@@ -2103,8 +2133,41 @@ export class Game {
     if (itemsWeightKg(list) + w > this.storageCap(kind, uid)) return 'No room — that would overload it.';
     const existing = list.find((it) => it.itemId === item.itemId);
     if (existing) existing.qty += item.qty;
-    else list.push({ uid: item.uid, itemId: item.itemId, qty: item.qty });
+    // spread, not a stripped copy: instance state (condition, mods, grid
+    // placement) rides along and persists through the save passthrough
+    else list.push({ ...item });
     return null;
+  }
+
+  /** Replace a stored stack wholesale (wave 3 grid drag write-back: same
+   *  stack, new placement). Returns an error string or null. */
+  storageSetItem(kind: 'vehicle' | 'trailer' | 'crate', uid: string, index: number, item: InvItem): string | null {
+    const list = this.storageList(kind, uid);
+    if (!list || index < 0 || index >= list.length) return 'That storage is gone.';
+    if (list[index].itemId !== item.itemId || list[index].qty !== item.qty) return 'That stack changed.';
+    list[index] = { ...item };
+    return null;
+  }
+
+  /** Wave 3 dispatch outcomes: wear a vehicle down (condition loss, and a
+   *  hard hit can blow a tire). Returns a flavor line or null if missing. */
+  damageVehicle(uid: string, frac: number): string | null {
+    const v = this.vehicles.byId(uid) ?? this.vehicles.vehicles.find((x) => x.def.id === uid);
+    if (!v) return null;
+    v.condition = Math.max(0.05, v.condition - frac);
+    if (frac >= 0.2 && v.tiresFlat < 2 && v.def.kind !== 'heli' && v.def.kind !== 'skiff') {
+      v.tiresFlat += 1;
+      return 'It limped home on a blown tire.';
+    }
+    return null;
+  }
+
+  /** Wave 3 Scout: real container census around a POI (Interact defs carry
+   *  true positions; looted state comes from the world diff). */
+  scoutPoi(poiId: string): { total: number; looted: number } | null {
+    const pos = this.world?.poiPositions[poiId];
+    if (!pos || !this.interact) return null;
+    return this.interact.containersNear(pos[0], pos[1], 130);
   }
 
   storageTakeItem(kind: 'vehicle' | 'trailer' | 'crate', uid: string, index: number): InvItem | null {

@@ -105,6 +105,21 @@ export class InteractSystem {
     return this.containersById.get(id);
   }
 
+  /** Wave 3 Scout intel: real container census around a point — how many
+   *  searchable containers stand within r meters and how many are emptied. */
+  containersNear(x: number, z: number, r: number): { total: number; looted: number } {
+    let total = 0;
+    let looted = 0;
+    for (const c of this.containersById.values()) {
+      const dx = c.x - x;
+      const dz = c.z - z;
+      if (dx * dx + dz * dz > r * r) continue;
+      total++;
+      if (this.hooks.isLooted(c.id)) looted++;
+    }
+    return { total, looted };
+  }
+
   isSearched(id: string): boolean {
     return this.searchedContainers.has(id) || this.searchedCorpses.has(id.replace(/^corpse:/, ''));
   }
