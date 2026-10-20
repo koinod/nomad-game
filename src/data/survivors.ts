@@ -125,6 +125,20 @@ export const DESIGNED_RECRUITS: Record<string, SurvivorDef> = {
     skills: { combat: 4, mechanics: 1, medicine: 2, stealth: 7, driver: 2, scavenging: 5, leadership: 0 },
     traits: ['quiet', 'night_owl'], morale: 50, hp: 100, status: 'healthy', job: 'Scavenger',
   },
+  // wave 4 recruits — found through encounters, not just conversation:
+  // Dez is stranded at the marina on a wrecked leg (needs a bandage to
+  // move); Priya won't leave the wreck until the relay proves the island
+  // has a voice. Both join hurt or wary, not gift-wrapped.
+  dez: {
+    id: 'dez', name: 'Dez Park', age: 41, background: 'Coast Guard rescue swimmer',
+    skills: { combat: 6, mechanics: 2, medicine: 3, stealth: 2, driver: 7, scavenging: 4, leadership: 3 },
+    traits: ['ex_military', 'tough'], morale: 48, hp: 70, status: 'injured', job: 'Operator',
+  },
+  priya: {
+    id: 'priya', name: 'Priya Nair', age: 31, background: 'ham-radio tinkerer',
+    skills: { combat: 1, mechanics: 6, medicine: 1, stealth: 3, driver: 2, scavenging: 5, leadership: 5 },
+    traits: ['night_owl', 'social'], morale: 52, hp: 100, status: 'healthy', job: 'Mechanic',
+  },
 };
 
 /**
@@ -143,6 +157,8 @@ export const SURVIVOR_LOOKS: Record<string, SurvivorLook> = {
   elena: { skin: 0xa8785a, jacket: 0xd8d8d0, pants: 0x3c4a56, build: 'slim' },
   mateo: { skin: 0x8a5a3b, jacket: 0x7a4a2a, pants: 0x35322c, build: 'heavy' },
   lina: { skin: 0xe0bfa0, jacket: 0x4a5a3a, pants: 0x2c3540, build: 'slim' },
+  dez: { skin: 0x54331f, jacket: 0xb8562e, pants: 0x2c3540, build: 'heavy' },
+  priya: { skin: 0x8a5a3b, jacket: 0x87551f, pants: 0x404040, build: 'standard' },
 };
 
 export function traitName(id: string): string {

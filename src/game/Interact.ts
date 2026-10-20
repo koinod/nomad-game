@@ -248,10 +248,33 @@ export class InteractSystem {
     }
 
     // ---- designed recruits: talk them into joining the crew ----
-    const recruitDefs: { key: string; poiId: string; dx: number; dz: number; jacket: number; line: string }[] = [
+    interface RecruitDef {
+      key: string; poiId: string; dx: number; dz: number; jacket: number; line: string;
+      /** wave 4 encounter gates: an item to hand over, or a world flag. */
+      requiresItem?: { itemId: string; label: string };
+      requiresFlag?: string;
+      lockedLine?: string; // spoken while the gate is unmet
+    }
+    const recruitDefs: RecruitDef[] = [
       { key: 'elena', poiId: 'lighthouse_base', dx: -3, dz: 4, jacket: 0xd8d8d0, line: 'Elena: "I ran an ER before the silence. Patch me a place to work and I\u2019m yours."' },
       { key: 'mateo', poiId: 'relay_station', dx: -14, dz: 8, jacket: 0x7a4a2a, line: 'Mateo: "Truck died two miles back. Nobody\u2019s coming. Say the word and I\u2019ll walk with you."' },
       { key: 'lina', poiId: 'dune_cache', dx: 2, dz: -3, jacket: 0x4a5a3a, line: 'Lina: "I\u2019ve been watching the road from the dunes. You walk loud — I can fix that. Take me with you."' },
+      {
+        // wave 4: stranded at the marina, leg wrecked — he drives anything
+        // afloat or rolling, but he cannot walk out on his own
+        key: 'dez', poiId: 'marina', dx: 6, dz: -4, jacket: 0xb8562e,
+        requiresItem: { itemId: 'bandage', label: 'a bandage' },
+        lockedLine: 'Dez: "Leg\u2019s torn up on the rocks. Wrap it — a bandage, anything — and I can move. I drive boats, trucks, whatever floats or rolls."',
+        line: 'Dez: "That\u2019ll hold. Twenty years pulling people out of the water, and I end up the cargo. Let\u2019s fix that — point me at a wheel."',
+      },
+      {
+        // wave 4: camped on the wreck with her radio — she moves only once
+        // the relay (the interactable north of here) proves a world answers
+        key: 'priya', poiId: 'wreck', dx: -3, dz: 5, jacket: 0x87551f,
+        requiresFlag: 'relay_online',
+        lockedLine: 'Priya: "I\u2019ve called into the static for nine days. Nobody calls back. Get that relay breathing, stranger — then I\u2019ll know this island isn\u2019t a grave with good weather."',
+        line: 'Priya: "You HEARD that? A carrier wave — an actual voice-shaped thing. Okay. Okay. I\u2019m in. Radios, engines, night watches — I\u2019m yours."',
+      },
     ];
     for (const r of recruitDefs) {
       const def = DESIGNED_RECRUITS[r.key];
@@ -273,9 +296,24 @@ export class InteractSystem {
         pos: mesh.position.clone(),
         label: `Recruit ${def.name}`,
         use: () => {
-          if (s.survivors.some((sv) => sv.id === def.id)) {
+          // fresh state, not the build-time capture: the crew list moves
+          if (useGameStore.getState().survivors.some((sv) => sv.id === def.id)) {
             s.addToast(`${def.name} is already with your crew.`);
             return;
+          }
+          // wave 4 encounter gates: the encounter resolves before the join
+          if (r.requiresFlag && !useGameStore.getState().flags[r.requiresFlag]) {
+            if (r.lockedLine) s.addToast(r.lockedLine);
+            return;
+          }
+          if (r.requiresItem) {
+            const st = useGameStore.getState();
+            if (st.countItem(r.requiresItem.itemId) < 1) {
+              if (r.lockedLine) s.addToast(r.lockedLine);
+              return;
+            }
+            const stack = st.inventory.find((i) => i.itemId === r.requiresItem!.itemId && i.qty > 0);
+            if (stack) st.removeItem(stack.uid, 1); // the bandage goes on the leg, not back in the bag
           }
           s.addToast(r.line);
           s.recruitSurvivor({ ...def });
