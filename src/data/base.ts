@@ -50,6 +50,12 @@ export const FACILITIES: FacilityDef[] = [
   },
 ];
 
+/** Wave 3 build queue: construction takes real time — a flat 45 minutes
+ *  plus 20 per unit of materials in the cost. */
+export function buildMinutes(f: FacilityDef): number {
+  return 45 + f.cost.reduce((a, c) => a + c.qty, 0) * 20;
+}
+
 /** sodgame heat formula (BASE_DESIGN §3): stockpile×1.2 + defense×0.8 + days×0.5,
  *  thresholds 30/60/90. Stockpile is abstracted as facilities+crew until the
  *  stockpile UI ships — the number is real and monotonic, not decoration. */

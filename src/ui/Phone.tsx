@@ -6,7 +6,7 @@ import { QUESTS } from '../data/quests';
 import { FACTIONS, repTier } from '../data/factions';
 import { SKILLS, TREES, PERKS, xpToNext } from '../data/skills';
 import { traitName, moraleBand, type SurvivorJob } from '../data/survivors';
-import { FACILITIES, baseHeat, heatBand } from '../data/base';
+import { FACILITIES, baseHeat, heatBand, buildMinutes } from '../data/base';
 import { DISPATCH_POIS, DISPATCH_TASKS, dispatchDurationMin, poiName, riskChance } from '../data/dispatch';
 import type { DispatchTask } from '../store/types';
 import { UPGRADES, canInstallUpgrade } from '../data/upgrades';
@@ -446,9 +446,14 @@ function WorldMap() {
 function BaseSection() {
   const base = useGameStore((s) => s.base);
   const buildFacility = useGameStore((s) => s.buildFacility);
+  const cancelBuild = useGameStore((s) => s.cancelBuild);
+  const baseQueue = useGameStore((s) => s.baseQueue);
   const inventory = useGameStore((s) => s.inventory);
   const survivors = useGameStore((s) => s.survivors);
   const daysElapsed = useGameStore((s) => s.daysElapsed);
+  const timeMinutes = useGameStore((s) => s.timeMinutes);
+  const fleet = useGameStore((s) => s.fleet);
+  const trailerFleet = useGameStore((s) => s.trailerFleet);
 
   if (!base) {
     return (
@@ -463,6 +468,13 @@ function BaseSection() {
   }
   const heat = baseHeat(base.facilities, survivors.length, daysElapsed);
   const count = (id: string) => inventory.filter((i) => i.itemId === id).reduce((a, i) => a + i.qty, 0);
+  const now = daysElapsed * 1440 + timeMinutes;
+  const stockRows = [
+    ...fleet.map((f) => ({ name: f.name, used: f.storageUsedKg, cap: f.storageCapKg, where: f.loc })),
+    ...trailerFleet.map((t) => ({ name: t.name, used: t.storageUsedKg, cap: t.storageCapKg, where: t.hitchedTo ? 'in tow' : 'parked' })),
+  ];
+  const stockUsed = stockRows.reduce((a, r) => a + r.used, 0);
+  const stockCap = stockRows.reduce((a, r) => a + r.cap, 0);
   return (
     <section>
       <h3 className="mb-2 flex items-center justify-between text-xs font-semibold text-[#8a94a3]">
@@ -478,20 +490,35 @@ function BaseSection() {
       <div className="flex flex-col gap-1.5">
         {FACILITIES.map((f) => {
           const owned = base.facilities.includes(f.id);
+          const queued = baseQueue.find((q) => q.facilityId === f.id);
           const afford = f.cost.every((c) => count(c.itemId) >= c.qty);
+          const mins = buildMinutes(f);
           return (
-            <div key={f.id} className={`flex items-start justify-between gap-2 rounded border p-2 ${owned ? 'border-[#5aa469] bg-[#101812]' : 'border-[#232b36] bg-[#0b0e12]'}`}>
+            <div key={f.id} className={`flex items-start justify-between gap-2 rounded border p-2 ${owned ? 'border-[#5aa469] bg-[#101812]' : queued ? 'border-[#e8b34b] bg-[#12161c]' : 'border-[#232b36] bg-[#0b0e12]'}`}>
               <div>
                 <div className="text-xs font-medium text-[#d7dde5]">{f.name}</div>
                 <div className="text-[11px] text-[#8a94a3]">{f.desc}</div>
-                {!owned && f.cost.length > 0 && (
+                {!owned && !queued && f.cost.length > 0 && (
                   <div className="mt-0.5 text-[11px] text-[#8a94a3]">
                     Cost: {f.cost.map((c) => `${c.qty}× ${ITEMS[c.itemId]?.name ?? c.itemId} (${count(c.itemId)})`).join(', ')}
+                    {' · '}builds in ~{Math.round(mins / 60 * 10) / 10}h
+                  </div>
+                )}
+                {queued && (
+                  <div className="mt-0.5 text-[11px] text-[#e8b34b]">
+                    Under construction — ready {fmtAbs(queued.readyMin)} ({Math.max(1, Math.round(queued.readyMin - now))} min left)
                   </div>
                 )}
               </div>
               {owned ? (
                 <span className="shrink-0 text-[11px] text-[#5aa469]">Built</span>
+              ) : queued ? (
+                <button
+                  onClick={() => { sfx.play('ui'); cancelBuild(f.id); }}
+                  className="shrink-0 rounded border border-[#232b36] px-2 py-1 text-[11px] text-[#d9534f] transition-colors hover:border-[#d9534f]"
+                >
+                  Cancel
+                </button>
               ) : (
                 <button
                   onClick={() => { sfx.play('ui'); buildFacility(f.id); }}
@@ -505,6 +532,22 @@ function BaseSection() {
           );
         })}
       </div>
+
+      {/* stockpile overview: the base has no shelves of its own yet — its
+          stockpile is everything riding in the fleet, wherever it's parked */}
+      <h4 className="mb-1.5 mt-4 text-xs font-semibold text-[#8a94a3]">
+        Stockpile — base + fleet ({stockUsed.toFixed(0)}/{stockCap} kg riding)
+      </h4>
+      {stockRows.length === 0 && <p className="text-[11px] text-[#8a94a3]">No vehicles or trailers yet — the stockpile is your own back.</p>}
+      <div className="flex flex-col gap-1">
+        {stockRows.map((r, i) => (
+          <div key={i} className="flex items-center justify-between gap-2 text-[11px]">
+            <span className="text-[#d7dde5]">{r.name} <span className="text-[#8a94a3]">· {r.where}</span></span>
+            <span className="font-mono text-[#8a94a3]">{r.used.toFixed(0)}/{r.cap} kg</span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-1 text-[10px] text-[#5a6472]">The base keeps no shelves of its own yet — what the fleet carries is the stockpile, and heat counts it.</p>
     </section>
   );
 }
@@ -781,6 +824,9 @@ function CharacterTab() {
   const equipped = useGameStore((s) => s.equipped);
   const difficulty = useGameStore((s) => s.difficulty);
   const perks = useGameStore((s) => s.perks);
+  const survivors = useGameStore((s) => s.survivors);
+  const useItemUid = useGameStore((s) => s.useItemUid);
+  const treatSurvivor = useGameStore((s) => s.treatSurvivor);
   const weight = totalWeightKg(inventory);
   const limit = carryLimitKg(equipped, inventory, difficulty, perks.includes('sc_packmule') ? 8 : 0);
   const tier = encumbranceTier(weight, limit);
@@ -826,6 +872,60 @@ function CharacterTab() {
         <p className="mt-2 text-[11px] text-[#8a94a3]">
           Heal from the Pack (bandages, medkits). Rest at campfires or in a claimed base to recover.
         </p>
+      </section>
+
+      {/* wave 3: treatment — work on yourself or the crew, straight from the pack */}
+      <section className="rounded border border-[#232b36] bg-[#0b0e12] p-3">
+        <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Treatment</h3>
+        <div className="mb-1 flex items-center justify-between text-xs">
+          <span className="text-[#8a94a3]">You</span>
+          <span className={hp >= 90 ? 'text-[#5aa469]' : hp >= 55 ? 'text-[#e8b34b]' : hp >= 25 ? 'text-[#d9534f]' : 'text-[#d9534f]'}>
+            {hp >= 90 ? 'Uninjured' : hp >= 55 ? 'Hurt' : hp >= 25 ? 'Badly hurt' : 'Critical'} · {Math.ceil(hp)}/{maxHp}
+          </span>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {inventory.filter((i) => (ITEMS[i.itemId]?.heal ?? 0) > 0 || ITEMS[i.itemId]?.category === 'food').length === 0 && (
+            <span className="text-[11px] text-[#8a94a3]">Nothing in the pack to treat or eat.</span>
+          )}
+          {inventory
+            .filter((i) => (ITEMS[i.itemId]?.heal ?? 0) > 0 || ITEMS[i.itemId]?.category === 'food')
+            .map((i) => {
+              const def = ITEMS[i.itemId];
+              return (
+                <button
+                  key={i.uid}
+                  onClick={() => { sfx.play('ui'); useItemUid(i.uid); }}
+                  className="rounded border border-[#232b36] px-2 py-1 text-[11px] text-[#d7dde5] transition-colors hover:border-[#e8b34b]"
+                >
+                  {def?.name} ×{i.qty}
+                  {def?.heal ? <span className="text-[#5aa469]"> +{def.heal} HP</span> : ''}
+                </button>
+              );
+            })}
+        </div>
+        {survivors.length > 0 && (
+          <div className="mt-3 flex flex-col gap-1.5 border-t border-[#232b36] pt-2">
+            {survivors.map((sv) => {
+              const max = sv.traits.includes('tough') ? 130 : 100;
+              return (
+                <div key={sv.id} className="flex items-center gap-2 text-xs">
+                  <span className="w-28 truncate text-[#d7dde5]">{sv.name}</span>
+                  <div className="h-1.5 flex-1 overflow-hidden rounded bg-[#232b36]">
+                    <div className={`h-full ${sv.hp >= 60 ? 'bg-[#5aa469]' : 'bg-[#d9534f]'}`} style={{ width: `${Math.min(100, (sv.hp / max) * 100)}%` }} />
+                  </div>
+                  <span className="w-16 font-mono text-[11px] text-[#8a94a3]">{Math.round(sv.hp)}/{max}{sv.status !== 'healthy' ? ` ${sv.status}` : ''}</span>
+                  <button
+                    onClick={() => { sfx.play('ui'); treatSurvivor(sv.id); }}
+                    className="shrink-0 rounded border border-[#232b36] px-2 py-0.5 text-[11px] text-[#d7dde5] transition-colors hover:border-[#e8b34b]"
+                  >
+                    Treat
+                  </button>
+                </div>
+              );
+            })}
+            <p className="text-[10px] text-[#5a6472]">Treatment draws bandages/med kits from your pack. An infirmary at base heals the crew daily.</p>
+          </div>
+        )}
       </section>
       <SkillsTab />
     </div>
@@ -1227,6 +1327,39 @@ function VehiclesTab() {
           <p className="text-sm text-[#8a94a3]">On foot. Your fleet is listed below — walk up to one and drive.</p>
         )}
       </section>
+
+      {/* wave 3: fleet-wide summary + one-tap scrap repair for everything in reach */}
+      {fleet.length > 0 && (
+        <section className="rounded border border-[#232b36] bg-[#0b0e12] p-3">
+          <h3 className="mb-1.5 text-xs font-semibold text-[#8a94a3]">Fleet summary</h3>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-[#8a94a3]">
+            <span><span className="text-[#d7dde5]">{fleet.length}</span> vehicles</span>
+            <span>avg condition <span className="text-[#d7dde5]">{Math.round(fleet.reduce((a, f) => a + f.condPct, 0) / fleet.length)}%</span></span>
+            <span><span className="text-[#d7dde5]">{fleet.reduce((a, f) => a + f.upgrades.length, 0)}</span> upgrades fitted</span>
+            <span>cargo <span className="text-[#d7dde5]">{fleet.reduce((a, f) => a + f.storageUsedKg, 0).toFixed(0)}/{fleet.reduce((a, f) => a + f.storageCapKg, 0)} kg</span></span>
+            <span><span className={fleet.some((f) => f.condPct < 60 || f.tiresFlat > 0) ? 'text-[#d9534f]' : 'text-[#d7dde5]'}>{fleet.filter((f) => f.condPct < 60 || f.tiresFlat > 0).length}</span> need work</span>
+            <span><span className="text-[#d7dde5]">{dispatches.length}</span> out on dispatch</span>
+          </div>
+          <button
+            className={`${btn} mt-2`}
+            disabled={!fleet.some((f) => f.dist <= 9 && f.condPct < 100) || count('scrap') < 1}
+            onClick={() => {
+              sfx.play('ui');
+              // scrap-patch every vehicle in reach toward 100%, one scrap
+              // per call, until the pile or the damage runs out
+              for (let i = 0; i < 40; i++) {
+                const st = useGameStore.getState();
+                const target = st.fleet.find((f) => f.dist <= 9 && f.condPct < 100);
+                if (!target || st.countItem('scrap') < 1) break;
+                st.repairVehicle(target.defId, 'scrap');
+              }
+            }}
+          >
+            Repair all in reach (scrap patches)
+          </button>
+          <span className="ml-2 text-[10px] text-[#5a6472]">Flats, engines and batteries are per-vehicle jobs, below.</span>
+        </section>
+      )}
 
       <section>
         <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Fleet ({fleet.length}) — tap one to work on it</h3>

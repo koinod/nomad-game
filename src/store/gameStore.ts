@@ -4,7 +4,7 @@ import { PERKS as PERKS_ALL } from '../data/skills';
 import { MODS as MODS_ALL, magSizeOf } from '../data/mods';
 import { UPGRADES as UPGRADE_DEFS } from '../data/upgrades';
 import { MODULE_DEFS } from '../data/trailerData';
-import { FACILITIES as FACILITY_DEFS, baseHeat } from '../data/base';
+import { FACILITIES as FACILITY_DEFS, baseHeat, buildMinutes } from '../data/base';
 import { dispatchDurationMin, poiName, resolveDispatch } from '../data/dispatch';
 import { TRAITS as TRAIT_DEFS } from '../data/survivors';
 import { QUESTS } from '../data/quests';
@@ -127,6 +127,8 @@ interface GameState {
     destPoiId: string,
   ) => void;
   recallDispatch: (id: string) => void;
+  cancelBuild: (facilityId: string) => void;
+  treatSurvivor: (survivorId: string) => void;
   moveInvItem: (uid: string, gx: number, gy: number, rot: boolean) => void;
   arrangeInventory: (order: 'size' | 'category') => void;
   moveStorageItem: (index: number, gx: number, gy: number, rot: boolean) => void;
@@ -356,6 +358,32 @@ export const useGameStore = create<GameState>()((set, get) => {
       get().addToast(`${sv.name} is back from ${poiName(d.destPoiId)}. Report in the Log.`);
       get().addSkillXp('leadership', 4);
     }
+  };
+
+  /** Wave 3: finish any base construction whose timer has run out. */
+  const tickBaseQueue = () => {
+    const s = get();
+    if (s.baseQueue.length === 0 || !s.base) return;
+    const now = s.daysElapsed * 1440 + s.timeMinutes;
+    const done = s.baseQueue.filter((q) => now >= q.readyMin);
+    if (done.length === 0) return;
+    const b = s.base;
+    const facilities = [...b.facilities];
+    for (const q of done) {
+      if (!facilities.includes(q.facilityId)) facilities.push(q.facilityId);
+    }
+    set({
+      base: { ...b, facilities },
+      baseQueue: s.baseQueue.filter((q) => now < q.readyMin),
+    });
+    for (const q of done) {
+      const def = FACILITY_DEFS.find((f) => f.id === q.facilityId);
+      get().addJournal(`Built — ${def?.name ?? q.facilityId}`, [
+        `Construction finished at the base. ${def?.desc ?? ''}`,
+      ]);
+      get().addToast(`Built: ${def?.name ?? q.facilityId}.`);
+    }
+    sfx.play('quest', { volume: 0.5 });
   };
 
   const api: GameState = {
@@ -671,9 +699,29 @@ export const useGameStore = create<GameState>()((set, get) => {
       if (s.restedMinutesLeft > 0 && rested === 0) s.addToast('The well-rested feeling fades.');
       set({ timeMinutes: (s.timeMinutes + minutes) % 1440, restedMinutesLeft: rested });
       resolveDueDispatches();
+      tickBaseQueue();
     },
 
-    advanceDay: () => set((s) => ({ daysElapsed: s.daysElapsed + 1 })),
+    advanceDay: () => {
+      const s = get();
+      // wave 3 day journal: close out the day that just ended before the
+      // counter resets — kills, crafts, and loot, only when something happened
+      const st = s.dayStats;
+      if (st.kills > 0 || st.crafts > 0 || st.pickups > 0) {
+        const lines: string[] = [];
+        if (st.kills > 0) lines.push(`Put down ${st.kills} husk${st.kills === 1 ? '' : 's'}.`);
+        if (st.pickups > 0) lines.push(`Hauled in ${st.pickups} item${st.pickups === 1 ? '' : 's'} from the island's leavings.`);
+        if (st.crafts > 0) lines.push(`Crafted ${st.crafts} thing${st.crafts === 1 ? '' : 's'} worth having.`);
+        const entry: JournalEntry = {
+          id: `j${Date.now().toString(36)}${(uidCounter++).toString(36)}`,
+          atMin: (s.daysElapsed + 1) * 1440,
+          title: `Day ${s.daysElapsed + 1} — the record`,
+          lines,
+        };
+        set({ journal: [entry, ...s.journal].slice(0, 60) });
+      }
+      set({ daysElapsed: s.daysElapsed + 1, dayStats: { kills: 0, crafts: 0, pickups: 0 } });
+    },
 
     addItem: (itemId, qty, quiet, opts) => {
       const def = ITEMS[itemId];
@@ -993,6 +1041,10 @@ export const useGameStore = create<GameState>()((set, get) => {
 
     questEvent: (type, target, count = 1) => {
       const s = get();
+      // wave 3: husk kills feed the day journal's tally
+      if (type === 'kill' && target === 'husk') {
+        set({ dayStats: { ...s.dayStats, kills: s.dayStats.kills + count } });
+      }
       let changed = false;
       const quests: QuestProgress[] = s.quests.map((q) => ({ ...q }));
       const doneQuests = [...s.doneQuests];
@@ -1173,6 +1225,9 @@ export const useGameStore = create<GameState>()((set, get) => {
       set({ base: { poiId, facilities: ['command_post'] } });
       s.setFlag('base_claimed');
       s.addToast('Base claimed. Build it up from the sat phone → Command.');
+      s.addJournal(`Base claimed — ${poiName(poiId)}`, [
+        'The flag is planted and the Command Post is up. This is home now — build it before the island notices.',
+      ]);
       s.addSkillXp('leadership', 10);
       sfx.play('quest', { volume: 0.6 });
     },
@@ -1182,6 +1237,12 @@ export const useGameStore = create<GameState>()((set, get) => {
       if (!b) return;
       const def = FACILITY_DEFS.find((f) => f.id === facilityId);
       if (!def || b.facilities.includes(facilityId)) return;
+      // wave 3: construction is queued work with a timer, not an instant —
+      // materials are committed up front, the facility lands when ready
+      if (s.baseQueue.some((q) => q.facilityId === facilityId)) {
+        s.addToast(`${def.name} is already under construction.`);
+        return;
+      }
       for (const c of def.cost) {
         if (s.countItem(c.itemId) < c.qty) {
           s.addToast(`Needs ${c.qty}× ${ITEMS[c.itemId]?.name ?? c.itemId}.`);
@@ -1198,10 +1259,66 @@ export const useGameStore = create<GameState>()((set, get) => {
           left -= take;
         }
       }
-      set({ base: { ...b, facilities: [...b.facilities, facilityId] } });
-      s.addToast(`Built: ${def.name}.`);
+      const mins = buildMinutes(def);
+      const readyMin = s.daysElapsed * 1440 + s.timeMinutes + mins;
+      set({ baseQueue: [...s.baseQueue, { facilityId, readyMin }] });
+      s.addToast(`Construction started: ${def.name} — ready in ~${Math.round(mins / 60 * 10) / 10}h of game time.`);
       s.addSkillXp('leadership', 2);
       sfx.play('craft', { volume: 0.5 });
+    },
+
+    cancelBuild: (facilityId) => {
+      const s = get();
+      const order = s.baseQueue.find((q) => q.facilityId === facilityId);
+      if (!order) return;
+      const def = FACILITY_DEFS.find((f) => f.id === facilityId);
+      set({ baseQueue: s.baseQueue.filter((q) => q.facilityId !== facilityId) });
+      // materials come back (the crew had not cut into them yet)
+      let refunded = true;
+      for (const c of def?.cost ?? []) {
+        if (!s.addItem(c.itemId, c.qty, true)) refunded = false;
+      }
+      s.addToast(
+        refunded
+          ? `Construction cancelled: ${def?.name ?? facilityId} — materials returned.`
+          : `Construction cancelled: ${def?.name ?? facilityId} — some materials would not fit back in the pack.`,
+      );
+    },
+
+    treatSurvivor: (survivorId) => {
+      const s = get();
+      const sv = s.survivors.find((x) => x.id === survivorId);
+      if (!sv) return;
+      const maxHp = sv.traits.includes('tough') ? 130 : 100;
+      if (sv.hp >= maxHp) {
+        s.addToast(`${sv.name} is already at full health.`);
+        return;
+      }
+      // best kit for the wound: medkit for serious hurt, bandage otherwise;
+      // fall back to whatever medical is actually in the pack
+      const missing = maxHp - sv.hp;
+      const want = missing >= 35 ? ['medkit', 'bandage'] : ['bandage', 'medkit'];
+      let used: string | null = null;
+      for (const id of want) {
+        const it = s.inventory.find((i) => i.itemId === id);
+        if (it) { used = id; s.removeItem(it.uid, 1); break; }
+      }
+      if (!used) {
+        s.addToast('No bandages or medkits in the pack to treat with.');
+        return;
+      }
+      const heal = ITEMS[used]?.heal ?? 0;
+      const hp = Math.min(maxHp, sv.hp + heal);
+      set({
+        survivors: s.survivors.map((x) =>
+          x.id === survivorId
+            ? { ...x, hp, status: x.status === 'injured' && hp >= 60 ? ('healthy' as const) : x.status }
+            : x,
+        ),
+      });
+      s.addToast(`${sv.name} treated with a ${ITEMS[used]?.name ?? used} (+${heal} HP).`);
+      s.addSkillXp('medicine', 4);
+      sfx.play('craft', { volume: 0.4 });
     },
     baseTick: () => {
       const s = get();
@@ -1407,6 +1524,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         }
       }
       s.addItem(recipe.resultId, recipe.resultQty, true);
+      set({ dayStats: { ...get().dayStats, crafts: get().dayStats.crafts + 1 } });
       s.addToast(`Crafted ${recipe.resultQty > 1 ? `${recipe.resultQty}× ` : ''}${ITEMS[recipe.resultId]?.name ?? recipe.resultId}.`);
       s.addSkillXp('mechanics', 6);
       // Efficient Hands: one in five crafts comes back with a spare part
@@ -1433,6 +1551,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         s.addToast('Pack full — no room for that.');
         return;
       }
+      set({ dayStats: { ...get().dayStats, pickups: get().dayStats.pickups + entry.qty } });
       s.questEvent('collect', entry.itemId, entry.qty);
       const rest = items.filter((_, i) => i !== index);
       if (rest.length === 0) {
