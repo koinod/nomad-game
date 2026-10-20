@@ -76,6 +76,8 @@ export default function Backpack() {
   const countItem = useGameStore((s) => s.countItem);
   const attachMod = useGameStore((s) => s.attachMod);
   const detachMod = useGameStore((s) => s.detachMod);
+  const repairWeapon = useGameStore((s) => s.repairWeapon);
+  const disassemble = useGameStore((s) => s.disassemble);
   const atBench = nearStation === 'workbench';
   const [selected, setSelected] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -318,6 +320,44 @@ export default function Backpack() {
                             ))}
                         </div>
                       )}
+                    </div>
+                  )}
+                  {(selDef.category === 'weapon-ranged' || selDef.category === 'weapon-melee' || selDef.disassembly) && (
+                    <div className="mt-3 border-t border-[#232b36] pt-2">
+                      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a3]">
+                        Condition{' '}
+                        <span className={(sel.condition ?? 100) < 30 ? 'text-[#d9534f]' : 'text-[#d7dde5]'}>
+                          {Math.round(sel.condition ?? 100)}%
+                        </span>
+                        {sel.jammed && <span className="text-[#d9534f]"> · jammed</span>}
+                      </div>
+                      <div className="h-1.5 w-full overflow-hidden rounded bg-[#131a22]">
+                        <div
+                          className={`h-full ${(sel.condition ?? 100) < 30 ? 'bg-[#d9534f]' : (sel.condition ?? 100) < 60 ? 'bg-[#e8b34b]' : 'bg-[#7fb069]'}`}
+                          style={{ width: `${Math.round(sel.condition ?? 100)}%` }}
+                        />
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {atBench && (selDef.category === 'weapon-ranged' || selDef.category === 'weapon-melee') && (
+                          <Act
+                            label={`Repair (${Math.max(1, Math.ceil((100 - (sel.condition ?? 100)) / 40))}× ${selDef.category === 'weapon-ranged' ? 'gun parts' : 'scrap'})`}
+                            fn={() => repairWeapon(sel.uid)}
+                          />
+                        )}
+                        {atBench && selDef.disassembly && (
+                          <Act
+                            label="Strip for parts"
+                            danger
+                            fn={() => {
+                              disassemble(sel.uid);
+                              setSelected(null);
+                            }}
+                          />
+                        )}
+                        {!atBench && (
+                          <span className="text-[11px] text-[#5a6472]">Bench work needs a Weapons Bench — oil & kits work anywhere.</span>
+                        )}
+                      </div>
                     </div>
                   )}
                   <div className="mt-2 flex items-center gap-2">

@@ -421,7 +421,7 @@ export class InteractSystem {
       pos: new THREE.Vector3(x, y, z),
       label: `Take ${def.name}${qty > 1 ? ` ×${qty}` : ''}`,
       use: () => {
-        if (!s.addItem(itemId, qty)) return; // addItem toasts the reason
+        if (!s.addItem(itemId, qty, false, { found: true })) return; // addItem toasts the reason
         this.hooks.scene.remove(mesh);
         this.pickupMeshes.delete(id);
         const ix = this.interactables.indexOf(entry);
@@ -463,7 +463,7 @@ export class InteractSystem {
         for (const e of table) {
           if (rng() > e.chance) continue;
           const qty = Math.max(1, Math.round(e.min + rng() * (e.max - e.min)));
-          if (!s.addItem(e.id, qty, true)) {
+          if (!s.addItem(e.id, qty, true, { found: true })) {
             s.addToast('Pack full — left the rest on the body.');
             break;
           }

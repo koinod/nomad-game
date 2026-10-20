@@ -113,13 +113,19 @@ function AmmoCounter() {
   const reserve = inventory
     .filter((i) => i.itemId === def.ammoId)
     .reduce((a, i) => a + i.qty, 0);
+  const cond = Math.round(inst.condition ?? 100);
   return (
     <div className="absolute bottom-24 right-4 rounded border border-[#232b36] bg-[#0b0e12]/80 px-3 py-1.5 text-right">
       <div className={`font-mono text-lg leading-none ${loaded === 0 ? 'text-[#d9534f]' : 'text-[#d7dde5]'}`}>
         {loaded}<span className="text-xs text-[#8a94a3]"> / {cap}</span>
       </div>
       <div className="mt-0.5 text-[10px] uppercase tracking-wider text-[#8a94a3]">
-        {loaded === 0 ? (reserve > 0 ? 'R — reload' : 'no ammo') : `reserve ${reserve}`}
+        {inst.jammed
+          ? <span className="text-[#d9534f]">jammed — R to clear</span>
+          : loaded === 0 ? (reserve > 0 ? 'R — reload' : 'no ammo') : `reserve ${reserve}`}
+      </div>
+      <div className={`mt-0.5 text-[10px] uppercase tracking-wider ${cond < 30 ? 'text-[#d9534f]' : cond < 60 ? 'text-[#e8b34b]' : 'text-[#5c6773]'}`}>
+        condition {cond}%
       </div>
     </div>
   );

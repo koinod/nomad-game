@@ -7,6 +7,9 @@ import { sfx } from '../systems/audio';
 import type { HuskManager } from './Husks';
 import { modNoiseMult, modSpreadMult } from '../data/mods';
 import { bloomSpread, moveSpread, rangeFalloff } from './gunMath';
+import {
+  applyWear, conditionDamageMult, rollJam, WEAR_PER_SHOT, WEAR_PER_SWING,
+} from './gunMath';
 
 export interface CombatFx {
   impact: (p: THREE.Vector3, kind: 'flesh' | 'dust', damage: number, head: boolean) => void;
@@ -111,6 +114,16 @@ export function tryMelee(h: CombatHooks): MeleeResult {
   // no melee weapon but a gun in hand: bash with the gun itself
   const stats = itemId == null && equippedRangedDef() ? GUN_BASH_STATS : meleeStatsFor(itemId);
   const empty: MeleeResult = { swung: false, hits: 0, kills: 0, stats };
+  // a weapon worn to nothing is scrap until the bench sees it
+  const meleeInst = (() => {
+    const s = useGameStore.getState();
+    return s.equipped.melee ? s.inventory.find((i) => i.uid === s.equipped.melee) : undefined;
+  })();
+  if (meleeInst && (meleeInst.condition ?? 100) <= 0) {
+    useGameStore.getState().addToast(`${ITEMS[meleeInst.itemId]?.name ?? 'Weapon'} is wrecked — repair it at a bench.`);
+    sfx.play('dryfire', { volume: 0.6 });
+    return empty;
+  }
   if (!h.spendStamina(stats.stamina)) {
     useGameStore.getState().addToast('Too winded to swing.');
     return empty;
@@ -156,6 +169,19 @@ export function tryMelee(h: CombatHooks): MeleeResult {
       sfx.play('killconfirm', { volume: 0.5 });
     }
   }
+  // landed swings wear the edge (once per swing, however many it cleaved);
+  // bashing with a gun wears the gun the same way
+  if (targets.length > 0) {
+    const st = useGameStore.getState();
+    const wearTarget =
+      meleeInst ??
+      (itemId == null && st.equipped.ranged
+        ? st.inventory.find((i) => i.uid === st.equipped.ranged)
+        : undefined);
+    if (wearTarget) {
+      st.setCondition(wearTarget.uid, applyWear(wearTarget.condition ?? 100, WEAR_PER_SWING));
+    }
+  }
   return { swung: true, hits: targets.length, kills, stats };
 }
 
@@ -179,6 +205,18 @@ export function tryRanged(h: CombatHooks): RangedResult {
   const s = useGameStore.getState();
   const inst = s.equipped.ranged ? s.inventory.find((i) => i.uid === s.equipped.ranged) : undefined;
   const mods = inst?.mods ?? [];
+  // a jammed action cycles nothing; a shot-out barrel fires nothing.
+  // Both are honest states, told to the player instead of silent clicks.
+  if (inst?.jammed) {
+    s.addToast('Jammed — press R to work the action clear.');
+    sfx.play('jam', { volume: 0.7 });
+    return miss;
+  }
+  if (inst && (inst.condition ?? 100) <= 0) {
+    s.addToast(`${def.name} is shot out — repair it at a bench or strip it for parts.`);
+    sfx.play('dryfire', { volume: 0.7 });
+    return miss;
+  }
   if (def.magSize != null) {
     // magazine-fed: rounds come from the mag, not straight from the pack
     const loaded = inst?.loaded ?? 0;
@@ -224,6 +262,20 @@ export function tryRanged(h: CombatHooks): RangedResult {
     const u0 = new THREE.Vector3().crossVectors(r0, baseDir).normalize();
     baseDir.addScaledVector(r0, h.sway.x).addScaledVector(u0, h.sway.y).normalize();
   }
+  // every trigger pull wears the gun a hair, and a worn gun can jam —
+  // applied identically to hitscan and projectile paths
+  const condMult = conditionDamageMult(inst?.condition ?? 100);
+  const afterShot = () => {
+    if (!inst) return;
+    const st = useGameStore.getState();
+    const worn = applyWear(inst.condition ?? 100, WEAR_PER_SHOT);
+    st.setCondition(inst.uid, worn);
+    if (rollJam(worn, mods.includes('suppressor'), Math.random)) {
+      st.setJammed(inst.uid, true);
+      sfx.play('jam', { volume: 0.9 });
+      st.addToast('Weapon jammed — R to clear.');
+    }
+  };
   // long guns throw a true round: it leaves now, the verdict lands when
   // it does. Ammo, noise and the flash already happened above.
   if (def.projectileSpeed && h.onProjectile) {
@@ -236,10 +288,11 @@ export function tryRanged(h: CombatHooks): RangedResult {
       dir.addScaledVector(right, Math.cos(a) * r).addScaledVector(up, Math.sin(a) * r).normalize();
     }
     h.onProjectile(h.eyePos.clone().addScaledVector(dir, 0.3), dir, {
-      damage: def.damage ?? 20,
+      damage: (def.damage ?? 20) * condMult,
       pen: def.ammoId ? (ITEMS[def.ammoId]?.pen ?? 0) : 0,
       weaponId: def.id,
     });
+    afterShot();
     return { fired: true, hit: false, killed: false, headshot: false, damage: 0, projectile: true };
   }
   let hit = false;
@@ -259,7 +312,7 @@ export function tryRanged(h: CombatHooks): RangedResult {
     const res = h.husks.raycastShot(h.eyePos, dir, range);
     const muzzle = h.eyePos.clone().addScaledVector(dir, 0.45);
     if (res) {
-      let dmg = rangeFalloff(def.damage ?? 20, res.dist);
+      let dmg = rangeFalloff((def.damage ?? 20) * condMult, res.dist);
       if (res.head) dmg *= 2;
       const dealt = Math.round(dmg);
       const kdir = new THREE.Vector3(
@@ -303,6 +356,7 @@ export function tryRanged(h: CombatHooks): RangedResult {
   if (killed) sfx.play('killconfirm', { volume: 0.55 });
   else if (headshot) sfx.play('headshot', { volume: 0.9 });
   else if (hit) sfx.play('tick', { volume: 0.35 + Math.min(0.6, totalDamage / 90) });
+  afterShot();
   return { fired: true, hit, killed, headshot, damage: totalDamage };
 }
 

@@ -87,6 +87,8 @@ export class Player {
   private recoilT = 0; // ranged recoil timer (arm anim)
   private reloadT = 0; // seconds left on the current reload
   private reloadUid: string | null = null; // weapon the in-flight reload belongs to
+  private clearT = 0; // seconds left working a jammed action clear
+  private clearUid: string | null = null;
   // ---- wave 2 weapon handling state ----
   private bloom = 0; // 0..1 spread bloom from sustained fire
   private adsBlend = 0; // 0 hip .. 0.55 shoulder .. 1 sights (eased, not stepped)
@@ -601,6 +603,25 @@ export class Player {
       const hpNow = s.hp;
       const hpDropped = this.lastHpSeen >= 0 && hpNow < this.lastHpSeen - 0.01;
       this.lastHpSeen = hpNow;
+      // working a jam clear takes both hands and 1.2s — the same things
+      // that break a reload break it, and the gun stays jammed
+      if (this.clearT > 0) {
+        const swapped = this.clearUid !== (s.equipped.ranged ?? null);
+        if (swapped || (wantSprint && wishInput) || hpDropped) {
+          this.clearT = 0;
+          this.clearUid = null;
+          if (!swapped) s.addToast('Still jammed.');
+        } else {
+          this.clearT -= dt;
+          if (this.clearT <= 0 && this.clearUid) {
+            s.setJammed(this.clearUid, false);
+            this.clearUid = null;
+            sfx.play('craft', { volume: 0.7 });
+            ctx.emitNoise(this.pos.x, this.pos.z, 8); // working the action is not silent
+            s.addToast('Jam cleared.');
+          }
+        }
+      }
       if (this.reloadT > 0) {
         const swapped = this.reloadUid !== (s.equipped.ranged ?? null);
         const sprinted = wantSprint && wishInput;
@@ -630,6 +651,12 @@ export class Player {
             this.reloadUid = null;
           }
         }
+      } else if (input.refuel && rInst && rInst.jammed && this.clearT <= 0) {
+        // R on a jammed gun works the action, it does not reload
+        this.clearT = 1.2;
+        this.clearUid = rInst.uid;
+        sfx.play('ui', { volume: 0.35 });
+        input.refuel = false;
       } else if (input.refuel && rInst && rDef?.magSize != null && rDef.ammoId) {
         const cap = magSizeOf(rDef.magSize, rInst.mods ?? []);
         if ((rInst.loaded ?? 0) < cap && s.inventory.some((i) => i.itemId === rDef.ammoId && i.qty > 0)) {

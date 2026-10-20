@@ -171,6 +171,14 @@ export const ITEMS: Record<string, ItemDef> = {
     id: 'tool_kit', name: 'Tool kit', category: 'material', weight: 2.2, slots: 2, stack: 1,
     desc: 'Wrenches, drivers, a pry bar. Repairs and machine work go faster with this.',
   },
+  cleaning_kit: {
+    id: 'cleaning_kit', name: 'Cleaning kit', category: 'tool', weight: 0.4, slots: 1, stack: 3,
+    desc: 'Rods, brushes, patches. Field-strips a weapon back to 60 condition. Use it on your equipped gun.',
+  },
+  gun_oil: {
+    id: 'gun_oil', name: 'Gun oil', category: 'tool', weight: 0.2, slots: 1, stack: 5,
+    desc: 'A squeeze bottle of the good stuff. +25 condition to your equipped weapon, anywhere.',
+  },
   frag: {
     id: 'frag', name: 'Frag grenade', category: 'weapon-melee', weight: 0.4, slots: 1, stack: 3,
     desc: 'Pull, throw, duck. Equip and left-click to throw.', damage: 0, thrown: { aoe: 5.5, dmg: 70, fuse: 1.6 },
@@ -543,11 +551,14 @@ export const FURNITURE_LOOT: Record<string, Record<'camp' | 'suburban', HuskLoot
     camp: [
       { id: 'scrap', min: 1, max: 3, chance: 0.8 },
       { id: 'cloth', min: 1, max: 2, chance: 0.5 },
+      { id: 'gun_oil', min: 1, max: 1, chance: 0.18 },
     ],
     suburban: [
       { id: 'scrap', min: 2, max: 4, chance: 0.85 },
       { id: 'wire', min: 1, max: 2, chance: 0.5 },
       { id: 'cloth', min: 1, max: 2, chance: 0.45 },
+      { id: 'cleaning_kit', min: 1, max: 1, chance: 0.16 },
+      { id: 'gun_oil', min: 1, max: 2, chance: 0.22 },
     ],
   },
   barrel: {
@@ -594,3 +605,33 @@ export const BUSH_LOOT: HuskLootEntry[] = [
   { id: 'produce', min: 1, max: 3, chance: 1 },
   { id: 'cloth', min: 1, max: 1, chance: 0.25 },
 ];
+
+// Bench disassembly yields (≈50% of build value — spec §3.4), assigned
+// after the table so the table itself stays a pure stat sheet. Weapons
+// stripped at the workbench feed the gun_parts mod economy.
+const DISASSEMBLY: Record<string, { itemId: string; qty: number }[]> = {
+  pistol: [{ itemId: 'gun_parts', qty: 2 }, { itemId: 'scrap', qty: 1 }],
+  revolver: [{ itemId: 'gun_parts', qty: 2 }, { itemId: 'scrap', qty: 1 }],
+  flare_gun: [{ itemId: 'gun_parts', qty: 1 }, { itemId: 'scrap', qty: 1 }],
+  shotgun: [{ itemId: 'gun_parts', qty: 2 }, { itemId: 'scrap', qty: 2 }],
+  hunting_rifle: [{ itemId: 'gun_parts', qty: 3 }, { itemId: 'scrap', qty: 1 }],
+  crossbow: [{ itemId: 'gun_parts', qty: 1 }, { itemId: 'scrap', qty: 2 }, { itemId: 'wire', qty: 1 }],
+  smg: [{ itemId: 'gun_parts', qty: 3 }, { itemId: 'scrap', qty: 1 }],
+  carbine: [{ itemId: 'gun_parts', qty: 3 }, { itemId: 'scrap', qty: 2 }],
+  dmr: [{ itemId: 'gun_parts', qty: 4 }, { itemId: 'scrap', qty: 1 }],
+  machete: [{ itemId: 'scrap', qty: 2 }],
+  hatchet: [{ itemId: 'scrap', qty: 1 }, { itemId: 'wood', qty: 1 }],
+  pipe: [{ itemId: 'scrap', qty: 1 }],
+  baseball_bat: [{ itemId: 'wood', qty: 2 }],
+  combat_knife: [{ itemId: 'scrap', qty: 1 }],
+  sledgehammer: [{ itemId: 'scrap', qty: 2 }, { itemId: 'wood', qty: 1 }],
+  crowbar: [{ itemId: 'scrap', qty: 2 }],
+  fire_axe: [{ itemId: 'scrap', qty: 2 }, { itemId: 'wood', qty: 1 }],
+  spear: [{ itemId: 'wood', qty: 1 }, { itemId: 'scrap', qty: 1 }],
+  riot_baton: [{ itemId: 'scrap', qty: 1 }],
+  torch: [{ itemId: 'wood', qty: 1 }, { itemId: 'cloth', qty: 1 }],
+  armored_vest: [{ itemId: 'cloth', qty: 3 }, { itemId: 'gun_parts', qty: 1 }],
+};
+for (const [id, yields] of Object.entries(DISASSEMBLY)) {
+  if (ITEMS[id]) ITEMS[id].disassembly = yields;
+}

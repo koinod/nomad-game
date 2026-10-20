@@ -111,6 +111,8 @@ export interface InvItem {
   qty: number;
   mods?: string[]; // attached mod itemIds (ranged weapons, per instance)
   loaded?: number; // rounds currently in the magazine (ranged weapons)
+  condition?: number; // weapons: 0..100, undefined = pristine (wave 2 wear)
+  jammed?: boolean; // weapons: action jammed — R works it clear
 }
 
 export interface Equipped {

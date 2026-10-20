@@ -162,11 +162,15 @@ interface GameState {
   healPlayer: (amount: number) => void;
   advanceTime: (minutes: number) => void;
 
-  addItem: (itemId: string, qty: number, quiet?: boolean) => boolean;
+  addItem: (itemId: string, qty: number, quiet?: boolean, opts?: { found?: boolean }) => boolean;
   removeItem: (uid: string, qty: number) => boolean;
   countItem: (itemId: string) => number;
   equipUid: (uid: string) => void;
   setLoaded: (uid: string, n: number) => void;
+  setCondition: (uid: string, n: number) => void;
+  setJammed: (uid: string, b: boolean) => void;
+  repairWeapon: (uid: string) => void;
+  disassemble: (uid: string) => void;
   attachMod: (weaponUid: string, modUid: string) => void;
   detachMod: (weaponUid: string, modId: string) => void;
   unequipSlot: (slot: keyof Equipped) => void;
@@ -393,7 +397,7 @@ export const useGameStore = create<GameState>()((set, get) => {
       }
       const taken = eng.storageTakeItem(s.storageOpen.kind, s.storageOpen.uid, index);
       if (!taken) return;
-      if (!s.addItem(taken.itemId, taken.qty, true)) {
+      if (!s.addItem(taken.itemId, taken.qty, true, { found: true })) {
         eng.storagePutItem(s.storageOpen.kind, s.storageOpen.uid, taken); // hand it back
         s.addToast('No room in the pack.');
         return;
@@ -542,7 +546,7 @@ export const useGameStore = create<GameState>()((set, get) => {
 
     advanceDay: () => set((s) => ({ daysElapsed: s.daysElapsed + 1 })),
 
-    addItem: (itemId, qty, quiet) => {
+    addItem: (itemId, qty, quiet, opts) => {
       const def = ITEMS[itemId];
       if (!def) return false;
       const s = get();
@@ -569,7 +573,13 @@ export const useGameStore = create<GameState>()((set, get) => {
           break;
         }
         const take = Math.min(def.stack, remaining);
-        inv.push({ uid: newUid(), itemId, qty: take });
+        const fresh: InvItem = { uid: newUid(), itemId, qty: take };
+        // a weapon found in the world has lived a life: condition 35–85.
+        // Crafted and granted weapons arrive pristine (no opts.found).
+        if (opts?.found && (def.category === 'weapon-ranged' || def.category === 'weapon-melee')) {
+          fresh.condition = 35 + Math.floor(Math.random() * 51);
+        }
+        inv.push(fresh);
         remaining -= take;
       }
       const added = qty - remaining;
@@ -638,6 +648,76 @@ export const useGameStore = create<GameState>()((set, get) => {
     setLoaded: (uid, n) => {
       const s = get();
       set({ inventory: s.inventory.map((i) => (i.uid === uid ? { ...i, loaded: n } : i)) });
+    },
+
+    setCondition: (uid, n) => {
+      const s = get();
+      const v = Math.round(Math.max(0, Math.min(100, n)) * 100) / 100;
+      set({ inventory: s.inventory.map((i) => (i.uid === uid ? { ...i, condition: v } : i)) });
+    },
+
+    setJammed: (uid, b) => {
+      const s = get();
+      set({ inventory: s.inventory.map((i) => (i.uid === uid ? { ...i, jammed: b } : i)) });
+    },
+
+    /** Bench repair: gun_parts (ranged) or scrap (melee), 1 per 40 missing. */
+    repairWeapon: (uid) => {
+      const s = get();
+      if (s.nearStation !== 'workbench') {
+        s.addToast('Repairs happen at a Weapons Bench.');
+        return;
+      }
+      const w = s.inventory.find((i) => i.uid === uid);
+      const def = w ? ITEMS[w.itemId] : undefined;
+      if (!w || !def) return;
+      const cond = w.condition ?? 100;
+      const missing = 100 - cond;
+      if (missing <= 0.5) {
+        s.addToast(`${def.name} is already in full working order.`);
+        return;
+      }
+      const costId = def.category === 'weapon-ranged' ? 'gun_parts' : 'scrap';
+      const units = Math.ceil(missing / 40);
+      if (s.countItem(costId) < units) {
+        s.addToast(`Repair needs ${units}× ${ITEMS[costId].name}.`);
+        return;
+      }
+      let left = units;
+      while (left > 0) {
+        const stack = get().inventory.find((i) => i.itemId === costId && i.qty > 0);
+        if (!stack) break;
+        const take = Math.min(stack.qty, left);
+        get().removeItem(stack.uid, take);
+        left -= take;
+      }
+      get().setCondition(uid, 100);
+      if (w.jammed) get().setJammed(uid, false);
+      s.addToast(`${def.name} stripped, cleaned and rebuilt — good as new.`);
+    },
+
+    /** Strip a weapon/armor at the bench into its disassembly yield. */
+    disassemble: (uid) => {
+      const s = get();
+      if (s.nearStation !== 'workbench') {
+        s.addToast('Stripping for parts happens at a Weapons Bench.');
+        return;
+      }
+      const w = s.inventory.find((i) => i.uid === uid);
+      const def = w ? ITEMS[w.itemId] : undefined;
+      if (!w || !def?.disassembly) return;
+      // an equipped piece comes off the body first
+      if (s.equipped.melee === uid) s.unequipSlot('melee');
+      if (s.equipped.ranged === uid) s.unequipSlot('ranged');
+      // attached mods and loaded rounds come back off before the strip
+      for (const modId of w.mods ?? []) get().addItem(modId, 1, true);
+      if ((w.loaded ?? 0) > 0 && def.ammoId) get().addItem(def.ammoId, w.loaded!, true);
+      get().removeItem(uid, 1);
+      const got: string[] = [];
+      for (const y of def.disassembly) {
+        if (get().addItem(y.itemId, y.qty, true)) got.push(`${y.qty}× ${ITEMS[y.itemId]?.name ?? y.itemId}`);
+      }
+      s.addToast(`Stripped the ${def.name}: ${got.join(', ') || 'nothing salvageable'}.`);
     },
 
     attachMod: (weaponUid, modUid) => {
@@ -720,6 +800,24 @@ export const useGameStore = create<GameState>()((set, get) => {
         s.removeItem(uid, 1);
         s.addToast(`Used ${def.name} (+${def.heal} HP).`);
         if (def.category === 'medical') s.addSkillXp('medicine', 4);
+      } else if (it.itemId === 'cleaning_kit' || it.itemId === 'gun_oil') {
+        // field weapon care, applied to the gun in hand (else the melee)
+        const targetUid = s.equipped.ranged ?? s.equipped.melee;
+        const target = targetUid ? s.inventory.find((i) => i.uid === targetUid) : undefined;
+        const tdef = target ? ITEMS[target.itemId] : undefined;
+        if (!target || !tdef) { s.addToast('Equip a weapon to maintain it.'); return; }
+        const cond = target.condition ?? 100;
+        if (it.itemId === 'cleaning_kit') {
+          if (cond >= 60) { s.addToast(`${tdef.name} is already cleaner than a field kit gets it.`); return; }
+          s.setCondition(target.uid, 60);
+          s.removeItem(uid, 1);
+          s.addToast(`Field-stripped the ${tdef.name} — condition 60. The bench does better.`);
+        } else {
+          if (cond >= 100) { s.addToast(`${tdef.name} is already slick.`); return; }
+          s.setCondition(target.uid, Math.min(100, cond + 25));
+          s.removeItem(uid, 1);
+          s.addToast(`Oiled the ${tdef.name} — condition ${Math.round(Math.min(100, cond + 25))}.`);
+        }
       } else if (def.category === 'weapon-melee' || def.category === 'weapon-ranged' || def.category === 'pack') {
         s.equipUid(uid);
       } else {
@@ -1091,7 +1189,7 @@ export const useGameStore = create<GameState>()((set, get) => {
       const items = s.lootStash[containerId];
       const entry = items?.[index];
       if (!entry) return;
-      if (!s.addItem(entry.itemId, entry.qty, true)) {
+      if (!s.addItem(entry.itemId, entry.qty, true, { found: true })) {
         s.addToast('Pack full — no room for that.');
         return;
       }
