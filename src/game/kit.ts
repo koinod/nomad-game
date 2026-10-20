@@ -841,9 +841,10 @@ export class Kit {
     color?: number;
     railing?: boolean;
     railColor?: number;
+    yOff?: number; // tiny height offset so wrap-around corner slabs don't z-fight
   }): void {
     const story = opts.story;
-    const top = floorTopLocal(story);
+    const top = floorTopLocal(story) + (opts.yOff ?? 0);
     const hw = this.w / 2;
     const hd = this.d / 2;
     const t = KIT.WALL_T;

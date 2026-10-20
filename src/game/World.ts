@@ -4,7 +4,7 @@
 
 import * as THREE from 'three';
 import { makeFbm, makeNoise2D, mulberry32, clamp, lerp, smoothstep } from './rng';
-import { buildHouses, houseFootprints, type HouseResult } from './Houses';
+import { buildHouses, houseFootprints, type HouseResult } from './HousesV4';
 import { buildPoiBuildings, poiFootprints, type PoiBuildResult } from './PoiBuildings';
 import { airbaseFootprints, buildAirbase, buildCarrier, CARRIER_DECK_Y } from './Airbase';
 import type { BiomeId } from './Game';

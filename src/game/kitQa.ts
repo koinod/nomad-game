@@ -189,11 +189,17 @@ export function auditDoors(b: KitBuilding, out: QaFailure[]): void {
       if ((lcPerp - d.fixed) * outPerp > 0.05) {
         fail(out, 'doors', b, `leaf at (${d.cx.toFixed(1)}, ${d.cz.toFixed(1)}) rests OUTSIDE the wall plane`);
       }
-      // swing-clear at rest: the leaf may not intersect any ground collider
+      // swing-clear at rest: the leaf may not intersect any ground
+      // collider. The recorded box is the AABB of a tilted thin plane —
+      // shrink it back to the plane's real extent and require true
+      // penetration (>3cm both axes); resting against its own wall
+      // face (a ~2cm AABB graze) is the intended pose, while a divider
+      // end or a dresser in the swing path penetrates far deeper.
+      const sb = { x0: lb.x0 + 0.035, x1: lb.x1 - 0.035, z0: lb.z0 + 0.035, z1: lb.z1 - 0.035 };
       for (const c of ground) {
-        const ox = Math.min(lb.x1, c.x1) - Math.max(lb.x0, c.x0);
-        const oz = Math.min(lb.z1, c.z1) - Math.max(lb.z0, c.z0);
-        if (ox > 0.02 && oz > 0.02) {
+        const ox = Math.min(sb.x1, c.x1) - Math.max(sb.x0, c.x0);
+        const oz = Math.min(sb.z1, c.z1) - Math.max(sb.z0, c.z0);
+        if (ox > 0.03 && oz > 0.03) {
           fail(out, 'doors', b,
             `leaf at (${d.cx.toFixed(1)}, ${d.cz.toFixed(1)}) rests inside a collider [${c.x0.toFixed(1)},${c.z0.toFixed(1)}]-[${c.x1.toFixed(1)},${c.z1.toFixed(1)}]`);
           break;
@@ -233,7 +239,12 @@ export function auditScale(b: KitBuilding, out: QaFailure[]): void {
   // slab floors: big floor rects inside the footprint; their heights must
   // step by exactly one story
   const big = b.floors.filter((f) => (f.x1 - f.x0) * (f.z1 - f.z0) >= 4);
-  const ys = [...new Set(big.map((f) => Math.round(f.y * 50) / 50))].sort((a, c) => a - c);
+  // cluster heights within 5cm (deck y-offsets, tread tops) before diffing
+  const sorted = big.map((f) => f.y).sort((a, c) => a - c);
+  const ys: number[] = [];
+  for (const y of sorted) {
+    if (ys.length === 0 || y - ys[ys.length - 1] > 0.05) ys.push(y);
+  }
   for (let i = 1; i < ys.length; i++) {
     const diff = ys[i] - ys[i - 1];
     if (Math.abs(diff - KIT.WALL_H) > 0.04) {
@@ -292,19 +303,20 @@ const RADIUS = 0.28; // collider clearance (player radius 0.45, cell-tolerant)
 const STEP_UP = 0.55; // engine floorYAtRef default
 
 export function auditReachability(b: KitBuilding, groundY: GroundY, out: QaFailure[]): void {
-  const entrance = b.doors
-    .filter((d) => d.story === 0 && !d.interior)
-    .sort((a, c) => (a.kind === 'door' ? 0 : 1) - (c.kind === 'door' ? 0 : 1))[0];
+  // every ground-story entrance is a seed: multi-unit buildings (an
+  // apartment's separate front doors) are each entered from outside
+  const entrances = b.doors.filter((d) => d.story === 0 && !d.interior);
   const targets: { x: number; z: number; label: string; near: boolean }[] = [
     ...b.roomPoints.map((p) => ({ ...p, near: false })),
     ...b.containers.map((c) => ({ x: c.x, z: c.z, label: `container ${c.id}`, near: true })),
     ...b.npcPoints.map((p) => ({ x: p.x, z: p.z, label: 'NPC point', near: true })),
   ];
   if (targets.length === 0) return;
-  if (!entrance) {
+  if (entrances.length === 0) {
     fail(out, 'reachability', b, 'no entrance door recorded — cannot audit reachability');
     return;
   }
+  const entrance = entrances[0];
   // grid bounds: union of pieces + doors, padded
   const xs = b.pieces.flatMap((p) => [p.x0, p.x1]);
   const zs = b.pieces.flatMap((p) => [p.z0, p.z1]);
@@ -333,18 +345,28 @@ export function auditReachability(b: KitBuilding, groundY: GroundY, out: QaFailu
     }
     return false;
   };
-  const sx = entrance.cx + entrance.outward[0] * 1.7;
-  const sz = entrance.cz + entrance.outward[1] * 1.7;
-  const [si, sj] = idxOf(sx, sz);
   const heights = new Map<number, number>();
   const key = (i: number, j: number) => j * nx + i;
-  const startRef = groundY(sx, sz);
-  if (si < 0 || sj < 0 || si >= nx || sj >= nz || blocked(sx, sz, startRef)) {
-    fail(out, 'reachability', b, 'the entrance itself is blocked or outside the audit grid');
+  const queue: [number, number][] = [];
+  for (const e of entrances) {
+    const sx = e.cx + e.outward[0] * 1.7;
+    const sz = e.cz + e.outward[1] * 1.7;
+    const [si, sj] = idxOf(sx, sz);
+    if (si < 0 || sj < 0 || si >= nx || sj >= nz) continue;
+    const startRef = groundY(sx, sz);
+    if (blocked(sx, sz, startRef)) {
+      fail(out, 'reachability', b, `the entrance at (${e.cx.toFixed(1)}, ${e.cz.toFixed(1)}) is itself blocked`);
+      continue;
+    }
+    if (!heights.has(key(si, sj))) {
+      heights.set(key(si, sj), startRef);
+      queue.push([si, sj]);
+    }
+  }
+  if (queue.length === 0) {
+    fail(out, 'reachability', b, 'no usable entrance — every doorway is blocked or outside the audit grid');
     return;
   }
-  heights.set(key(si, sj), startRef);
-  const queue: [number, number][] = [[si, sj]];
   while (queue.length) {
     const [i, j] = queue.shift()!;
     const refY = heights.get(key(i, j))!;
