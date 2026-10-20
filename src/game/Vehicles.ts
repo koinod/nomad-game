@@ -17,7 +17,7 @@ import { box, chrome, darkTrim, glassTint, lampMat, loftMesh, mat, tailMat, tube
 import { buildStallion, applyStallionUpgrades } from './carModels';
 import { buildBoxtruck, buildBronco, buildF250, buildPickup, buildSemi } from './truckModels';
 import { buildGoliath, buildSedan, buildSprinter, buildTank, buildV03, buildVan } from './vanModels';
-import { buildATV, buildMarshBuggy, buildMotocross, buildSportbike } from './smallModels';
+import { buildATV, buildMarshBuggy, buildMotocross, buildSkiff as buildSkiffModel, buildSportbike } from './smallModels';
 import {
   cgHeightM, cornerRoll, effectiveSteerAngle, impactBounce, impactDamage,
   understeerK, vehicleMassKg, weightTransferPitch,
@@ -1376,8 +1376,8 @@ function makeVehicle(def: VehicleDef, x: number, z: number, heading: number, gro
     variant,
   };
   if (def.kind === 'skiff') {
-    if (def.id === 'tug') buildTug(g, def);
-    else buildSkiff(g, def);
+    if (def.id === 'tug') buildTug(g, def); // airbase-wave build, kept
+    else buildSkiffModel(g, def, v); // CRAFT WAVE: lofted V-hull skiff
   }
   else if (def.kind === 'bike' || def.kind === 'moto' || def.kind === 'atv') buildBike(g, def, v);
   else if (def.kind === 'heli') {
