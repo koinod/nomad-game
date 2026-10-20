@@ -15,7 +15,7 @@ import {
 } from '../data/upgrades';
 import { box, chrome, darkTrim, glassTint, lampMat, loftMesh, mat, tailMat, tube } from './modelKit';
 import { buildStallion, applyStallionUpgrades } from './carModels';
-import { buildBoxtruck, buildSemi } from './truckModels';
+import { buildBoxtruck, buildF250, buildPickup, buildSemi } from './truckModels';
 import { buildSedan, buildVan } from './vanModels';
 import {
   cgHeightM, cornerRoll, effectiveSteerAngle, impactBounce, impactDamage,
@@ -206,6 +206,8 @@ function buildCarBody(g: THREE.Group, def: VehicleDef, v: Vehicle): void {
   if (def.id === 'van') { buildVan(g, def, v); return; }
   if (def.id === 'sedan') { buildSedan(g, def, v); return; }
   if (def.id === 'semi' || def.id === 'semi_day') { buildSemi(g, def, v); return; }
+  if (def.id === 'pickup') { buildPickup(g, def, v); return; }
+  if (def.id === 'f250') { buildF250(g, def, v); return; }
   const { length: L, width: W } = def;
   const color = def.id === 'semi' ? SEMI_PAINTS[v.colorPick % SEMI_PAINTS.length] : def.color;
   const body = mat(color, 0.55, 0.35);
@@ -1897,8 +1899,8 @@ export function applyUpgradeVisuals(v: Vehicle): void {
   if (v.upgrades.includes('cargo_racks') && v.def.kind === 'car') {
     if (v.def.id === 'pickup' || v.def.id === 'f250') {
       // bed rails + a headache rack behind the cab
-      for (const sgn of [1, -1]) box(g, 0.05, 0.22, L * 0.36, dark, sgn * (W / 2 - 0.05), 1.42, -L * 0.3);
-      box(g, W * 0.9, 0.3, 0.05, dark, 0, 1.5, -L * 0.12);
+      for (const sgn of [1, -1]) box(g, 0.05, 0.22, L * 0.36, dark, sgn * (W / 2 - 0.05), 1.46, -L * 0.3);
+      box(g, W * 0.9, 0.3, 0.05, dark, 0, 1.52, -L * 0.165);
     } else if (v.def.id !== 'goliath' && v.def.id !== 'tank' && v.def.id !== 'marsh_buggy') {
       const roofY = v.def.id === 'van' ? 2.2 : v.def.id === 'v03_hauler' ? 2.27 : v.def.id === 'sprinter' ? 2.3 : v.def.id === 'boxtruck' ? 2.75 : 1.5;
       for (const sgn of [1, -1]) box(g, 0.06, 0.06, L * 0.44, dark, sgn * W * 0.3, roofY, -L * 0.05);
