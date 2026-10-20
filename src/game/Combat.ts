@@ -8,6 +8,11 @@ import type { HuskManager } from './Husks';
 import { modNoiseMult, modSpreadMult } from '../data/mods';
 import { rangeFalloff } from './gunMath';
 
+export interface CombatFx {
+  impact: (p: THREE.Vector3, kind: 'flesh' | 'dust', damage: number, head: boolean) => void;
+  tracer: (from: THREE.Vector3, to: THREE.Vector3) => void;
+}
+
 export interface CombatHooks {
   husks: HuskManager;
   emitNoise: (x: number, z: number, radius: number) => void;
@@ -19,6 +24,8 @@ export interface CombatHooks {
   flashMuzzle: () => void;
   aimLevel: number; // 0 = hip, 1 = shoulder, 2 = down sights — drives the accuracy cone
   onThrow?: (itemId: string) => void; // grenades: hand off to Game's projectile sim
+  groundY?: (x: number, z: number) => number; // tracer endpoints + dust on misses
+  fx?: CombatFx; // impact puffs + tracers (Game-owned Fx, optional in tests)
 }
 
 /** Per-weapon melee feel: reach, arc, swing speed, knockback, stamina cost. */
@@ -206,6 +213,7 @@ export function tryRanged(h: CombatHooks): RangedResult {
       dir.addScaledVector(right, Math.cos(a) * r).addScaledVector(up, Math.sin(a) * r).normalize();
     }
     const res = h.husks.raycastShot(h.eyePos, dir, range);
+    const muzzle = h.eyePos.clone().addScaledVector(dir, 0.45);
     if (res) {
       let dmg = rangeFalloff(def.damage ?? 20, res.dist);
       if (res.head) dmg *= 2;
@@ -217,10 +225,32 @@ export function tryRanged(h: CombatHooks): RangedResult {
       ).normalize();
       const k = res.husk.damage(dealt, kdir, 1.2, false, { head: res.head });
       res.husk.investigateAt(h.playerPos);
+      if (h.fx) {
+        const point = h.eyePos.clone().addScaledVector(dir, res.dist);
+        h.fx.impact(point, 'flesh', dealt, res.head);
+        h.fx.tracer(muzzle, point);
+      }
       hit = true;
       totalDamage += dealt;
       if (res.head) headshot = true;
       if (k) killed = true;
+    } else if (h.fx) {
+      // a miss still draws its line — walk the ray to the dirt so the
+      // tracer ends where the round actually went
+      let end = h.eyePos.clone().addScaledVector(dir, range);
+      if (h.groundY) {
+        for (let d = 2; d <= range; d += 2) {
+          const p = h.eyePos.clone().addScaledVector(dir, d);
+          const gy = h.groundY(p.x, p.z);
+          if (p.y <= gy + 0.05) {
+            p.y = gy + 0.05;
+            end = p;
+            h.fx.impact(p, 'dust', 0, false);
+            break;
+          }
+        }
+      }
+      h.fx.tracer(muzzle, end);
     }
   }
   // one feedback voice per trigger pull, best result wins: a shotgun blast

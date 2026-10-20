@@ -11,6 +11,7 @@ import { ITEMS } from '../data/items';
 import { World, heightAt, biomeAt, initTerrainField } from './World';
 import { CARRIER_DECK_Y } from './Airbase';
 import { Player } from './Player';
+import { Fx } from './Fx';
 import { HuskManager } from './Husks';
 import type { Husk, SpawnZone } from './Husks';
 import { InteractSystem, buildContainerDefs } from './Interact';
@@ -49,6 +50,7 @@ export class Game {
   private scene: THREE.Scene | null = null;
   private camera: THREE.PerspectiveCamera | null = null;
   private world: World | null = null;
+  private fx: Fx | null = null;
   private player: Player | null = null;
   private husks: HuskManager | null = null;
   private animals: AnimalManager | null = null;
@@ -148,6 +150,7 @@ export class Game {
 
     this.world = new World(this.scene, opts.seed);
     this.world.build();
+    this.fx = new Fx(this.scene);
 
     // vehicles: the full roster parked around the island
     this.vehicles = new VehicleManager();
@@ -764,6 +767,7 @@ export class Game {
         useGameStore.getState().setNoiseLevel(Math.min(100, (eff / 80) * 100));
       },
       onThrow: (itemId: string) => this.throwGrenade(itemId),
+      fx: this.fx ?? undefined,
       onAnimalKill: (kill: { id: string; kind: string; x: number; z: number; min: number; max: number }) => {
         // gut the kill: raw meat appears where the animal fell
         const qty = kill.min + Math.floor(this.rng() * (kill.max - kill.min + 1));
@@ -852,6 +856,9 @@ export class Game {
         this.onHuskKilled(h);
       }
     }
+
+    // combat feedback particles + tracers ride every frame
+    this.fx?.update(dt);
 
     // thrown weapons: arc, bounce lightly off ground, blow on fuse
     for (let i = this.throwables.length - 1; i >= 0; i--) {

@@ -27,6 +27,7 @@ export interface PlayerCtx {
   emitNoise: (x: number, z: number, radius: number) => void;
   onAnimalKill: (kill: AnimalKill & { id: string; min: number; max: number }) => void;
   onThrow: (itemId: string) => void; // grenades: Game owns the projectile sim
+  fx?: import('./Fx').Fx; // combat feedback particles/tracers (Game-owned)
   camera: THREE.PerspectiveCamera;
   colliders: readonly Collider[]; // house walls + furniture
 }
@@ -602,8 +603,26 @@ export class Player {
         spendStamina: (n) => this.spendStamina(n),
         flashMuzzle: () => this.flashMuzzle(),
         aimLevel: this.aimLevel,
+        groundY: ctx.groundY,
+        fx: ctx.fx
+          ? {
+              impact: (p, kind, damage, head) =>
+                kind === 'flesh' ? ctx.fx!.impactFlesh(p, damage, head) : ctx.fx!.impactDust(p),
+              tracer: (from, to) => ctx.fx!.tracer(from, to),
+            }
+          : undefined,
       });
       if (fired.fired) {
+        // muzzle smoke + a kicked-out casing: the shot leaves evidence
+        if (ctx.fx) {
+          const muzzlePos = new THREE.Vector3();
+          this.muzzle.getWorldPosition(muzzlePos);
+          ctx.fx.muzzleSmoke(muzzlePos, dir);
+          if (rdef && (rdef.fireMode === 'semi' || rdef.fireMode === 'auto')) {
+            const right = new THREE.Vector3(Math.cos(this.camYaw), 0, -Math.sin(this.camYaw));
+            ctx.fx.brass(eye.clone().addScaledVector(dir, 0.3), right);
+          }
+        }
         if (fired.hit) {
           useGameStore.getState().setHitmark(
             fired.killed ? 'kill' : fired.headshot ? 'headshot' : 'hit',
