@@ -25,6 +25,10 @@ export interface VehicleDef {
   water?: boolean;
   storageKg: number; // trunk / bed / cargo capacity
   tracked?: boolean; // tank: tracks not wheels, crushes, near-indestructible
+  /** Balloon tires: sand imposes ~no penalty in the drive model. */
+  sandRunner?: boolean;
+  /** Collision/wear damage multiplier (default 1; >1 = fragile). */
+  armorMul?: number;
 }
 
 /** An animated door/ramp on a vehicle or trailer, driven by t 0→1. */
@@ -69,11 +73,13 @@ export const VEHICLE_DEFS: VehicleDef[] = [
   { id: 'sportbike', name: 'Sport Bike', kind: 'bike', length: 2.1, width: 0.7, fuelMax: 12, burnClass: 0.5, topSpeed: 30, noiseDrive: 40, color: 0xc23b2e, storageKg: 5 },
   { id: 'motocross', name: 'Dirt Bike', kind: 'moto', length: 2.2, width: 0.8, fuelMax: 10, burnClass: 0.5, topSpeed: 26, noiseDrive: 45, color: 0x3a6ea5, storageKg: 5 },
   { id: 'atv', name: 'ATV', kind: 'atv', length: 2.1, width: 1.1, fuelMax: 15, burnClass: 0.6, topSpeed: 19, noiseDrive: 42, color: 0x4a5230, storageKg: 25 },
+  { id: 'marsh_buggy', name: 'Marsh Buggy', kind: 'car', length: 3.6, width: 1.9, fuelMax: 30, burnClass: 0.8, topSpeed: 17, noiseDrive: 52, color: 0xd8621e, storageKg: 40, sandRunner: true, armorMul: 1.6 },
   { id: 'skiff', name: 'Skiff', kind: 'skiff', length: 5.5, width: 2.0, fuelMax: 24, burnClass: 0.9, topSpeed: 14, noiseDrive: 38, color: 0xd8d8d0, water: true, storageKg: 120 },
   { id: 'sedan', name: 'Sedan', kind: 'car', length: 4.7, width: 1.8, fuelMax: 40, burnClass: 1.0, topSpeed: 21, noiseDrive: 45, color: 0x5a6a7a, storageKg: 70 },
   { id: 'mustang', name: 'Mustang Dark Horse', kind: 'car', length: 4.8, width: 1.9, fuelMax: 45, burnClass: 1.1, topSpeed: 42, noiseDrive: 55, color: 0x2f4d7d, storageKg: 45 },
   { id: 'van', name: 'Utility Van', kind: 'car', length: 5.2, width: 2.0, fuelMax: 55, burnClass: 1.3, topSpeed: 19, noiseDrive: 50, color: 0xb8b8b0, storageKg: 260 },
   { id: 'sprinter', name: 'Sprinter Van', kind: 'car', length: 6.0, width: 2.05, fuelMax: 75, burnClass: 1.4, topSpeed: 18, noiseDrive: 48, color: 0x9aa4ac, storageKg: 380 },
+  { id: 'v03_hauler', name: 'V-03 Hauler', kind: 'car', length: 5.6, width: 2.1, fuelMax: 65, burnClass: 1.5, topSpeed: 16.5, noiseDrive: 52, color: 0x2f3337, storageKg: 520 },
   { id: 'bronco', name: 'Bronco 4x4', kind: 'car', length: 4.6, width: 1.9, fuelMax: 55, burnClass: 1.3, topSpeed: 21, noiseDrive: 55, color: 0x4a5a3a, storageKg: 130 },
   { id: 'pickup', name: 'Pickup', kind: 'car', length: 5.3, width: 1.9, fuelMax: 60, burnClass: 1.3, topSpeed: 20, noiseDrive: 55, color: 0x5f7285, storageKg: 320 },
   { id: 'f250', name: 'F-250 Dually', kind: 'car', length: 5.9, width: 2.0, fuelMax: 70, burnClass: 1.4, topSpeed: 20, noiseDrive: 55, color: 0x2e2e32, storageKg: 420 },
@@ -426,6 +432,97 @@ function buildCarBody(g: THREE.Group, def: VehicleDef, v: Vehicle): void {
     // GT wing on uprights
     for (const sgn of [1, -1]) box(g, 0.06, 0.24, 0.1, trim, sgn * W * 0.3, 1.05, -L * 0.45);
     box(g, W * 0.88, 0.05, 0.34, trim, 0, 1.19, -L * 0.46);
+  } else if (def.id === 'marsh_buggy') {
+    // Marsh Buggy (Stitch): orange open buggy on huge balloon tires —
+    // no doors, no roof, just a welded roll cage and a light bar.
+    const cageMat = mat(0x2a2a2e, 0.6, 0.4);
+    box(g, W * 0.92, 0.18, L * 0.9, body, 0, 0.52, 0); // floor pan
+    for (const sgn of [1, -1]) box(g, 0.3, 0.3, L * 0.55, body, sgn * (W / 2 - 0.15), 0.66, -0.1); // side pods
+    const nose = box(g, W * 0.8, 0.26, L * 0.3, body, 0, 0.78, L * 0.33);
+    nose.rotation.x = 0.1; // sloped nose
+    box(g, W * 0.5, 0.14, 0.05, dark, 0, 0.62, L * 0.49); // grille slot
+    for (const sgn of [1, -1]) box(g, 0.2, 0.09, 0.05, lampMat(), sgn * W * 0.28, 0.82, L * 0.48);
+    // two bucket seats + dash + wheel
+    for (const sgn of [1, -1]) {
+      box(g, 0.52, 0.13, 0.5, mat(0x24262a, 0.95, 0), sgn * W * 0.21, 0.78, -0.12);
+      const back = box(g, 0.52, 0.58, 0.11, mat(0x24262a, 0.95, 0), sgn * W * 0.21, 1.08, -0.4);
+      back.rotation.x = 0.14;
+    }
+    box(g, W * 0.72, 0.1, 0.24, dark, 0, 1.0, L * 0.17); // dash
+    const swheel = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.04, 12), dark);
+    swheel.rotation.x = 1.15;
+    swheel.position.set(W * 0.21, 1.06, L * 0.13);
+    g.add(swheel);
+    // the roll cage: A-pillars, top rails, rear stays, crossbars
+    const bar = (x1: number, y1: number, z1: number, x2: number, y2: number, z2: number) => {
+      const va = new THREE.Vector3(x1, y1, z1);
+      const vb = new THREE.Vector3(x2, y2, z2);
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, va.distanceTo(vb), 8), cageMat);
+      m.position.copy(va).lerp(vb, 0.5);
+      m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), vb.sub(va).normalize());
+      m.castShadow = true;
+      g.add(m);
+    };
+    for (const sgn of [1, -1]) {
+      bar(sgn * 0.8, 0.62, 0.78, sgn * 0.78, 1.8, 0.28); // A-pillar
+      bar(sgn * 0.78, 1.8, 0.28, sgn * 0.8, 1.8, -1.02); // top rail
+      bar(sgn * 0.8, 1.8, -1.02, sgn * 0.84, 0.64, -1.48); // rear stay
+      bar(sgn * 0.84, 0.64, -1.48, sgn * 0.84, 0.64, -0.6); // rear low rail
+    }
+    bar(-0.78, 1.8, 0.28, 0.78, 1.8, 0.28); // front crossbar
+    bar(-0.8, 1.8, -1.02, 0.8, 1.8, -1.02); // rear crossbar
+    bar(-0.79, 1.52, 0.55, 0.79, 1.52, 0.55); // dash bar
+    // light bar on the cage brow
+    box(g, 0.95, 0.08, 0.08, dark, 0, 1.9, 0.3);
+    for (const lx of [-0.32, 0, 0.32]) box(g, 0.17, 0.12, 0.05, lampMat(), lx, 1.9, 0.35);
+    // rear engine block + exhaust + a spare balloon on the back rack
+    box(g, W * 0.58, 0.4, 0.5, dark, 0, 0.82, -L * 0.36);
+    const exh = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.5, 8), chrome());
+    exh.rotation.x = 0.5;
+    exh.position.set(W * 0.3, 1.1, -L * 0.44);
+    g.add(exh);
+    const spare = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.3, 14), mat(0x1e1e22, 1, 0));
+    spare.position.set(0, 1.12, -L * 0.44);
+    spare.castShadow = true;
+    g.add(spare);
+    // minimal fenders over the balloons
+    for (const sgn of [1, -1]) box(g, 0.52, 0.07, 0.95, body, sgn * (W / 2 - 0.04), 1.04, L * 0.32);
+  } else if (def.id === 'v03_hauler') {
+    // V-03 Hauler (Stitch): the utility van's armored sibling — charcoal
+    // plated cargo box, barred rear windows, brush guard, heavy bumpers.
+    const plate = mat(0x232629, 0.5, 0.5);
+    box(g, W, 1.62, L * 0.64, body, 0, 1.36, -L * 0.16); // cargo box
+    box(g, W * 0.99, 0.07, L * 0.66, body, 0, 2.2, -L * 0.16); // roof
+    box(g, 0.85, 0.1, 0.85, plate, 0, 2.28, -L * 0.08); // roof hatch
+    box(g, W * 0.98, 1.06, L * 0.3, body, 0, 0.85, L * 0.33); // cab
+    const shieldV = box(g, W * 0.9, 0.62, 0.07, glass(), 0, 1.32, L * 0.47);
+    shieldV.rotation.x = -0.12;
+    box(g, W * 0.96, 0.42, L * 0.14, body, 0, 0.55, L * 0.44); // snub hood
+    box(g, W * 0.7, 0.22, 0.06, dark, 0, 0.52, L * 0.51); // grille
+    for (const sgn of [1, -1]) {
+      box(g, 0.3, 0.1, 0.05, lampMat(), sgn * W * 0.34, 0.78, L * 0.51);
+      box(g, 0.07, 0.34, 0.05, tailMat(), sgn * W * 0.44, 1.05, -L * 0.51);
+      // riveted armor plates over the cargo flanks + cab doors
+      box(g, 0.04, 1.14, L * 0.52, plate, sgn * (W / 2 + 0.015), 1.38, -L * 0.16);
+      box(g, 0.04, 0.78, 0.92, plate, sgn * (W / 2 + 0.01), 0.92, L * 0.33);
+      box(g, 0.34, 0.07, L * 0.54, plate, sgn * (W / 2 - 0.2), 2.0, -L * 0.16); // plate top rail
+      // side step
+      box(g, 0.3, 0.06, 0.8, plate, sgn * (W / 2 + 0.1), 0.3, L * 0.3);
+    }
+    // marker lights on the cab brow
+    for (const mx of [-0.5, 0, 0.5]) box(g, 0.14, 0.06, 0.04, mat(0xd88f2e, 0.4, 0.1), mx, 1.98, L * 0.485);
+    // rear doors with barred windows
+    box(g, 0.04, 1.55, 0.05, dark, 0, 1.32, -L * 0.485); // center seam
+    for (const sgn of [1, -1]) {
+      box(g, 0.44, 0.4, 0.03, glass(), sgn * W * 0.24, 1.72, -L * 0.49);
+      for (let i = 0; i < 3; i++) box(g, 0.46, 0.045, 0.04, plate, sgn * W * 0.24, 1.58 + i * 0.14, -L * 0.495);
+    }
+    // brush guard: verticals + horizontals over the nose
+    for (const bx of [-0.52, 0, 0.52]) box(g, 0.07, 0.72, 0.07, plate, bx, 0.62, L * 0.55);
+    for (const by of [0.34, 0.62, 0.9]) box(g, W * 0.62, 0.07, 0.07, plate, 0, by, L * 0.55);
+    mirrors(g, W, 1.35, L * 0.42);
+    box(g, W, 0.3, 0.14, plate, 0, 0.3, L * 0.52); // heavy bumpers
+    box(g, W, 0.3, 0.14, plate, 0, 0.3, -L * 0.52);
   } else if (def.id === 'sprinter') {
     // Tall cargo van: real cab + a HOLLOW walk-in cargo box with twin
     // rear doors that swing open — you can step in the back and load it.
@@ -527,14 +624,16 @@ function buildCarBody(g: THREE.Group, def: VehicleDef, v: Vehicle): void {
   // wheels (the tank rides on its modeled tracks instead)
   if (def.id === 'tank') { v.wheelR = 0.5; return; }
   const wr =
+    def.id === 'marsh_buggy' ? 0.46 :
     def.id === 'f250' ? 0.44 :
     def.id === 'pickup' ? 0.4 :
+    def.id === 'v03_hauler' ? 0.38 :
     def.id === 'bronco' ? 0.38 :
     def.id === 'van' || def.id === 'sprinter' ? 0.36 :
     def.id === 'semi' || def.id === 'semi_day' || def.id === 'boxtruck' ? 0.42 :
     def.id === 'goliath' ? 0.46 : 0.33;
   v.wheelR = wr;
-  const ww = def.id === 'goliath' ? 0.34 : def.id === 'pickup' || def.id === 'f250' || def.id === 'bronco' ? 0.3 : 0.24;
+  const ww = def.id === 'marsh_buggy' ? 0.44 : def.id === 'goliath' ? 0.34 : def.id === 'pickup' || def.id === 'f250' || def.id === 'bronco' ? 0.3 : def.id === 'v03_hauler' ? 0.27 : 0.24;
   const nAxle = def.id === 'semi' || def.id === 'semi_day' || def.id === 'goliath' || def.id === 'boxtruck' ? 3 : 2;
   const axleZs = nAxle === 3 ? [L * 0.32, -L * 0.1, -L * 0.32] : [L * 0.32, -L * 0.32];
   axleZs.forEach((az, i) => {
@@ -699,6 +798,8 @@ const SPAWNS: SpawnDef[] = [
   { id: 'semi', poi: 'dune_cache', dx: 55, dz: -18, heading: Math.PI / 2 },
   { id: 'semi_day', poi: 'dune_cache', dx: 38, dz: -30, heading: Math.PI / 2 },
   { id: 'sprinter', poi: 'town', dx: 88, dz: 58, heading: Math.PI },
+  { id: 'v03_hauler', poi: 'town', dx: 96, dz: 68, heading: Math.PI },
+  { id: 'marsh_buggy', poi: 'marina', dx: 16, dz: 12, heading: 0.7 },
   { id: 'goliath', poi: 'lighthouse_base', dx: 12, dz: -8, heading: -Math.PI / 2 },
   { id: 'tank', poi: 'lighthouse_base', dx: 24, dz: -18, heading: -Math.PI / 2 },
   { id: 'skiff', poi: 'marina', dx: -64, dz: 8, heading: Math.PI / 2 },
@@ -810,7 +911,7 @@ export class VehicleManager {
     // Load matters: a hitched trailer's mass (towedMassKg, set by the
     // trailer manager) and blown tires cut the top end and the pull;
     // an engine tune buys some of it back (data/upgrades math).
-    const surfaceTop = onSand ? sandFactor(v.upgrades) : 1;
+    const surfaceTop = onSand ? (def.sandRunner ? 1 : sandFactor(v.upgrades)) : 1;
     const topF = def.topSpeed * condF * surfaceTop * (inWater ? 0.3 : 1)
       * topSpeedFactor(v.upgrades, v.towedMassKg, v.tiresFlat);
     const accelF = accelFactor(v.upgrades, v.towedMassKg);
@@ -819,7 +920,7 @@ export class VehicleManager {
     const accelBefore = v.speed;
     if (th > 0.02) {
       const power = clamp(1 - v.speed / Math.max(topF, 1), 0.22, 1); // strong launch, tapering top end
-      v.speed += th * (topF / 2.9) * power * (onSand ? 0.8 : 1) * accelF * dt;
+      v.speed += th * (topF / 2.9) * power * (onSand && !def.sandRunner ? 0.8 : 1) * accelF * dt;
     } else if (th < -0.02) {
       if (v.speed > 0.4) {
         v.speed -= (topF / 1.05) * dt; // brakes
@@ -833,7 +934,7 @@ export class VehicleManager {
     // drag: aero (proportional) + rolling resistance (constant pull to 0)
     v.speed -= v.speed * (inWater ? 1.4 : 0.32) * dt;
     if (Math.abs(th) < 0.02) {
-      const roll = (onSand ? 1.1 : 0.55) * dt;
+      const roll = (onSand && !def.sandRunner ? 1.1 : 0.55) * dt;
       v.speed = Math.abs(v.speed) <= roll ? 0 : v.speed - Math.sign(v.speed) * roll;
       v.speed -= v.speed * 0.25 * dt; // engine braking
     }
@@ -872,7 +973,7 @@ export class VehicleManager {
       if (def.tracked) {
         env.noise(pos.x, pos.z, 26); // the building loses; the tank doesn't notice
       } else {
-        v.condition = Math.max(0, v.condition - 0.02 * collisionLossFactor(v.upgrades));
+        v.condition = Math.max(0, v.condition - 0.02 * collisionLossFactor(v.upgrades) * (def.armorMul ?? 1));
         env.noise(pos.x, pos.z, 18);
         // a hard hit on a worn vehicle can blow a tire (run-flats prevent it)
         if (v.condition < 0.3 && v.tiresFlat < 2 && !v.upgrades.includes('run_flats') && Math.random() < 0.45) {
@@ -997,8 +1098,8 @@ export function applyUpgradeVisuals(v: Vehicle): void {
       // bed rails + a headache rack behind the cab
       for (const sgn of [1, -1]) box(g, 0.05, 0.22, L * 0.36, dark, sgn * (W / 2 - 0.05), 1.42, -L * 0.3);
       box(g, W * 0.9, 0.3, 0.05, dark, 0, 1.5, -L * 0.12);
-    } else if (v.def.id !== 'goliath' && v.def.id !== 'tank') {
-      const roofY = v.def.id === 'van' ? 2.2 : v.def.id === 'sprinter' ? 2.3 : v.def.id === 'boxtruck' ? 2.75 : 1.5;
+    } else if (v.def.id !== 'goliath' && v.def.id !== 'tank' && v.def.id !== 'marsh_buggy') {
+      const roofY = v.def.id === 'van' ? 2.2 : v.def.id === 'v03_hauler' ? 2.27 : v.def.id === 'sprinter' ? 2.3 : v.def.id === 'boxtruck' ? 2.75 : 1.5;
       for (const sgn of [1, -1]) box(g, 0.06, 0.06, L * 0.44, dark, sgn * W * 0.3, roofY, -L * 0.05);
       for (let i = 0; i < 3; i++) box(g, W * 0.64, 0.05, 0.09, dark, 0, roofY + 0.02, -L * 0.05 + (i - 1) * L * 0.16);
     }

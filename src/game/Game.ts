@@ -1769,7 +1769,7 @@ export class Game {
   }
 
   private bestCarrierFor(x: number, z: number): { kind: 'vehicle' | 'trailer'; uid: string; name: string } | null {
-    const LOADABLE = ['pickup', 'f250', 'sprinter', 'van', 'boxtruck', 'bronco', 'goliath'];
+    const LOADABLE = ['pickup', 'f250', 'sprinter', 'van', 'v03_hauler', 'boxtruck', 'bronco', 'goliath'];
     let best: { kind: 'vehicle' | 'trailer'; uid: string; name: string } | null = null;
     let bd = 5.5;
     for (const v of this.vehicles.vehicles) {

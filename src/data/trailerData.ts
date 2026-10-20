@@ -90,6 +90,7 @@ export const TOW_RATING: Record<string, number> = {
   sedan: 0,
   mustang: 0,
   van: 1,
+  v03_hauler: 1,
   bronco: 1,
   boxtruck: 1,
   sprinter: 1,
