@@ -1330,8 +1330,12 @@ export function applyUpgradeVisuals(v: Vehicle): void {
       // bed rails + a headache rack behind the cab
       for (const sgn of [1, -1]) box(g, 0.05, 0.22, L * 0.36, dark, sgn * (W / 2 - 0.05), 1.46, -L * 0.3);
       box(g, W * 0.9, 0.3, 0.05, dark, 0, 1.52, -L * 0.165);
-    } else if (v.def.id !== 'goliath' && v.def.id !== 'tank' && v.def.id !== 'marsh_buggy') {
-      const roofY = v.def.id === 'van' ? 2.2 : v.def.id === 'v03_hauler' ? 2.27 : v.def.id === 'sprinter' ? 2.3 : v.def.id === 'boxtruck' ? 2.75 : 1.5;
+    } else if (v.def.id !== 'goliath' && v.def.id !== 'tank' && v.def.id !== 'marsh_buggy'
+      && v.def.id !== 'semi' && v.def.id !== 'semi_day' && v.def.id !== 'bronco') {
+      // roof heights of the LOFTED bodies (sedan 1.92, van 2.14, v03
+      // 2.24, sprinter 2.21, boxtruck crown 2.80); semis wear no roof
+      // rack and the bronco already ships with one
+      const roofY = v.def.id === 'van' ? 2.2 : v.def.id === 'v03_hauler' ? 2.34 : v.def.id === 'sprinter' ? 2.3 : v.def.id === 'boxtruck' ? 2.86 : v.def.id === 'sedan' ? 1.98 : 1.5;
       for (const sgn of [1, -1]) box(g, 0.06, 0.06, L * 0.44, dark, sgn * W * 0.3, roofY, -L * 0.05);
       for (let i = 0; i < 3; i++) box(g, W * 0.64, 0.05, 0.09, dark, 0, roofY + 0.02, -L * 0.05 + (i - 1) * L * 0.16);
     }

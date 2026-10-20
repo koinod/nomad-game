@@ -308,12 +308,9 @@ export function makeWheel(g: THREE.Group, o: WheelOpts): THREE.Group {
 export function archTub(g: THREE.Group, x: number, y: number, z: number, r: number, bodyHW: number): void {
   const disc = new THREE.Mesh(new THREE.CircleGeometry(r + 0.07, 22, 0, Math.PI), tubMat());
   disc.position.set(x >= 0 ? bodyHW - 0.17 : -(bodyHW - 0.17), y, z);
+  // CircleGeometry's 0..PI sweep spans local +Y (up); the Y-rotation
+  // faces the disc out the flank — the dark cavity behind the wheel.
   disc.rotation.y = x >= 0 ? Math.PI / 2 : -Math.PI / 2;
-  // CircleGeometry theta runs in its local XY; after the Y-rotation the
-  // half must face UP — rotate the geometry's local frame instead:
-  disc.rotation.z = 0;
-  disc.geometry = disc.geometry.clone();
-  disc.geometry.rotateZ(0); // (kept explicit — half-disc spans local +Y)
   g.add(disc);
   const lip = new THREE.Mesh(new THREE.TorusGeometry(r + 0.05, 0.035, 8, 20, Math.PI), tubMat());
   lip.position.set(x, y, z);
