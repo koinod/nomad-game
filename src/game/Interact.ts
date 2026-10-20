@@ -34,7 +34,7 @@ export interface InteractHooks {
 
 export interface Interactable {
   id: string;
-  kind: 'container' | 'campfire' | 'switch' | 'npc' | 'beacon' | 'corpse';
+  kind: 'container' | 'campfire' | 'switch' | 'npc' | 'beacon' | 'corpse' | 'pickup';
   pos: THREE.Vector3;
   label: string;
   use: () => void;
@@ -54,10 +54,42 @@ function personMesh(jacket: number, skin: number): THREE.Group {
   return g;
 }
 
+/** Small readable weapon/item mesh lying on the ground. */
+function buildPickupMesh(category: string): THREE.Group {
+  const g = new THREE.Group();
+  const steel = new THREE.MeshStandardMaterial({ color: 0x8a8f96, roughness: 0.5, metalness: 0.6 });
+  const wood = new THREE.MeshStandardMaterial({ color: 0x5a4632, roughness: 0.9 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x2c2c30, roughness: 0.7 });
+  if (category === 'weapon-melee') {
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.05, 0.85), steel);
+    blade.position.z = 0.3;
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.28), wood);
+    grip.position.z = -0.28;
+    g.add(blade, grip);
+  } else if (category === 'weapon-ranged') {
+    const bodyM = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.13, 0.4), dark);
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.2, 0.1), wood);
+    grip.position.set(0, -0.12, 0.1);
+    grip.rotation.x = 0.25;
+    g.add(bodyM, grip);
+  } else {
+    const box = new THREE.Mesh(
+      new THREE.BoxGeometry(0.34, 0.24, 0.34),
+      new THREE.MeshStandardMaterial({ color: 0x9a8a6a, roughness: 0.95 }),
+    );
+    g.add(box);
+  }
+  g.traverse((o) => {
+    if (o instanceof THREE.Mesh) o.castShadow = true;
+  });
+  return g;
+}
+
 export class InteractSystem {
   readonly interactables: Interactable[] = [];
   private crateMeshes = new Map<string, THREE.Mesh>();
   private searchedCorpses = new Set<string>();
+  private pickupMeshes = new Map<string, THREE.Group>();
   private hooks: InteractHooks;
 
   constructor(hooks: InteractHooks, pois: Record<string, [number, number]>, containers: ContainerDef[]) {
@@ -83,31 +115,31 @@ export class InteractSystem {
         pos,
         label: hooks.isLooted(c.id) ? 'Empty container' : 'Search container',
         use: () => {
+          // fresh state: the constructor's `s` snapshot goes stale after any set()
+          const st = useGameStore.getState();
           if (hooks.isLooted(c.id)) {
-            s.addToast('Nothing left here.');
+            st.addToast('Nothing left here.');
             return;
           }
-          const rng = hooks.rng;
-          const taken: string[] = [];
-          let tookAny = false;
-          for (const e of c.loot) {
-            if (rng() > e.chance) continue;
-            const qty = Math.max(1, Math.round((e.min + rng() * (e.max - e.min)) * hooks.resourceMult));
-            // quiet take: one summary toast below instead of a toast per item
-            if (!s.addItem(e.id, qty, true)) {
-              s.addToast('Pack full — could not take everything.');
-              return; // do NOT mark looted; come back with room
+          // loot preview: roll once, stash it, show the panel — take what you want
+          if (!st.lootStash[c.id]) {
+            const rng = hooks.rng;
+            const items: { itemId: string; qty: number }[] = [];
+            for (const e of c.loot) {
+              if (rng() > e.chance) continue;
+              const qty = Math.max(1, Math.round((e.min + rng() * (e.max - e.min)) * hooks.resourceMult));
+              items.push({ itemId: e.id, qty });
             }
-            s.questEvent('collect', e.id, qty);
-            tookAny = true;
-            taken.push(`${qty > 1 ? `${qty}× ` : ''}${ITEMS[e.id]?.name ?? e.id}`);
+            if (items.length === 0) {
+              st.addToast('Nothing useful inside.');
+              this.setContainerEmptied(c.id);
+              return;
+            }
+            st.stageContainerLoot(c.id, items);
           }
-          if (!tookAny) s.addToast('Nothing useful inside.');
-          else s.addToast(`Looted: ${taken.join(', ')}.`);
-          hooks.markLooted(c.id);
-          const m = this.crateMeshes.get(c.id);
-          if (m) m.visible = false;
-          sfx.play('pickup', { volume: 0.8 });
+          st.openStagedLoot(c.id);
+          if (document.pointerLockElement) document.exitPointerLock();
+          sfx.play('ui', { volume: 0.5 });
         },
       });
     }
@@ -190,15 +222,74 @@ export class InteractSystem {
         pos,
         label: 'Climb to the lamp room',
         use: () => {
-          const rep = s.rep['lighthouse'] ?? 0;
+          const st = useGameStore.getState();
+          const rep = st.rep['lighthouse'] ?? 0;
           if (rep >= 50) {
-            s.openDialogue('npc:kowalski', 'beacon_choice');
+            st.openDialogue('npc:kowalski', 'beacon_choice');
           } else {
-            s.addToast(`The beacon needs the Collective's trust (Lighthouse rep 50 — have ${rep}).`);
+            st.addToast(`The beacon needs the Collective's trust (Lighthouse rep 50 — have ${rep}).`);
             sfx.play('ui', { volume: 0.5 });
           }
         },
       });
+    }
+
+    // ---- hand-placed weapon pickups: see it on the ground, take it ----
+    const pickup = (id: string, itemId: string, qty: number, poiId: string, dx: number, dz: number) => {
+      const [px, pz] = at(poiId);
+      this.registerPickup(id, itemId, qty, px + dx, pz + dz);
+    };
+    pickup('pk_machete', 'machete', 1, 'jonah_camp', 3.5, -1.5);
+    pickup('pk_hatchet', 'hatchet', 1, 'forest_cache', -3, 2.5);
+    pickup('pk_pistol', 'pistol', 1, 'town', 9, -5);
+    pickup('pk_flare', 'flare', 2, 'relay_station', 2.5, -2);
+    pickup('pk_bandage', 'bandage', 2, 'shore_camp', -2.5, 3);
+  }
+
+  /** Mark a container fully looted: hide the crate, relabel the prompt. */
+  setContainerEmptied(id: string): void {
+    this.hooks.markLooted(id);
+    const m = this.crateMeshes.get(id);
+    if (m) m.visible = false;
+    const it = this.interactables.find((i) => i.id === id);
+    if (it) it.label = 'Empty container';
+  }
+
+  /** Visible ground pickup with its own mesh. One-shot: taken once. */
+  registerPickup(id: string, itemId: string, qty: number, x: number, z: number): void {
+    const s = useGameStore.getState();
+    const def = ITEMS[itemId];
+    if (!def) return;
+    const y = this.hooks.groundY(x, z);
+    const mesh = buildPickupMesh(def.category);
+    mesh.position.set(x, y + 0.32, z);
+    mesh.rotation.y = this.hooks.rng() * Math.PI * 2;
+    mesh.userData.baseY = y + 0.32;
+    mesh.userData.phase = this.hooks.rng() * Math.PI * 2;
+    this.hooks.scene.add(mesh);
+    this.pickupMeshes.set(id, mesh);
+    const entry: Interactable = {
+      id: `pickup:${id}`,
+      kind: 'pickup',
+      pos: new THREE.Vector3(x, y, z),
+      label: `Take ${def.name}${qty > 1 ? ` ×${qty}` : ''}`,
+      use: () => {
+        if (!s.addItem(itemId, qty)) return; // addItem toasts the reason
+        this.hooks.scene.remove(mesh);
+        this.pickupMeshes.delete(id);
+        const ix = this.interactables.indexOf(entry);
+        if (ix >= 0) this.interactables.splice(ix, 1);
+        sfx.play('pickup', { volume: 0.8 });
+      },
+    };
+    this.interactables.push(entry);
+  }
+
+  /** Gentle bob for ground pickups so they read as interactive. */
+  update(_dt: number, elapsed: number): void {
+    for (const mesh of this.pickupMeshes.values()) {
+      mesh.position.y = (mesh.userData.baseY as number) + Math.sin(elapsed * 2 + (mesh.userData.phase as number)) * 0.06;
+      mesh.rotation.y += _dt * 0.4;
     }
   }
 

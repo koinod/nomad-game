@@ -119,6 +119,15 @@ interface GameState {
   closeSleep: () => void;
   setWellRested: (minutes: number) => void;
 
+  // loot preview (E on a container shows contents before taking)
+  lootOpenId: string | null;
+  lootStash: Record<string, { itemId: string; qty: number }[]>;
+  stageContainerLoot: (containerId: string, items: { itemId: string; qty: number }[]) => void;
+  openStagedLoot: (containerId: string) => void;
+  takeLootIndex: (containerId: string, index: number) => void;
+  takeAllLoot: (containerId: string) => void;
+  closeLoot: () => void;
+
   addToast: (text: string) => void;
   dismissToast: (id: number) => void;
 
@@ -167,6 +176,8 @@ export const useGameStore = create<GameState>()((set, get) => {
     backpackOpen: false,
     sleepOpen: false,
     restedMinutesLeft: 0,
+    lootOpenId: null,
+    lootStash: {},
 
     dialogue: null,
     interactPrompt: null,
@@ -181,7 +192,7 @@ export const useGameStore = create<GameState>()((set, get) => {
     pendingSnapshot: null,
     saveSlots: [],
 
-    setScreen: (s) => set({ screen: s, paused: false, dialogue: null, phoneOpen: false, backpackOpen: false, sleepOpen: false }),
+    setScreen: (s) => set({ screen: s, paused: false, dialogue: null, phoneOpen: false, backpackOpen: false, sleepOpen: false, lootOpenId: null, lootStash: {} }),
     setPaused: (p) => set({ paused: p }),
 
     startNewGame: (d) => {
@@ -200,7 +211,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         flags: {},
         rep: { lighthouse: 0, pier: 0 },
         phoneOpen: false, phoneTab: 'loadout', phoneUnlocked: false, battery: 100,
-        backpackOpen: false, sleepOpen: false, restedMinutesLeft: 0,
+        backpackOpen: false, sleepOpen: false, restedMinutesLeft: 0, lootOpenId: null, lootStash: {},
         dialogue: { source: 'prologue', nodeId: 'start' },
         interactPrompt: null,
         poiPositions: {},
@@ -501,6 +512,39 @@ export const useGameStore = create<GameState>()((set, get) => {
     openSleep: () => set({ sleepOpen: true }),
     closeSleep: () => set({ sleepOpen: false }),
     setWellRested: (minutes) => set({ restedMinutesLeft: minutes }),
+
+    stageContainerLoot: (containerId, items) =>
+      set((s) => ({ lootStash: { ...s.lootStash, [containerId]: [...items] } })),
+    openStagedLoot: (containerId) => set({ lootOpenId: containerId }),
+    closeLoot: () => set({ lootOpenId: null }),
+    takeLootIndex: (containerId, index) => {
+      const s = get();
+      const items = s.lootStash[containerId];
+      const entry = items?.[index];
+      if (!entry) return;
+      if (!s.addItem(entry.itemId, entry.qty, true)) {
+        s.addToast('Pack full — no room for that.');
+        return;
+      }
+      s.questEvent('collect', entry.itemId, entry.qty);
+      const rest = items.filter((_, i) => i !== index);
+      if (rest.length === 0) {
+        const stash = { ...s.lootStash };
+        delete stash[containerId];
+        set({ lootStash: stash, lootOpenId: null });
+        getGame()?.completeContainerLoot(containerId);
+      } else {
+        set({ lootStash: { ...s.lootStash, [containerId]: rest } });
+      }
+    },
+    takeAllLoot: (containerId) => {
+      let guard = 0;
+      while ((get().lootStash[containerId]?.length ?? 0) > 0 && guard++ < 40) {
+        const before = get().lootStash[containerId].length;
+        get().takeLootIndex(containerId, 0);
+        if ((get().lootStash[containerId]?.length ?? 0) === before) break; // pack full
+      }
+    },
 
     addToast: (text) => {
       const id = toastCounter++;

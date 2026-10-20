@@ -302,7 +302,17 @@ export class Game {
 
     // global edge triggers (work even while the world is paused)
     if (input.pause && s.screen === 'game' && !s.dead && !this.cutscene) {
-      this.setPaused(!s.paused);
+      // Esc closes the loot panel first; it doesn't open the pause menu
+      if (s.lootOpenId != null) {
+        useGameStore.getState().closeLoot();
+      } else {
+        this.setPaused(!s.paused);
+      }
+      sfx.play('ui', { volume: 0.4 });
+    }
+    if (input.interact && s.lootOpenId != null) {
+      // E toggles the loot panel shut (world is paused, so simulate never sees it)
+      useGameStore.getState().closeLoot();
       sfx.play('ui', { volume: 0.4 });
     }
     if (input.phone && s.screen === 'game' && !s.dead && !s.dialogue && !this.cutscene) {
@@ -338,6 +348,7 @@ export class Game {
       s.phoneOpen ||
       s.backpackOpen ||
       s.sleepOpen ||
+      s.lootOpenId != null ||
       s.dead ||
       s.screen !== 'game';
 
@@ -361,6 +372,7 @@ export class Game {
       }
     }
     this.world?.update(dt, this.elapsed);
+    this.interact?.update(dt, this.elapsed);
 
     this.renderer?.render(this.scene!, this.camera!);
     resetEdgeTriggers();
@@ -461,6 +473,14 @@ export class Game {
         s.questEvent('reach', step.target, 1);
       }
     }
+  }
+
+  /** Called by the store when a container's staged loot is fully taken. */
+  completeContainerLoot(containerId: string): void {
+    this.interact?.setContainerEmptied(containerId);
+    const s = useGameStore.getState();
+    s.addToast('Container emptied.');
+    void s.autosave();
   }
 
   private onHuskKilled(h: Husk): void {
@@ -599,7 +619,8 @@ export class Game {
       s.dialogue == null &&
       !s.phoneOpen &&
       !s.backpackOpen &&
-      !s.sleepOpen
+      !s.sleepOpen &&
+      s.lootOpenId == null
     ) {
       // lock lost without Esc (alt-tab, click-out) — pause the game
       this.setPaused(true);

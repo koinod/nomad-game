@@ -538,3 +538,10 @@ Follow the design plan process from the frontend-design skill before writing any
 **Stage 2 (post-v1 roadmap, not this build):** after reaching an ending, the world evolves — modeled on Far Cry 5 → New Dawn and Terraria's hardmode/secondary overworld. A completed run unlocks an evolved overworld state (new threats, shifted factions, new loot tables) rather than just NG+.
 
 **Shipped 2026-10-19 (improvement push v0.1.1):** WASD inversion fix, sprint discoverability + mobile RUN toggle, locomotion animation (bob/lean/strafe roll/joint pivots/idle breathing), melee swing + ranged recoil arm animation, speed bump (walk 4.9 / sprint 8.8), real-time shadows + ACES tone mapping + grass tufts, loot summary toasts, standalone backpack overlay (I key, dead-phone-proof) with search/organize/drop/field crafting, Skyrim-style sleep dialog (1/2/4/8h, enemy-blocked, well-rested buff), husk clothing variation + searchable corpses with zone-tied loot tables.
+
+**Phased roadmap (Ian, 2026-10-19 — supersedes milestone order for prioritization):**
+- Phase 1 — Game feel: movement overhaul, combat, UI, visible weapons/loot on ground, loot preview on containers.
+- Phase 2 — Core survival loop: crafting, base building, survivor recruitment, vehicles, skill upgrades, satphone/radio.
+- Phase 3 — World depth: six factions fully interactable, story improvements, map quality bar = RDR2 or better.
+- Phase 4 — The road to D.C.: mainland + D.C. Exclusion Zone at ~1/10th real-world distance scale.
+- Stage 2 (post-launch): New Dawn-like evolved overworld after reaching an ending.
