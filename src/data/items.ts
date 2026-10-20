@@ -132,6 +132,10 @@ export const ITEMS: Record<string, ItemDef> = {
     id: 'car_battery', name: 'Car battery', category: 'material', weight: 7.0, slots: 2, stack: 1,
     desc: 'Holds a charge. Vehicles and bases both want these.',
   },
+  armor_plate: {
+    id: 'armor_plate', name: 'Armor plate', category: 'material', weight: 4.0, slots: 2, stack: 2,
+    desc: 'Cut steel plate, drilled for bolting. Vehicle armor work.',
+  },
   torch: {
     id: 'torch', name: 'Torch', category: 'tool', weight: 0.4, slots: 1, stack: 2,
     desc: 'Cloth-wrapped branch, soaked in fuel. Light for the dark places.',
@@ -306,6 +310,7 @@ export const HUSK_LOOT: Record<string, HuskLootEntry[]> = {
     { id: 'scrap', min: 1, max: 3, chance: 0.3 },
     { id: 'cloth', min: 1, max: 2, chance: 0.25 },
     { id: 'ammo_9mm', min: 2, max: 5, chance: 0.12 },
+    { id: 'armor_plate', min: 1, max: 1, chance: 0.05 },
   ],
   relay: [
     { id: 'wire', min: 1, max: 3, chance: 0.4 },
@@ -449,6 +454,11 @@ export const STATION_RECIPES: Record<string, FieldRecipe> = {
     components: [{ itemId: 'scrap', qty: 2 }, { itemId: 'wire', qty: 1 }, { itemId: 'chemicals', qty: 1 }],
     resultId: 'car_battery', resultQty: 1,
   },
+  r_armor_plate: {
+    id: 'r_armor_plate', name: 'Armor plate', station: 'industrial',
+    components: [{ itemId: 'scrap', qty: 3 }, { itemId: 'gun_parts', qty: 1 }],
+    resultId: 'armor_plate', resultQty: 1,
+  },
 };
 
 export const BASE_CARRY_KG = 20;
@@ -542,6 +552,8 @@ export const FURNITURE_LOOT: Record<string, Record<'camp' | 'suburban', HuskLoot
       { id: 'scrap', min: 2, max: 4, chance: 0.85 },
       { id: 'wire', min: 1, max: 3, chance: 0.6 },
       { id: 'fire_starter', min: 1, max: 1, chance: 0.25 },
+      { id: 'engine_part', min: 1, max: 1, chance: 0.2 },
+      { id: 'armor_plate', min: 1, max: 1, chance: 0.08 },
     ],
   },
 };
