@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { makeFbm, makeNoise2D, mulberry32, clamp, lerp, smoothstep } from './rng';
 import { buildHouses, houseFootprints, type HouseResult } from './Houses';
 import { buildPoiBuildings, poiFootprints, type PoiBuildResult } from './PoiBuildings';
+import { airbaseFootprints, buildAirbase } from './Airbase';
 import type { BiomeId } from './Game';
 import type { StationId } from '../data/items';
 import type { Collider } from './Colliders';
@@ -229,6 +230,16 @@ export class World {
       this.poiPositions,
       (x, z) => heightAt(x, z),
     );
+    // AIRBASE wave: the depot + airbase complex (and the carrier) merge
+    // into the same result — Game consumes one collider/floor/loot set
+    {
+      const ab = buildAirbase(this.scene, this.poiPositions, (x, z) => heightAt(x, z));
+      this.poiBuildings.group.add(ab.group);
+      this.poiBuildings.colliders.push(...ab.colliders);
+      this.poiBuildings.floors.push(...ab.floors);
+      this.poiBuildings.containers.push(...ab.containers);
+      this.poiBuildings.roofs.push(...ab.roofs);
+    }
     this.buildStations();
     this.buildCampfires();
     this.buildWreck();
@@ -355,7 +366,11 @@ export class World {
   /** Flatten a terrain pad under each house footprint (corners measured on
    *  raw terrain before any pad exists). */
   private setupHousePads(): void {
-    const footprints = [...houseFootprints(this.poiPositions), ...poiFootprints(this.poiPositions)];
+    const footprints = [
+      ...houseFootprints(this.poiPositions),
+      ...poiFootprints(this.poiPositions),
+      ...airbaseFootprints(this.poiPositions),
+    ];
     const pads = footprints.map((f) => {
       const corners = [
         heightAt(f.cx - f.hw, f.cz - f.hd),
@@ -704,6 +719,9 @@ export class World {
     place('chemistry', rx + 5, rz + 6, 'chem');
     const [mx, mz] = this.poi('marina');
     place('industrial', mx + 8, mz - 4, 'shop');
+    // the depot's Machine Shop: the fleet's home bay gets the real station
+    const [ax, az] = this.poi('airbase');
+    place('industrial', ax - 38, az + 24, 'shop');
   }
 
   private buildWreck(): void {
