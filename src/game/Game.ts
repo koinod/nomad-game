@@ -965,7 +965,7 @@ export class Game {
         const killed = husks.damageInRadius(x, z, r, dmg);
         if (killed > 0) {
           sfx.play('hit', { volume: 0.6 });
-          this.requestHitstop(60);
+          this.requestHitstop(0.06);
         }
         husks.emitNoise(x, z, 20);
       },
@@ -977,7 +977,13 @@ export class Game {
       time: this.elapsed,
     });
     const pos = v.group.position;
-    player.driveUpdate(dt, playerCtx, pos.x, pos.y, pos.z, v.def.length * 0.9 + 4);
+    player.driveUpdate(dt, playerCtx, pos.x, pos.y, pos.z, v.def.length * 0.9 + 4, {
+      kind: v.def.kind,
+      id: v.def.id,
+      length: v.def.length,
+      width: v.def.width,
+      heading: v.heading,
+    });
     // Driver XP: clean miles count — a collision resets the streak
     if (v.condition < condBefore - 0.001) {
       this.cleanMeters = 0;

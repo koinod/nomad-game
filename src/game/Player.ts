@@ -707,14 +707,63 @@ export class Player {
    * Driving rig: the player rides the vehicle — position glued to it, body
    * hidden, chase camera with free look. Call instead of update() while driving.
    */
-  driveUpdate(dt: number, ctx: PlayerCtx, tx: number, ty: number, tz: number, camDist: number): void {
+  driveUpdate(
+    dt: number,
+    ctx: PlayerCtx,
+    tx: number,
+    ty: number,
+    tz: number,
+    camDist: number,
+    seat?: { kind: string; id: string; length: number; width: number; heading: number },
+  ): void {
     if (this.viewModel.parent === ctx.camera) ctx.camera.remove(this.viewModel);
     this.viewModel.visible = false;
     this.swingTrail.visible = false;
-    this.group.visible = false;
     this.pos.x = tx;
     this.pos.z = tz;
     this.pos.y = ty;
+    // the driver is IN the vehicle: visible and seated in third person,
+    // hidden in first person (you ARE the driver)
+    if (seat && !this.firstPerson) {
+      this.group.visible = true;
+      const W = seat.width;
+      const L = seat.length;
+      let lx = 0;
+      let lz = 0;
+      let gy = 0; // group-origin height offset (feet), per vehicle
+      let armReach = -0.55;
+      switch (seat.kind) {
+        case 'bike':
+        case 'moto':
+          lz = -0.3; gy = 0.18; armReach = -0.7;
+          break;
+        case 'atv':
+          lz = -0.05; gy = 0.24; armReach = -0.65;
+          break;
+        case 'skiff':
+          lx = 0.3; lz = -0.6; gy = -0.22;
+          break;
+        default: {
+          lx = W * 0.21; // driver's seat, left-hand drive (+X = vehicle left)
+          const cabForward = seat.id === 'van' || seat.id === 'boxtruck' || seat.id === 'semi' || seat.id === 'apc';
+          lz = cabForward ? L * 0.24 : L * 0.03;
+          gy = seat.id === 'semi' ? 0.5 : seat.id === 'boxtruck' || seat.id === 'apc' ? 0.32 : seat.id === 'van' ? 0.22 : -0.02;
+        }
+      }
+      const c = Math.cos(seat.heading);
+      const s = Math.sin(seat.heading);
+      this.group.position.set(tx + lx * c + lz * s, ty + gy, tz - lx * s + lz * c);
+      this.group.rotation.y = seat.heading;
+      // seated pose: thighs forward, hands to the wheel/bars
+      this.legL.rotation.x = -1.25;
+      this.legR.rotation.x = -1.25;
+      this.armL.rotation.x = armReach;
+      this.armR.rotation.x = armReach;
+      this.armL.rotation.z = 0.08;
+      this.armR.rotation.z = -0.08;
+    } else {
+      this.group.visible = false;
+    }
     const [ldxRaw, ldyRaw] = consumeLook();
     const ldx = clamp(ldxRaw, -90, 90);
     const ldy = clamp(ldyRaw, -90, 90);
@@ -750,6 +799,13 @@ export class Player {
   /** Restore the on-foot body after exiting a vehicle. */
   endDrive(): void {
     this.group.visible = true;
+    // stand back up: clear the seated pose
+    this.legL.rotation.x = 0;
+    this.legR.rotation.x = 0;
+    this.armL.rotation.x = 0;
+    this.armR.rotation.x = 0;
+    this.armL.rotation.z = 0;
+    this.armR.rotation.z = 0;
   }
 
   /** Vehicles drive from the chase camera: force the mode from outside. */

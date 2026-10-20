@@ -48,6 +48,10 @@ export interface Vehicle {
   wheelPivots: THREE.Object3D[];
   steerVis: number;
   bobT: number;
+  steerAngle: number; // current front-wheel angle (rad), the bicycle model's input
+  wheelR: number; // rolling radius for wheel spin
+  bodyPitch: number; // smoothed weight-transfer pitch (accel/brake)
+  bodyRoll: number; // smoothed lateral lean (cornering)
 }
 
 export interface DriveEnv {
@@ -104,11 +108,30 @@ function buildCarBody(g: THREE.Group, def: VehicleDef, v: Vehicle): void {
     nose.rotation.x = -0.35;
     box(g, 0.9, 0.18, 0.9, mat(0x2e3238), 0, 2.05, 0.4); // roof hatch
   } else if (def.id === 'pickup' || def.id === 'f250') {
+    // a real pickup silhouette: hood line LOW, cab RAISED with glass + roof,
+    // and an OPEN bed (floor + walls), not a solid slab — the old flat boxes
+    // read as a bench from every angle.
     const tall = def.id === 'f250' ? 0.18 : 0;
-    box(g, W, 0.55 + tall, L * 0.42, body, 0, 0.62 + tall / 2, L * 0.2);
-    box(g, W, 0.5, L * 0.4, mat(0x2e3238, 0.9, 0), 0, 0.62 + tall / 2, -L * 0.24); // bed
-    box(g, W, 0.5, 0.1, body, 0, 0.95 + tall / 2, -L * 0.44); // tailgate
-    box(g, W * 0.92, 0.45, 0.08, glass(), 0, 0.78 + tall / 2, L * 0.405);
+    const dark = mat(0x2e3238, 0.9, 0);
+    box(g, W, 0.42, L, body, 0, 0.52, 0); // frame/lower body
+    box(g, W * 0.96, 0.34, L * 0.26, body, 0, 0.88 + tall * 0.3, L * 0.36); // hood
+    box(g, W * 0.98, 0.52, L * 0.31, body, 0, 0.86 + tall * 0.3, L * 0.1); // cab lower
+    box(g, W * 0.93, 0.44, L * 0.28, glass(), 0, 1.3 + tall * 0.6, L * 0.1); // glass band
+    box(g, W * 0.97, 0.09, L * 0.32, body, 0, 1.56 + tall * 0.6, L * 0.1); // roof
+    // open bed: floor + two side walls + front wall + tailgate
+    box(g, W * 0.94, 0.07, L * 0.4, dark, 0, 0.76, -L * 0.27);
+    box(g, 0.09, 0.55, L * 0.42, body, -(W / 2 - 0.045), 1.02 + tall * 0.3, -L * 0.27);
+    box(g, 0.09, 0.55, L * 0.42, body, W / 2 - 0.045, 1.02 + tall * 0.3, -L * 0.27);
+    box(g, W, 0.55, 0.08, body, 0, 1.02 + tall * 0.3, -L * 0.065); // bed front wall
+    box(g, W, 0.55, 0.07, body, 0, 1.02 + tall * 0.3, -L * 0.475); // tailgate
+    // bumpers, lights, mirrors
+    box(g, W, 0.22, 0.14, dark, 0, 0.42, L * 0.52);
+    box(g, W, 0.22, 0.14, dark, 0, 0.42, -L * 0.52);
+    const lamp = mat(0xd8dcc8, 0.3, 0.1);
+    box(g, 0.34, 0.13, 0.05, lamp, -W * 0.32, 0.86 + tall * 0.3, L * 0.5);
+    box(g, 0.34, 0.13, 0.05, lamp, W * 0.32, 0.86 + tall * 0.3, L * 0.5);
+    box(g, 0.07, 0.13, 0.1, dark, -(W / 2 + 0.05), 1.32 + tall * 0.6, L * 0.22);
+    box(g, 0.07, 0.13, 0.1, dark, W / 2 + 0.05, 1.32 + tall * 0.6, L * 0.22);
   } else if (def.id === 'bronco') {
     box(g, W, 0.6, L, body, 0, 0.62, 0);
     box(g, W * 0.96, 0.62, L * 0.55, body, 0, 1.2, -L * 0.12);
@@ -130,6 +153,7 @@ function buildCarBody(g: THREE.Group, def: VehicleDef, v: Vehicle): void {
   }
   // wheels
   const wr = def.id === 'f250' ? 0.44 : def.id === 'semi' || def.id === 'boxtruck' || def.id === 'apc' ? 0.42 : 0.34;
+  v.wheelR = wr;
   const ww = def.id === 'apc' ? 0.3 : 0.24;
   const nAxle = def.id === 'semi' || def.id === 'apc' || def.id === 'boxtruck' ? 3 : 2;
   const axleZs = nAxle === 3 ? [L * 0.32, -L * 0.1, -L * 0.32] : [L * 0.32, -L * 0.32];
@@ -143,6 +167,7 @@ function buildCarBody(g: THREE.Group, def: VehicleDef, v: Vehicle): void {
 function buildBike(g: THREE.Group, def: VehicleDef, v: Vehicle): void {
   const body = mat(def.color, 0.5, 0.4);
   if (def.kind === 'atv') {
+    v.wheelR = 0.32;
     box(g, 1.0, 0.25, 1.9, body, 0, 0.62, 0);
     box(g, 0.5, 0.3, 0.6, mat(0x1e1e22), 0, 0.85, 0.1); // seat
     box(g, 1.05, 0.06, 0.4, mat(0x2e3238), 0, 0.78, 0.85); // front rack
@@ -154,6 +179,7 @@ function buildBike(g: THREE.Group, def: VehicleDef, v: Vehicle): void {
   }
   // two-wheelers
   const wr = def.kind === 'moto' ? 0.36 : 0.32;
+  v.wheelR = wr;
   box(g, 0.3, 0.25, 1.2, body, 0, 0.72, 0.05); // tank/frame
   box(g, 0.42, 0.12, 0.5, mat(0x1e1e22), 0, 0.92, -0.35); // seat
   if (def.kind === 'moto') {
@@ -194,6 +220,10 @@ function makeVehicle(def: VehicleDef, x: number, z: number, heading: number, gro
     wheelPivots: [],
     steerVis: 0,
     bobT: Math.random() * 10,
+    steerAngle: 0,
+    wheelR: 0.35,
+    bodyPitch: 0,
+    bodyRoll: 0,
   };
   if (def.kind === 'skiff') buildSkiff(g, def);
   else if (def.kind === 'bike' || def.kind === 'moto' || def.kind === 'atv') buildBike(g, def, v);
@@ -266,87 +296,164 @@ export class VehicleManager {
   }
 
   /** Arcade drive step for one vehicle. Returns the driven vehicle. */
+  /**
+   * Bicycle-model drive: the front wheels carry a real steer angle, the car
+   * rotates about its REAR AXLE (the true pivot), and speed comes from a
+   * power curve + drag instead of a lerp to target. Steering direction:
+   * heading θ maps +Z→(sinθ, cosθ), so increasing θ turns LEFT — a right
+   * steer (input +1) must decrease θ.
+   */
   drive(dt: number, v: Vehicle, throttle: number, steer: number, env: DriveEnv): void {
     const def = v.def;
     const pos = v.group.position;
-    const h = env.groundY(pos.x, pos.z);
-    const inWater = h < -0.4;
-    let th = clamp(throttle, -1, 1);
-    if (def.water) {
-      if (h > 0.4) th = 0; // beached — drag it in or push it off
-      else th *= 1; // water only
-    } else if (inWater) {
-      th *= 0.15; // land vehicles bog in the drink
-    }
-    const condF = 0.45 + 0.55 * v.condition;
-    const topF = def.topSpeed * condF;
-    const topR = def.topSpeed * 0.32;
-    const hasFuel = v.fuel > 0.05;
-    const engine = hasFuel ? th : 0;
-    const target = engine >= 0 ? engine * topF : engine * topR;
-    const accelRate = topF / 3.2;
-    const brakeRate = topF / 1.4;
-    const d = target - v.speed;
-    v.speed += clamp(d, -brakeRate * dt, accelRate * dt);
-    // drag when coasting
-    if (Math.abs(engine) < 0.05) v.speed *= Math.max(0, 1 - 0.8 * dt);
-    // steering: bite scales with speed
+    const groundHere = env.groundY(pos.x, pos.z);
     const speedRatio = clamp(Math.abs(v.speed) / Math.max(def.topSpeed, 1), 0, 1);
-    const steerRate = 2.0 * clamp(speedRatio * 2.2, 0, 1);
-    v.heading += steer * steerRate * dt * (v.speed < -0.2 ? -1 : 1);
-    v.steerVis = v.steerVis + (steer * 0.45 - v.steerVis) * Math.min(1, dt * 8);
+    const hasFuel = v.fuel > 0.05;
+    const condF = 0.45 + 0.55 * v.condition;
+
+    // ---------- water: rudder model (boats pivot midships, steer = rudder) ----------
+    if (def.water) {
+      let th = clamp(throttle, -1, 1);
+      if (groundHere > 0.4) th = 0; // beached
+      const engine = hasFuel ? th : 0;
+      const topF = def.topSpeed * condF;
+      const target = engine >= 0 ? engine * topF : engine * topF * 0.4;
+      v.speed += clamp(target - v.speed, -topF * 0.5 * dt, topF * 0.35 * dt);
+      if (Math.abs(engine) < 0.05) v.speed *= Math.max(0, 1 - 0.5 * dt);
+      const steerTarget = clamp(steer, -1, 1) * 0.5;
+      v.steerAngle += clamp(steerTarget - v.steerAngle, -1.8 * dt, 1.8 * dt);
+      v.heading -= v.steerAngle * clamp(v.speed / 6, -1, 1) * dt * 1.4;
+      pos.x += Math.sin(v.heading) * v.speed * dt;
+      pos.z += Math.cos(v.heading) * v.speed * dt;
+      pos.y = 0.12 + Math.sin(env.time * 1.6 + v.bobT) * 0.06;
+      v.group.rotation.set(
+        Math.sin(env.time * 1.3 + v.bobT) * 0.02,
+        v.heading,
+        Math.cos(env.time * 1.1 + v.bobT) * 0.025,
+      );
+      this.finishDriveStep(dt, v, env, engine, speedRatio);
+      return;
+    }
+
+    // ---------- land: bicycle model ----------
+    const inWater = groundHere < -0.4;
+    const onSand = groundHere < 0.9; // beach band — soft surface, real drag
+    const wb = def.kind === 'car' ? def.length * 0.64 : 1.4; // wheelbase (axles ±L·0.32 / ±0.7)
+
+    // steer angle: ramps toward the input, max angle shrinks with speed
+    const maxSteerBase = def.kind === 'car' ? 0.58 : 0.72; // ~33° cars, ~41° bikes/atv
+    const maxSteer = maxSteerBase / (1 + speedRatio * 2.4);
+    const steerTarget = clamp(steer, -1, 1) * maxSteer;
+    const steerRate = steerTarget === 0 || Math.sign(steerTarget) !== Math.sign(v.steerAngle) ? 3.4 : 2.6;
+    v.steerAngle += clamp(steerTarget - v.steerAngle, -steerRate * dt, steerRate * dt);
+    v.steerVis = v.steerAngle;
+
+    // longitudinal: power curve launch, real brakes, aero + rolling drag
+    const surfaceTop = onSand ? 0.78 : 1;
+    const topF = def.topSpeed * condF * surfaceTop * (inWater ? 0.3 : 1);
+    const topR = def.topSpeed * 0.32 * condF;
+    const th = hasFuel ? clamp(throttle, -1, 1) : 0;
+    const accelBefore = v.speed;
+    if (th > 0.02) {
+      const power = clamp(1 - v.speed / Math.max(topF, 1), 0.22, 1); // strong launch, tapering top end
+      v.speed += th * (topF / 2.4) * power * (onSand ? 0.8 : 1) * dt;
+    } else if (th < -0.02) {
+      if (v.speed > 0.4) {
+        v.speed -= (topF / 1.05) * dt; // brakes
+      } else {
+        const power = clamp(1 + v.speed / Math.max(topR, 1), 0.3, 1);
+        v.speed += th * (topR / 1.6) * power * dt; // reverse
+      }
+    }
+    if (v.speed > topF) v.speed = Math.max(topF, v.speed - topF * 0.8 * dt);
+    if (v.speed < -topR) v.speed = -topR;
+    // drag: aero (proportional) + rolling resistance (constant pull to 0)
+    v.speed -= v.speed * (inWater ? 1.4 : 0.32) * dt;
+    if (Math.abs(th) < 0.02) {
+      const roll = (onSand ? 1.1 : 0.55) * dt;
+      v.speed = Math.abs(v.speed) <= roll ? 0 : v.speed - Math.sign(v.speed) * roll;
+      v.speed -= v.speed * 0.25 * dt; // engine braking
+    }
+    const accel = dt > 0 ? (v.speed - accelBefore) / dt : 0;
+
+    // yaw from the bicycle model; position integrates from the REAR AXLE,
+    // so the nose swings wide and the tail stays planted — the real pivot.
+    const yawRate = wb > 0 ? (v.speed / wb) * Math.tan(v.steerAngle) : 0;
+    const fx0 = Math.sin(v.heading);
+    const fz0 = Math.cos(v.heading);
+    const rearX = pos.x - fx0 * (wb / 2);
+    const rearZ = pos.z - fz0 * (wb / 2);
+    v.heading -= yawRate * dt; // minus: right steer decreases θ (see header)
     const fx = Math.sin(v.heading);
     const fz = Math.cos(v.heading);
-    pos.x += fx * v.speed * dt;
-    pos.z += fz * v.speed * dt;
-    // body vs. buildings
+    const newRearX = rearX + fx * v.speed * dt;
+    const newRearZ = rearZ + fz * v.speed * dt;
+    pos.x = newRearX + fx * (wb / 2);
+    pos.z = newRearZ + fz * (wb / 2);
+
+    // body vs. buildings (center-circle, as before)
     const radius = Math.max(def.length, def.width) / 2 * 0.75;
     const p3 = { x: pos.x, z: pos.z };
     const before = { x: pos.x, z: pos.z };
     resolveCollisions(p3, radius, env.colliders);
-    if (Math.hypot(p3.x - before.x, p3.z - before.z) > 0.001 && Math.abs(v.speed) > 5) {
-      // clipped something solid at speed: damage, slow down
+    const clipped = Math.hypot(p3.x - before.x, p3.z - before.z) > 0.001;
+    if (clipped && Math.abs(v.speed) > 5) {
       v.condition = Math.max(0, v.condition - 0.02);
       env.noise(pos.x, pos.z, 18);
     }
     pos.x = p3.x;
     pos.z = p3.z;
-    if (Math.hypot(p3.x - before.x, p3.z - before.z) > 0.001) {
-      v.speed *= 0.35;
-    }
-    // terrain follow
-    if (def.water) {
-      pos.y = 0.12 + Math.sin(env.time * 1.6 + v.bobT) * 0.06;
-      v.group.rotation.x = Math.sin(env.time * 1.3 + v.bobT) * 0.02;
-      v.group.rotation.z = Math.cos(env.time * 1.1 + v.bobT) * 0.025;
-    } else {
-      const gy = Math.max(env.groundY(pos.x, pos.z), -0.6);
-      pos.y = gy + (def.kind === 'atv' || def.kind === 'bike' || def.kind === 'moto' ? 0.05 : 0.02);
-      const ahead = env.groundY(pos.x + fx * 1.5, pos.z + fz * 1.5);
-      const behind = env.groundY(pos.x - fx * 1.5, pos.z - fz * 1.5);
-      const side = env.groundY(pos.x + fz * 1.2, pos.z - fx * 1.2);
-      v.group.rotation.x = clamp(Math.atan2(behind - ahead, 3) * 0.7, -0.3, 0.3);
-      v.group.rotation.z = clamp(Math.atan2(gy - side, 2.4) * 0.7, -0.3, 0.3);
-    }
+    if (clipped) v.speed *= 0.35;
+
+    // terrain follow + weight transfer (pitch under accel/brake, lean in turns)
+    const gy = Math.max(env.groundY(pos.x, pos.z), -0.6);
+    pos.y = gy + (def.kind === 'atv' || def.kind === 'bike' || def.kind === 'moto' ? 0.05 : 0.02);
+    const ahead = env.groundY(pos.x + fx * 1.5, pos.z + fz * 1.5);
+    const behind = env.groundY(pos.x - fx * 1.5, pos.z - fz * 1.5);
+    const side = env.groundY(pos.x + fz * 1.2, pos.z - fx * 1.2);
+    const terrainPitch = clamp(Math.atan2(behind - ahead, 3) * 0.7, -0.3, 0.3);
+    const terrainRoll = clamp(Math.atan2(gy - side, 2.4) * 0.7, -0.3, 0.3);
+    const pitchTarget = terrainPitch + clamp(-accel * 0.006, -0.05, 0.07); // nose dives on brake, lifts on launch
+    const isBike = def.kind === 'bike' || def.kind === 'moto' || def.kind === 'atv';
+    const rollTarget = terrainRoll + (isBike
+      ? v.steerAngle * clamp(Math.abs(v.speed) / 8, 0, 1) * 0.5 * Math.sign(v.speed || 1) // bikes lean IN
+      : -v.steerAngle * speedRatio * 0.055); // cars roll OUT, a little
+    const smooth = Math.min(1, dt * 7);
+    v.bodyPitch += (pitchTarget - v.bodyPitch) * smooth;
+    v.bodyRoll += (rollTarget - v.bodyRoll) * smooth;
+    v.group.rotation.x = v.bodyPitch;
+    v.group.rotation.z = v.bodyRoll;
     v.group.rotation.y = v.heading;
-    // wheels
-    const wr = 0.35;
-    for (const w of v.wheelSpin) w.rotation.x += (v.speed / wr) * dt;
-    for (const p of v.wheelPivots) p.rotation.y = v.steerVis;
-    // fuel + wear
-    if (Math.abs(engine) > 0.05 && hasFuel) {
-      v.fuel = Math.max(0, v.fuel - 0.18 * def.burnClass * speedRatio * dt);
+
+    // wheels: spin by true rolling radius; front pivots show the real angle
+    for (const w of v.wheelSpin) w.rotation.x += (v.speed / v.wheelR) * dt;
+    for (const p of v.wheelPivots) p.rotation.y = -v.steerAngle;
+
+    this.finishDriveStep(dt, v, env, th, speedRatio);
+  }
+
+  /** Shared tail of a drive step: fuel, wear, ramming, engine noise. */
+  private finishDriveStep(dt: number, v: Vehicle, env: DriveEnv, engine: number, speedRatio: number): void {
+    const def = v.def;
+    const pos = v.group.position;
+    if (Math.abs(engine) > 0.05 && v.fuel > 0) {
+      v.fuel = Math.max(0, v.fuel - 0.18 * def.burnClass * Math.max(speedRatio, 0.15) * dt);
     }
-    v.condition = Math.max(0, v.condition - (0.02 / 60) * (0.3 + speedRatio) * dt);
-    // ramming: husks in front of a fast vehicle take damage
+    if (!def.water) {
+      v.condition = Math.max(0, v.condition - (0.02 / 60) * (0.3 + speedRatio) * dt);
+    }
     if (Math.abs(v.speed) > 4) {
+      const fx = Math.sin(v.heading);
+      const fz = Math.cos(v.heading);
       env.ram(pos.x + fx * (def.length / 2), pos.z + fz * (def.length / 2), 1.2 + def.width / 2, Math.abs(v.speed) * 2.2);
     }
-    // driving noise
     (v as { noiseT?: number }).noiseT = ((v as { noiseT?: number }).noiseT ?? 0) + dt;
     if ((v as { noiseT?: number }).noiseT! > 0.3) {
       (v as { noiseT?: number }).noiseT = 0;
       env.noise(pos.x, pos.z, Math.abs(v.speed) > 0.5 ? def.noiseDrive : def.noiseDrive * 0.55);
+    }
+    if (def.water) {
+      for (const w of v.wheelSpin) w.rotation.x += (v.speed / v.wheelR) * dt;
     }
   }
 }

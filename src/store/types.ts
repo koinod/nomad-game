@@ -144,6 +144,16 @@ export interface WorldDiff {
   cleared: string[]; // one-shot interactable ids used (switches etc.)
 }
 
+export interface VehicleSave {
+  defId: string;
+  x: number;
+  y: number;
+  z: number;
+  heading: number;
+  fuel: number;
+  condition: number;
+}
+
 export interface SaveSnapshot {
   version: 1;
   savedAt: number;
