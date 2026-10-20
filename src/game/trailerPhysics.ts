@@ -79,3 +79,18 @@ export function packDeckSlots(
   }
   return centers;
 }
+
+/**
+ * Sway damping for the tow solver: the geometric step can snap a
+ * trailer's heading around when the hitch jerks (a swerve, a bounce) —
+ * at road speed a real trailer answers with lag, not snaps. Rate-limit
+ * the heading correction; the limit tightens with tow speed. The
+ * caller re-derives the trailer position from the damped heading so
+ * the tongue stays pinned to the hitch.
+ */
+export function swayDampedHeading(prev: number, solved: number, towSpeed: number, dt: number): number {
+  const maxRate = clamp(2.6 - Math.abs(towSpeed) * 0.09, 0.9, 2.6);
+  const d = wrapAngle(solved - prev);
+  const maxStep = maxRate * Math.max(dt, 0);
+  return prev + clamp(d, -maxStep, maxStep);
+}

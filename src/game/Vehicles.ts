@@ -15,6 +15,10 @@ import {
 } from '../data/upgrades';
 import { box, chrome, darkTrim, glassTint, lampMat, loftMesh, mat, tailMat, tube } from './modelKit';
 import { buildStallion, applyStallionUpgrades } from './carModels';
+import {
+  cgHeightM, cornerRoll, effectiveSteerAngle, impactBounce, impactDamage,
+  understeerK, vehicleMassKg, weightTransferPitch,
+} from './drivePhysics';
 
 export { glassTint } from './modelKit';
 
@@ -129,6 +133,7 @@ export interface Vehicle {
   tiresFlat: number; // blown tires: drag + pull until replaced
   flatSide: 1 | -1; // which way a flat pulls
   blewTire: boolean; // set by drive() on a blowout, consumed by Game (toast)
+  wasClipped: boolean; // collision edge detection for impact damage
   colorPick: number; // semi paint variation index
   towedMassKg: number; // trailer + cargo mass, set by the trailer manager
   cargoCrates: number; // physical crates loaded (visual + mass)
@@ -1344,6 +1349,7 @@ function makeVehicle(def: VehicleDef, x: number, z: number, heading: number, gro
     tiresFlat: 0,
     flatSide: 1,
     blewTire: false,
+    wasClipped: false,
     colorPick: def.id === 'semi' ? Math.floor(Math.random() * SEMI_PAINTS.length) : 0,
     towedMassKg: 0,
     cargoCrates: 0,
@@ -1540,6 +1546,10 @@ export class VehicleManager {
     const steerRate = steerTarget === 0 || Math.sign(steerTarget) !== Math.sign(v.steerAngle) ? 3.4 : 2.6;
     v.steerAngle += clamp(steerTarget - v.steerAngle, -steerRate * dt, steerRate * dt);
     v.steerVis = v.steerAngle;
+    // grip saturation: the tires can't deliver full lock at speed
+    // (the wheel + steering wheel still show the commanded angle)
+    const effSteer = effectiveSteerAngle(v.steerAngle, speedRatio, understeerK(def));
+    const massKg = vehicleMassKg(def) + itemsWeightKg(v.storage);
 
     // longitudinal: power curve launch, real brakes, aero + rolling drag.
     // Load matters: a hitched trailer's mass (towedMassKg, set by the
@@ -1576,7 +1586,7 @@ export class VehicleManager {
 
     // yaw from the bicycle model; position integrates from the REAR AXLE,
     // so the nose swings wide and the tail stays planted — the real pivot.
-    const yawRate = wb > 0 ? (v.speed / wb) * Math.tan(v.steerAngle) : 0;
+    const yawRate = wb > 0 ? (v.speed / wb) * Math.tan(effSteer) : 0;
     const fx0 = Math.sin(v.heading);
     const fz0 = Math.cos(v.heading);
     const rearX = pos.x - fx0 * (wb / 2);
@@ -1603,24 +1613,36 @@ export class VehicleManager {
     const before = { x: pos.x, z: pos.z };
     resolveCollisions(p3, radius, env.colliders, pos.y);
     const clipped = Math.hypot(p3.x - before.x, p3.z - before.z) > 0.001;
-    if (clipped && Math.abs(v.speed) > 5) {
-      if (def.tracked) {
-        env.noise(pos.x, pos.z, 26); // the building loses; the tank doesn't notice
-      } else {
-        v.condition = Math.max(0, v.condition - 0.02 * collisionLossFactor(v.upgrades) * (def.armorMul ?? 1));
-        env.noise(pos.x, pos.z, 18);
-        // a hard hit on a worn vehicle can blow a tire (run-flats prevent it)
-        if (v.condition < 0.3 && v.tiresFlat < 2 && !v.upgrades.includes('run_flats') && Math.random() < 0.45) {
-          v.tiresFlat += 1;
-          v.flatSide = Math.random() < 0.5 ? 1 : -1;
-          v.blewTire = true;
-          env.noise(pos.x, pos.z, 30);
-        }
+    // IMPACT physics: damage lands once, on the impact edge, scaled by
+    // kinetic energy (speed², mass class) — scraping a wall bleeds
+    // speed but doesn't keep re-charging the repair bill. A hard hit
+    // bounces: light hulls ricochet, heavy hulls just stop.
+    const impactSpeed = Math.abs(v.speed);
+    let bounced = false;
+    if (clipped && impactSpeed > 5 && def.tracked) {
+      env.noise(pos.x, pos.z, 26); // the building loses; the tank doesn't notice
+    }
+    if (clipped && !v.wasClipped && impactSpeed > 5 && !def.tracked) {
+      const dmg = impactDamage(impactSpeed, massKg, def.armorMul ?? 1, collisionLossFactor(v.upgrades));
+      v.condition = Math.max(0, v.condition - dmg);
+      env.noise(pos.x, pos.z, 18);
+      // a hard hit on a worn vehicle can blow a tire (run-flats prevent it)
+      if (dmg > 0.07 && v.condition < 0.45 && v.tiresFlat < 2 && !v.upgrades.includes('run_flats')
+        && Math.random() < Math.min(0.7, dmg * 1.8)) {
+        v.tiresFlat += 1;
+        v.flatSide = Math.random() < 0.5 ? 1 : -1;
+        v.blewTire = true;
+        env.noise(pos.x, pos.z, 30);
+      }
+      if (impactSpeed >= 7) {
+        v.speed = -v.speed * impactBounce(massKg);
+        bounced = true;
       }
     }
+    v.wasClipped = clipped;
     pos.x = p3.x;
     pos.z = p3.z;
-    if (clipped) v.speed *= def.tracked ? 0.88 : 0.35;
+    if (clipped && !bounced) v.speed *= def.tracked ? 0.88 : 0.35;
 
     // SUSPENSION: sample the ground at all four wheel contact patches.
     // Body height, pitch, AND roll all come from the four corners — a
@@ -1649,11 +1671,12 @@ export class VehicleManager {
     const rightAvg = (hFR + hRR) / 2;
     const terrainPitch = clamp(Math.atan2(rearAvg - frontAvg, wb) * 0.9, -0.38, 0.38);
     const terrainRoll = clamp(Math.atan2(leftAvg - rightAvg, track) * 0.9, -0.38, 0.38);
-    const pitchTarget = terrainPitch + clamp(-accel * 0.005, -0.045, 0.06); // nose dives on brake, lifts on launch
+    const cgH = cgHeightM(def);
+    const pitchTarget = terrainPitch + weightTransferPitch(accel, cgH, wb); // weight transfer: dive on brake, squat on launch
     const leansIn = def.kind === 'bike' || def.kind === 'moto'; // NOT the ATV — four wheels roll like a car
     const rollTarget = terrainRoll + (leansIn
       ? v.steerAngle * clamp(Math.abs(v.speed) / 8, 0, 1) * 0.5 * Math.sign(v.speed || 1) // bikes lean IN
-      : -v.steerAngle * speedRatio * 0.05); // cars + ATV roll OUT, a little
+      : cornerRoll(yawRate, v.speed, cgH, track)); // cars + ATV roll OUT with lateral load
     const smooth = Math.min(1, dt * 7);
     v.bodyPitch += (pitchTarget - v.bodyPitch) * smooth;
     v.bodyRoll += (rollTarget - v.bodyRoll) * smooth;

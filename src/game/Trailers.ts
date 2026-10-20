@@ -9,7 +9,7 @@ import { clamp } from './rng';
 import {
   isDeckKind, trailerDef, type ModuleId, type TrailerDef,
 } from '../data/trailerData';
-import { pointAt, stepTrailer } from './trailerPhysics';
+import { pointAt, stepTrailer, swayDampedHeading } from './trailerPhysics';
 import {
   itemsWeightKg, stepDoors, type DoorAnim, type InteriorSpec, type Vehicle,
 } from './Vehicles';
@@ -642,9 +642,12 @@ export class TrailerManager {
         } else {
           const hitch = vehicles.hitchWorld(tow);
           const next = stepTrailer({ x: pos.x, z: pos.z, heading: t.heading }, hitch, tz, az, 1.15, tow.heading);
-          pos.x = next.x;
-          pos.z = next.z;
-          t.heading = next.heading;
+          // sway damping: the solved heading is rate-limited (tighter at
+          // speed) and the body re-pins to the hitch on the damped angle
+          const damped = swayDampedHeading(t.heading, next.heading, Math.abs(tow.speed), dt);
+          pos.x = hitch.x - Math.sin(damped) * tz;
+          pos.z = hitch.z - Math.cos(damped) * tz;
+          t.heading = damped;
           tow.towedMassKg = trailerMassKg(t, vehicles as { byId: (id: string) => Vehicle | null });
           // a moving trailer shoves husks aside at its axle line
           const moved = Math.hypot(pos.x - t.prevX, pos.z - t.prevZ);
