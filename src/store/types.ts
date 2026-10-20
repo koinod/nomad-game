@@ -135,6 +135,7 @@ export interface InvItem {
   itemId: string;
   qty: number;
   mods?: string[]; // attached mod itemIds (ranged weapons, per instance)
+  finish?: string; // wave 4: applied finish id (data/mods FINISHES), cosmetic
   loaded?: number; // rounds currently in the magazine (ranged weapons)
   condition?: number; // weapons: 0..100, undefined = pristine (wave 2 wear)
   jammed?: boolean; // weapons: action jammed — R works it clear

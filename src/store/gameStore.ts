@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { ITEMS, FIELD_RECIPES, STATION_RECIPES, STATION_LABEL } from '../data/items';
 import { PERKS as PERKS_ALL } from '../data/skills';
-import { MODS as MODS_ALL, magSizeOf } from '../data/mods';
+import { FINISHES, MODS as MODS_ALL, magSizeOf } from '../data/mods';
 import { UPGRADES as UPGRADE_DEFS } from '../data/upgrades';
 import { MODULE_DEFS } from '../data/trailerData';
 import { FACILITIES as FACILITY_DEFS, baseHeat, buildMinutes } from '../data/base';
@@ -200,6 +200,7 @@ interface GameState {
   repairWeapon: (uid: string) => void;
   disassemble: (uid: string) => void;
   attachMod: (weaponUid: string, modUid: string) => void;
+  applyFinish: (weaponUid: string, finishUid: string) => void;
   detachMod: (weaponUid: string, modId: string) => void;
   unequipSlot: (slot: keyof Equipped) => void;
   useItemUid: (uid: string) => void;
@@ -978,6 +979,39 @@ export const useGameStore = create<GameState>()((set, get) => {
       s.addItem(modId, 1, true);
       s.addToast(`Removed the ${MODS_ALL[modId]?.name ?? modId}.`);
       sfx.play('ui', { volume: 0.4 });
+    },
+
+    /** Wave 4: apply a finish kit to a weapon at the bench. The kit is
+     *  consumed; re-finishing replaces the old coat (the old kit is gone —
+     *  paint is paint). Purely cosmetic; the gun never shoots different. */
+    applyFinish: (weaponUid, finishUid) => {
+      const s = get();
+      if (s.nearStation !== 'workbench') {
+        s.addToast('Finishes are applied at a Weapons Bench.');
+        return;
+      }
+      const w = s.inventory.find((i) => i.uid === weaponUid);
+      const kit = s.inventory.find((i) => i.uid === finishUid);
+      const wdef = w ? ITEMS[w.itemId] : undefined;
+      const fdef = kit ? FINISHES[kit.itemId] : undefined;
+      if (!w || !kit || !wdef || !fdef) return;
+      if (wdef.category !== 'weapon-ranged' && wdef.category !== 'weapon-melee') {
+        s.addToast('Finishes go on weapons.');
+        return;
+      }
+      if (w.finish === fdef.id) {
+        s.addToast(`The ${wdef.name} already wears ${fdef.name}.`);
+        return;
+      }
+      s.removeItem(finishUid, 1);
+      set({
+        inventory: get().inventory.map((i) =>
+          i.uid === weaponUid ? { ...i, finish: fdef.id } : i,
+        ),
+      });
+      s.addToast(`Refinished the ${wdef.name}: ${fdef.name}.`);
+      s.addSkillXp('mechanics', 3);
+      sfx.play('craft', { volume: 0.5 });
     },
 
     unequipSlot: (slot) => {

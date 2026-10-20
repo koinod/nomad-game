@@ -46,6 +46,32 @@ export const MODS: Record<string, ModDef> = {
   },
 };
 
+// --------------------------------------------------------------- finishes ---
+// Wave 4: weapon finishes — lootable cosmetics applied at a Weapons Bench.
+// Pure data: the material rules themselves live in weaponMeshes.applyFinish
+// (metal surfaces take metal/rough/metalness; camo breaks up the rest).
+
+export interface FinishDef {
+  id: string; // also the inventory item id of the finish kit
+  name: string;
+  metal: number; // color metal surfaces (metalness >= 0.4) are refinished to
+  rough: number;
+  metalness: number;
+  /** Camo only: the two tones non-metal parts alternate between. */
+  camoTones?: [number, number];
+}
+
+export const FINISHES: Record<string, FinishDef> = {
+  finish_matte: { id: 'finish_matte', name: 'Matte Black', metal: 0x1b1d20, rough: 0.62, metalness: 0.35 },
+  finish_camo: { id: 'finish_camo', name: 'Marsh Camo', metal: 0x59603f, rough: 0.8, metalness: 0.15, camoTones: [0x59603f, 0x8a7a52] },
+  finish_rust: { id: 'finish_rust', name: 'Honest Rust', metal: 0x7a4a2a, rough: 0.95, metalness: 0.08 },
+  finish_worn: { id: 'finish_worn', name: 'Worn Steel', metal: 0x8f9296, rough: 0.48, metalness: 0.62 },
+};
+
+export function finishDef(id: string | undefined): FinishDef | undefined {
+  return id ? FINISHES[id] : undefined;
+}
+
 export function magSizeOf(baseMag: number, mods: readonly string[]): number {
   let m = baseMag;
   for (const id of mods) {

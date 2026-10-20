@@ -106,6 +106,7 @@ export class Player {
   private landDip = 0; // camera dip on hard landing, decays
   private handAnchor!: THREE.Group; // right-hand weapon mount
   private handItemId: string | null = null;
+  private handKey = ''; // itemId + finish — the hand mesh's build signature
   private smoothCamMinY = 0; // smoothed ground clearance — kills the hard-clamp snap
   private blockBlend = 0; // 0..1 block pose blend
   private swingTrail!: THREE.Mesh; // translucent arc that sells the swing
@@ -384,7 +385,15 @@ export class Player {
   private syncHandWeapon(): void {
     const s = useGameStore.getState();
     const want = activeHandItemId(s.equipped, s.inventory);
-    if (want === this.handItemId) return;
+    // wave 4: a refinished weapon rebuilds its mesh even when the item
+    // itself didn't change — the sync key carries the instance's finish
+    const activeInst = want
+      ? (s.equipped.melee ? s.inventory.find((i) => i.uid === s.equipped.melee) : undefined)
+        ?? (s.equipped.ranged ? s.inventory.find((i) => i.uid === s.equipped.ranged) : undefined)
+      : undefined;
+    const key = `${want ?? ''}|${activeInst?.finish ?? ''}`;
+    if (key === this.handKey) return;
+    this.handKey = key;
     this.handItemId = want;
     // a fresh weapon comes up at carry height: it takes its draw time to
     // be ready, and it cannot fire mid-draw
@@ -395,12 +404,12 @@ export class Player {
       while (anchor.children.length > 0) anchor.remove(anchor.children[0]);
     }
     if (want) {
-      const mesh = buildHandMesh(want);
+      const mesh = buildHandMesh(want, activeInst?.finish);
       // slight grip tilt so weapons read naturally in hand
       mesh.rotation.x = 0.15;
       this.handAnchor.add(mesh);
       // view-model variant points down the lens
-      const vm = buildHandMesh(want);
+      const vm = buildHandMesh(want, activeInst?.finish);
       vm.rotation.y = Math.PI; // hand meshes point +Z; the lens looks -Z
       this.vmAnchor.add(vm);
     }

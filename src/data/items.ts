@@ -16,7 +16,7 @@ export const ITEMS: Record<string, ItemDef> = {
   pistol: {
     id: 'pistol', name: '9mm pistol', category: 'weapon-ranged', weight: 1.1, slots: 2, stack: 1,
     desc: 'Old service pistol. Loud — everything hears it.', damage: 34, range: 45, ammoId: 'ammo_9mm',
-    magSize: 12, reloadSec: 1.4, modSlots: ['muzzle', 'magazine', 'underbarrel'],
+    magSize: 12, reloadSec: 1.4, modSlots: ['optic', 'muzzle', 'magazine', 'underbarrel'],
     fireMode: 'semi', recoil: 0.011, recoilDrift: 0.004, bloomPerShot: 0.16, bloomMax: 0.05, adsTime: 0.22, sway: 0.5,
   },
   ammo_9mm: {
@@ -210,14 +210,14 @@ export const ITEMS: Record<string, ItemDef> = {
     id: 'revolver', name: 'Revolver', category: 'weapon-ranged', weight: 1.0, slots: 2, stack: 1,
     desc: 'Six chambers of argument.', damage: 42, range: 40, ammoId: 'ammo_9mm',
     spread: 0.05, cooldown: 0.65, noiseRadius: 80,
-    magSize: 6, reloadSec: 2.0, modSlots: [],
+    magSize: 6, reloadSec: 2.0, modSlots: ['underbarrel'],
     fireMode: 'single', recoil: 0.02, recoilDrift: 0.006, bloomPerShot: 0.22, bloomMax: 0.05, adsTime: 0.25, sway: 0.55,
   },
   crossbow: {
     id: 'crossbow', name: 'Crossbow', category: 'weapon-ranged', weight: 2.4, slots: 3, stack: 1,
     desc: 'Whispers. Reloads like it means it.', damage: 60, range: 55, ammoId: 'bolts',
     spread: 0.015, cooldown: 1.6, noiseRadius: 12,
-    magSize: 1, reloadSec: 1.6, modSlots: [],
+    magSize: 1, reloadSec: 1.6, modSlots: ['optic'],
     fireMode: 'single', projectileSpeed: 55, recoil: 0.008, recoilDrift: 0.002, bloomPerShot: 0.3, bloomMax: 0.015, adsTime: 0.3, sway: 0.8,
   },
   smg: {
@@ -285,6 +285,23 @@ export const ITEMS: Record<string, ItemDef> = {
     id: 'laser_sight', name: 'Laser sight', category: 'mod', weight: 0.2, slots: 1, stack: 3,
     desc: 'Underbarrel laser: hip-fire tightens up.',
   },
+  // wave 4: weapon finishes — lootable cosmetics, applied at a Weapons Bench
+  finish_matte: {
+    id: 'finish_matte', name: 'Finish kit — Matte Black', category: 'mod', weight: 0.3, slots: 1, stack: 3,
+    desc: 'A bench refinish: deep matte black on every metal surface.',
+  },
+  finish_camo: {
+    id: 'finish_camo', name: 'Finish kit — Marsh Camo', category: 'mod', weight: 0.3, slots: 1, stack: 3,
+    desc: 'Olive and reed-tan, broken up by hand. The island\u2019s own colors.',
+  },
+  finish_rust: {
+    id: 'finish_rust', name: 'Finish kit — Honest Rust', category: 'mod', weight: 0.3, slots: 1, stack: 3,
+    desc: 'Pre-weathered. A gun that looks abandoned gets handled like it is.',
+  },
+  finish_worn: {
+    id: 'finish_worn', name: 'Finish kit — Worn Steel', category: 'mod', weight: 0.3, slots: 1, stack: 3,
+    desc: 'Bright edges, holster polish. The finish of a gun that gets used.',
+  },
   molotov: {
     id: 'molotov', name: 'Molotov', category: 'weapon-melee', weight: 0.5, slots: 1, stack: 3,
     desc: 'A bottle of bad decisions. Equip and left-click to throw.', damage: 0, thrown: { aoe: 4, dmg: 25, fuse: 0, fire: true },
@@ -351,6 +368,7 @@ export const HUSK_LOOT: Record<string, HuskLootEntry[]> = {
     { id: 'armor_plate', min: 1, max: 1, chance: 0.22 },
     { id: 'bandage', min: 1, max: 1, chance: 0.4 },
     { id: 'ammo_9mm', min: 4, max: 9, chance: 0.3 },
+    { id: 'finish_matte', min: 1, max: 1, chance: 0.12 },
   ],
   forest: [
     { id: 'cloth', min: 1, max: 2, chance: 0.6 },
@@ -367,6 +385,7 @@ export const HUSK_LOOT: Record<string, HuskLootEntry[]> = {
     { id: 'cloth', min: 1, max: 2, chance: 0.25 },
     { id: 'ammo_9mm', min: 2, max: 5, chance: 0.12 },
     { id: 'armor_plate', min: 1, max: 1, chance: 0.05 },
+    { id: 'finish_worn', min: 1, max: 1, chance: 0.06 },
   ],
   relay: [
     { id: 'wire', min: 1, max: 3, chance: 0.4 },
@@ -691,6 +710,7 @@ const FOOTPRINTS: Record<string, [number, number]> = {
   valuables: [1, 1], lockpick: [1, 1], phone: [1, 1], relay_part: [1, 1], beacon_cell: [1, 1],
   flare: [1, 1], fire_starter: [1, 1], gun_oil: [1, 1], cleaning_kit: [1, 1],
   reflex_sight: [1, 1], suppressor: [1, 1], extended_mag: [1, 1], foregrip: [1, 1], laser_sight: [1, 1],
+  finish_matte: [1, 1], finish_camo: [1, 1], finish_rust: [1, 1], finish_worn: [1, 1],
   // bulky goods
   fuel_can: [2, 2], tire: [2, 2], engine_part: [2, 2], armor_plate: [2, 2], tool_kit: [2, 2],
   car_battery: [2, 1], wood: [2, 1], torch: [2, 1], riot_helmet: [2, 1],

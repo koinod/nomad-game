@@ -3,6 +3,36 @@
 // attached to the player's right arm. Same builder, different presentation.
 
 import * as THREE from 'three';
+import { FINISHES, finishDef } from '../data/mods';
+
+/**
+ * Wave 4: refinish a built weapon mesh in place. Metal surfaces
+ * (metalness >= 0.4 — barrels, receivers, blades) take the finish's own
+ * color/rough/metalness; camo additionally breaks up the furniture by
+ * alternating its two tones part by part; rust creeps into everything.
+ * The mesh's materials are fresh-built per call, so mutating is safe.
+ */
+export function applyFinish(g: THREE.Group, finishId: string | undefined): void {
+  const f = finishDef(finishId);
+  if (!f) return;
+  let n = 0;
+  g.traverse((o) => {
+    if (!(o instanceof THREE.Mesh)) return;
+    const m = o.material as THREE.MeshStandardMaterial;
+    if (!('metalness' in m) || !('color' in m)) return;
+    if (m.metalness >= 0.4) {
+      m.color.setHex(f.metal);
+      m.roughness = f.rough;
+      m.metalness = f.metalness;
+    } else if (f.camoTones) {
+      m.color.setHex(f.camoTones[n++ % 2]);
+      m.roughness = Math.max(m.roughness, 0.8);
+    } else if (f.id === FINISHES.finish_rust.id) {
+      m.color.lerp(new THREE.Color(0x7a4a2a), 0.35);
+      m.roughness = Math.min(1, m.roughness + 0.15);
+    }
+  });
+}
 
 const MAT = {
   steel: () => new THREE.MeshStandardMaterial({ color: 0x9aa0a8, roughness: 0.35, metalness: 0.7 }),
@@ -337,7 +367,7 @@ export function buildGroundMesh(itemId: string, qty = 1): THREE.Group {
 }
 
 /** Hand-held mesh — origin at the grip, points forward (+Z in hand space). */
-export function buildHandMesh(itemId: string): THREE.Group {
+export function buildHandMesh(itemId: string, finish?: string): THREE.Group {
   const g = new THREE.Group();
   const add = (m: THREE.Mesh) => { m.castShadow = true; g.add(m); return m; };
 
@@ -440,6 +470,91 @@ export function buildHandMesh(itemId: string): THREE.Group {
       wrap.rotation.x = Math.PI / 2; wrap.position.z = 0.38;
       break;
     }
+    // ---- wave 4: the ranged roster's missing hand meshes ----
+    case 'revolver': {
+      const barrel = add(new THREE.Mesh(new THREE.CylinderGeometry(0.021, 0.021, 0.3, 10), MAT.darkSteel()));
+      barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.055, 0.22);
+      const underlug = add(new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.03, 0.26), MAT.darkSteel()));
+      underlug.position.set(0, 0.03, 0.2);
+      const drum = add(new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.042, 0.07, 12), MAT.steel()));
+      drum.rotation.x = Math.PI / 2; drum.position.set(0, 0.04, 0.02);
+      const frame = add(new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.07, 0.14), MAT.darkSteel()));
+      frame.position.set(0, 0.03, -0.04);
+      const grip = add(new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.19, 0.07), MAT.wood()));
+      grip.position.set(0, -0.07, -0.08); grip.rotation.x = 0.3;
+      break;
+    }
+    case 'flare_gun': {
+      const body = add(new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.036, 0.3, 10), MAT.redPlastic()));
+      body.rotation.x = Math.PI / 2; body.position.set(0, 0.05, 0.14);
+      const grip = add(new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.17, 0.07), MAT.black()));
+      grip.position.set(0, -0.06, -0.02); grip.rotation.x = 0.25;
+      break;
+    }
+    case 'smg': {
+      const receiver = add(new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.09, 0.34), MAT.darkSteel()));
+      receiver.position.set(0, 0.03, 0.08);
+      const barrel = add(new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.18, 8), MAT.steel()));
+      barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.05, 0.33);
+      const mag = add(new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.2, 0.06), MAT.black()));
+      mag.position.set(0, -0.1, 0.08); mag.rotation.x = 0.12;
+      const stock = add(new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.06, 0.2), MAT.black()));
+      stock.position.set(0, 0.02, -0.18);
+      const grip = add(new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.14, 0.06), MAT.black()));
+      grip.position.set(0, -0.07, -0.04); grip.rotation.x = 0.25;
+      break;
+    }
+    case 'carbine': {
+      const receiver = add(new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.09, 0.4), MAT.darkSteel()));
+      receiver.position.set(0, 0.03, 0.1);
+      const barrel = add(new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.017, 0.34, 8), MAT.steel()));
+      barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.05, 0.45);
+      const guard = add(new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.24, 8), MAT.black()));
+      guard.rotation.x = Math.PI / 2; guard.position.set(0, 0.04, 0.3);
+      const mag = add(new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.18, 0.07), MAT.black()));
+      mag.position.set(0, -0.1, 0.1); mag.rotation.x = 0.18;
+      const stock = add(new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.1, 0.26), MAT.darkWood()));
+      stock.position.set(0, -0.01, -0.22); stock.rotation.x = 0.1;
+      const grip = add(new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.13, 0.06), MAT.black()));
+      grip.position.set(0, -0.07, -0.03); grip.rotation.x = 0.25;
+      break;
+    }
+    case 'dmr': {
+      const receiver = add(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.1, 0.46), MAT.darkSteel()));
+      receiver.position.set(0, 0.03, 0.08);
+      const barrel = add(new THREE.Mesh(new THREE.CylinderGeometry(0.019, 0.019, 0.5, 10), MAT.steel()));
+      barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.06, 0.55);
+      const brake = add(new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.09, 8), MAT.darkSteel()));
+      brake.rotation.x = Math.PI / 2; brake.position.set(0, 0.06, 0.82);
+      const scope = add(new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.24, 8), MAT.black()));
+      scope.rotation.x = Math.PI / 2; scope.position.set(0, 0.13, 0.08);
+      const mag = add(new THREE.Mesh(new THREE.BoxGeometry(0.042, 0.16, 0.08), MAT.black()));
+      mag.position.set(0, -0.1, 0.12); mag.rotation.x = 0.1;
+      const stock = add(new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.12, 0.3), MAT.darkWood()));
+      stock.position.set(0, -0.02, -0.28); stock.rotation.x = 0.12;
+      const bipod = add(new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.16, 0.02), MAT.steel()));
+      bipod.position.set(0.05, -0.06, 0.5); bipod.rotation.z = 0.3;
+      const bipod2 = bipod.clone(); bipod2.position.x = -0.05; bipod2.rotation.z = -0.3;
+      g.add(bipod2);
+      break;
+    }
+    case 'crossbow': {
+      const prod = add(new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.035, 0.09), MAT.darkWood()));
+      prod.position.set(0, 0.06, 0.42);
+      for (const sx of [-0.36, 0.36]) {
+        const tip = add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.03, 0.05), MAT.steel()));
+        tip.position.set(sx, 0.06, 0.38); tip.rotation.y = sx > 0 ? -0.5 : 0.5;
+      }
+      const rail = add(new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.62), MAT.wood()));
+      rail.position.set(0, 0.05, 0.12);
+      const boltMesh = add(new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.4, 6), MAT.tan()));
+      boltMesh.rotation.x = Math.PI / 2; boltMesh.position.set(0, 0.09, 0.18);
+      const stock = add(new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.11, 0.3), MAT.darkWood()));
+      stock.position.set(0, -0.02, -0.28); stock.rotation.x = 0.14;
+      const stirrup = add(new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.012, 6, 12, Math.PI), MAT.steel()));
+      stirrup.position.set(0, 0.0, 0.5); stirrup.rotation.x = Math.PI / 2;
+      break;
+    }
     default: {
       // generic held item: small box at the fist
       const box = add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.18), MAT.tan()));
@@ -447,6 +562,7 @@ export function buildHandMesh(itemId: string): THREE.Group {
       break;
     }
   }
+  if (finish) applyFinish(g, finish);
   return g;
 }
 
