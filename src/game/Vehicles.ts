@@ -17,6 +17,7 @@ import { box, chrome, darkTrim, glassTint, lampMat, loftMesh, mat, tailMat, tube
 import { buildStallion, applyStallionUpgrades } from './carModels';
 import { buildBoxtruck, buildBronco, buildF250, buildPickup, buildSemi } from './truckModels';
 import { buildGoliath, buildSedan, buildSprinter, buildTank, buildV03, buildVan } from './vanModels';
+import { buildMarshBuggy } from './smallModels';
 import {
   cgHeightM, cornerRoll, effectiveSteerAngle, impactBounce, impactDamage,
   understeerK, vehicleMassKg, weightTransferPitch,
@@ -213,6 +214,7 @@ function buildCarBody(g: THREE.Group, def: VehicleDef, v: Vehicle): void {
   if (def.id === 'v03_hauler') { buildV03(g, def, v); return; }
   if (def.id === 'goliath') { buildGoliath(g, def, v); return; }
   if (def.id === 'tank') { buildTank(g, def, v); return; }
+  if (def.id === 'marsh_buggy') { buildMarshBuggy(g, def, v); return; }
   const { length: L, width: W } = def;
   const color = def.id === 'semi' ? SEMI_PAINTS[v.colorPick % SEMI_PAINTS.length] : def.color;
   const body = mat(color, 0.55, 0.35);
