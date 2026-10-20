@@ -46,6 +46,15 @@ export default function TouchControls() {
   const [knob, setKnob] = useState({ x: 0, y: 0 });
   const lookId = useRef<number | null>(null);
   const lookLast = useRef({ x: 0, y: 0 });
+  const [runOn, setRunOn] = useState(false);
+
+  const toggleRun = () => {
+    setRunOn((v) => {
+      const nv = !v;
+      input.sprint = nv;
+      return nv;
+    });
+  };
 
   const moveKnob = (t: React.Touch) => {
     const el = joyBaseRef.current;
@@ -150,6 +159,15 @@ export default function TouchControls() {
         <div className="flex gap-3">
           <ControlButton label="E" ariaLabel="Interact" onPress={() => { input.interact = true; }} />
           <ControlButton label="☎" ariaLabel="Open phone" onPress={() => { input.phone = true; }} />
+        </div>
+        <div className="flex gap-3">
+          <ControlButton
+            label="RUN"
+            ariaLabel="Toggle run"
+            onPress={toggleRun}
+            className={runOn ? 'border-[#e8b34b] text-[#e8b34b]' : undefined}
+          />
+          <ControlButton label="PACK" ariaLabel="Open backpack" onPress={() => { input.backpack = true; }} />
         </div>
       </div>
     </div>

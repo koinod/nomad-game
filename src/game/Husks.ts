@@ -28,9 +28,21 @@ export interface HuskCtx {
 const _v1 = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 
+/** Deterministic per-husk variation from its id (clothing, hat, carried tool). */
+function hashId(id: string): () => number {
+  let h = 7;
+  for (let i = 0; i < id.length; i++) h = (Math.imul(h, 31) + id.charCodeAt(i)) | 0;
+  return mulberry32(h);
+}
+
+const JACKETS = [0x5a4632, 0x3c5a6e, 0x6e3c3c, 0x4a5a3c, 0x555555, 0x6b5a2e, 0x2e4a4e];
+const PANTS = [0x35322c, 0x2c3540, 0x404040, 0x3a3230, 0x4a3b2c];
+const HATS = [0x2c2c30, 0x5a4632, 0x6e6e6e, 0x3c3c3c];
+
 export class Husk {
   readonly id: string;
   readonly kind: HuskKind;
+  readonly zoneId: string;
   readonly group = new THREE.Group();
   hp: number;
   state: HuskState = 'idle';
@@ -47,9 +59,10 @@ export class Husk {
   private mats: THREE.MeshStandardMaterial[] = [];
   private bodyMat!: THREE.MeshStandardMaterial;
 
-  constructor(id: string, kind: HuskKind, x: number, z: number, groundY: (x: number, z: number) => number) {
+  constructor(id: string, kind: HuskKind, x: number, z: number, zoneId: string, groundY: (x: number, z: number) => number) {
     this.id = id;
     this.kind = kind;
+    this.zoneId = zoneId;
     const st = KIND_STATS[kind];
     this.hp = st.hp;
     this.home.set(x, 0, z);
@@ -60,25 +73,54 @@ export class Husk {
   }
 
   private buildMesh(color: number, height: number): void {
-    this.bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 1 });
-    this.mats.push(this.bodyMat);
+    // clothing variation: every husk dressed from a palette, some with a
+    // hat, some still clutching a tool — Skyrim-style corpse readability
+    const vrnd = hashId(this.id);
+    const pick = (arr: number[]): number => arr[Math.floor(vrnd() * arr.length)];
+    const jacketMat = new THREE.MeshStandardMaterial({ color: pick(JACKETS), roughness: 1 });
+    const pantsMat = new THREE.MeshStandardMaterial({ color: pick(PANTS), roughness: 1 });
+    this.bodyMat = jacketMat;
+    this.mats.push(jacketMat, pantsMat);
     const darkMat = new THREE.MeshStandardMaterial({ color: 0x2c2c30, roughness: 1 });
     this.mats.push(darkMat);
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.72, height * 0.62, 0.42), this.bodyMat);
+    void color;
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.72, height * 0.62, 0.42), jacketMat);
     body.position.y = height * 0.52;
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.27, 8, 6), darkMat);
     head.position.y = height * 0.94;
     head.name = 'head';
-    const armL = new THREE.Mesh(new THREE.BoxGeometry(0.2, height * 0.5, 0.2), this.bodyMat);
+    const armL = new THREE.Mesh(new THREE.BoxGeometry(0.2, height * 0.5, 0.2), jacketMat);
     armL.position.set(-0.5, height * 0.55, 0.12);
     armL.rotation.x = -0.9;
     const armR = armL.clone();
     armR.position.x = 0.5;
-    const legL = new THREE.Mesh(new THREE.BoxGeometry(0.24, height * 0.42, 0.24), darkMat);
+    const legL = new THREE.Mesh(new THREE.BoxGeometry(0.24, height * 0.42, 0.24), pantsMat);
     legL.position.set(-0.18, height * 0.21, 0);
     const legR = legL.clone();
     legR.position.x = 0.18;
     this.group.add(body, head, armL, armR, legL, legR);
+    if (vrnd() < 0.35) {
+      const hat = new THREE.Mesh(
+        new THREE.BoxGeometry(0.36, 0.12, 0.34),
+        new THREE.MeshStandardMaterial({ color: pick(HATS), roughness: 1 }),
+      );
+      hat.position.y = height * 0.94 + 0.3;
+      this.group.add(hat);
+      this.mats.push(hat.material as THREE.MeshStandardMaterial);
+    }
+    if (vrnd() < 0.25) {
+      const tool = new THREE.Mesh(
+        new THREE.BoxGeometry(0.09, 0.55, 0.09),
+        new THREE.MeshStandardMaterial({ color: 0x6e6a63, roughness: 1 }),
+      );
+      tool.position.set(0.5, height * 0.32, 0.32);
+      tool.rotation.x = 0.5;
+      this.group.add(tool);
+      this.mats.push(tool.material as THREE.MeshStandardMaterial);
+    }
+    this.group.traverse((o) => {
+      if (o instanceof THREE.Mesh) o.castShadow = true;
+    });
     this.group.userData.headY = height * 0.94;
   }
 
@@ -126,17 +168,9 @@ export class Husk {
     const g = this.group;
     if (this.state === 'dead') {
       this.deathT += dt;
-      // ragdoll-lite: tip over then fade
+      // ragdoll-lite: tip over and stay — the corpse is searchable (Skyrim-style)
       const tip = Math.min(1, this.deathT / 0.45);
       g.rotation.x = -tip * Math.PI * 0.5;
-      if (this.deathT > 1.2) {
-        const f = 1 - Math.min(1, (this.deathT - 1.2) / 1.8);
-        for (const m of this.mats) {
-          m.transparent = true;
-          m.opacity = f;
-        }
-        if (f <= 0) this.removed = true;
-      }
       return;
     }
 
@@ -305,8 +339,8 @@ export class HuskManager {
     return null;
   }
 
-  private addHusk(id: string, kind: HuskKind, x: number, z: number, groundY: (x: number, z: number) => number): void {
-    const h = new Husk(id, kind, x, z, groundY);
+  private addHusk(id: string, kind: HuskKind, x: number, z: number, zoneId: string, groundY: (x: number, z: number) => number): void {
+    const h = new Husk(id, kind, x, z, zoneId, groundY);
     this.husks.push(h);
     this.scene.add(h.group);
   }
@@ -320,7 +354,7 @@ export class HuskManager {
         const p = this.landPoint(zone, groundY);
         if (!p) continue;
         const kind = zone.kinds[Math.floor(this.rng() * zone.kinds.length)];
-        this.addHusk(id, kind, p[0], p[1], groundY);
+        this.addHusk(id, kind, p[0], p[1], zone.id, groundY);
       }
     }
   }
@@ -413,7 +447,7 @@ export class HuskManager {
             const d = Math.hypot(p[0] - playerPos.x, p[1] - playerPos.z);
             if (d > 60) {
               const kind = zone.kinds[Math.floor(this.rng() * zone.kinds.length)];
-              this.addHusk(`rz_${this.spawnCounter++}`, kind, p[0], p[1], ctx.groundY);
+              this.addHusk(`rz_${this.spawnCounter++}`, kind, p[0], p[1], zone.id, ctx.groundY);
             }
           }
         }

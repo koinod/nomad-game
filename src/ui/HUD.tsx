@@ -187,6 +187,14 @@ export default function HUD() {
         <Hotbar />
       </div>
 
+      {/* controls hint, desktop only */}
+      {!('ontouchstart' in window) && (
+        <div className="pointer-events-none absolute bottom-4 right-4 hidden text-right text-[11px] leading-relaxed text-[#8a94a3] md:block">
+          WASD move · Shift run · F punch · Q fire
+          <br />E interact · I backpack · Tab phone
+        </div>
+      )}
+
       {/* interact prompt, above hotbar */}
       {interactPrompt && (
         <div className="absolute bottom-24 left-1/2 -translate-x-1/2">

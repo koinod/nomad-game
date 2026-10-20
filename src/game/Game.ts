@@ -76,6 +76,10 @@ export class Game {
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(this.canvas.clientWidth || window.innerWidth, this.canvas.clientHeight || window.innerHeight);
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.06;
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(
@@ -140,11 +144,13 @@ export class Game {
         isCleared: (id) => this.cleared.has(id),
         markCleared: (id) => { this.cleared.add(id); },
         setLastSafe: (x, z) => { this.lastSafe = [x, z]; },
-        rest: () => this.rest(),
       },
       this.world.poiPositions,
       buildContainerDefs(this.world.poiPositions),
     );
+
+    // shadow flags for world + husk + interactable meshes (idempotent)
+    this.world.applyShadowFlags();
 
     // listeners
     window.addEventListener('keydown', this.onKeyDown);
@@ -235,13 +241,34 @@ export class Game {
     sfx.play('quest', { volume: 0.5 });
   }
 
-  rest(): void {
+  /**
+   * Skyrim-style sleep: duration chosen in the sleep dialog. Blocked when
+   * husks are close. Longer sleep heals more; a full 8h grants Well Rested.
+   */
+  trySleep(hours: number): void {
     const s = useGameStore.getState();
-    s.advanceTime(480);
-    s.healPlayer(s.maxHp);
-    s.chargeBattery(100);
+    const player = this.player;
+    if (!player || !this.husks) return;
+    const threat = this.husks.nearestThreat(player.pos.x, player.pos.z);
+    if (threat && threat.dist < 28) {
+      s.addToast("Can't sleep — something's moving out there.");
+      sfx.play('ui', { volume: 0.5 });
+      return;
+    }
+    const missing = s.maxHp - s.hp;
+    const healed = Math.round(Math.min(missing, Math.max(20, (hours / 8) * s.maxHp)));
+    s.advanceTime(hours * 60);
+    if (healed > 0) s.healPlayer(healed);
+    player.stamina = 100;
+    s.chargeBattery(hours * 12);
+    if (hours >= 8) s.setWellRested(6 * 60);
+    const t = s.timeMinutes;
+    const clock = `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+    s.addToast(
+      `Slept ${hours}h — woke at ${clock}.${healed > 0 ? ` Recovered ${healed} HP.` : ''}${hours >= 8 ? ' Well rested.' : ''}`,
+    );
+    s.closeSleep();
     sfx.play('quest', { volume: 0.7 });
-    s.addToast('Rested 8 hours. Fully healed.');
     void s.autosave();
   }
 
@@ -280,8 +307,25 @@ export class Game {
     }
     if (input.phone && s.screen === 'game' && !s.dead && !s.dialogue && !this.cutscene) {
       if (s.phoneOpen) s.closePhone();
-      else s.openPhone();
+      else {
+        s.openPhone();
+        // opening the phone without freeing the mouse left the UI unclickable
+        if (useGameStore.getState().phoneOpen && document.pointerLockElement) {
+          document.exitPointerLock();
+        }
+      }
       sfx.play('phone', { volume: 0.5 });
+    }
+    if (input.backpack && s.screen === 'game' && !s.dead && !s.dialogue && !this.cutscene) {
+      const st = useGameStore.getState();
+      if (st.backpackOpen) st.closeBackpack();
+      else {
+        st.openBackpack();
+        if (useGameStore.getState().backpackOpen && document.pointerLockElement) {
+          document.exitPointerLock();
+        }
+      }
+      sfx.play('ui', { volume: 0.5 });
     }
     if (input.hotbar >= 1 && input.hotbar <= 3 && s.screen === 'game' && !s.dialogue) {
       s.useHotbar(input.hotbar - 1);
@@ -292,6 +336,8 @@ export class Game {
       s.paused ||
       s.dialogue != null ||
       s.phoneOpen ||
+      s.backpackOpen ||
+      s.sleepOpen ||
       s.dead ||
       s.screen !== 'game';
 
@@ -347,6 +393,7 @@ export class Game {
       emitNoise: (x, z, r) => husks.emitNoise(x, z, r),
       camera,
     });
+    this.world?.updateShadowTarget(player.pos.x, player.pos.z);
 
     const night = this.isNight();
     husks.update(
@@ -420,12 +467,8 @@ export class Game {
     this.deadHusks.add(h.id);
     const s = useGameStore.getState();
     s.questEvent('kill', 'husk', 1);
-    if (this.rng() < 0.4) {
-      const drops = ['scrap', 'cloth', 'ammo_9mm'] as const;
-      const id = drops[Math.floor(this.rng() * drops.length)];
-      const qty = id === 'ammo_9mm' ? 3 + Math.floor(this.rng() * 4) : 1 + Math.floor(this.rng() * 2);
-      if (s.addItem(id, qty, true)) s.addToast(`Salvaged ${qty}x ${id}.`);
-    }
+    // the body stays where it fell — search it for zone-tied loot
+    this.interact?.registerCorpse(h.id, h.group.position.x, h.group.position.z, h.zoneId);
   }
 
   private updateCutscene(dt: number): void {
@@ -480,6 +523,9 @@ export class Game {
       case 'Tab':
       case 'KeyP':
         input.phone = true;
+        break;
+      case 'KeyI':
+        input.backpack = true;
         break;
       case 'Escape':
         input.pause = true;
@@ -551,7 +597,9 @@ export class Game {
       !s.dead &&
       !this.cutscene &&
       s.dialogue == null &&
-      !s.phoneOpen
+      !s.phoneOpen &&
+      !s.backpackOpen &&
+      !s.sleepOpen
     ) {
       // lock lost without Esc (alt-tab, click-out) — pause the game
       this.setPaused(true);

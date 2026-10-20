@@ -6,6 +6,8 @@ import { ambience } from '../systems/audio';
 import { ENDING_LINES } from '../narrative/dialogue';
 import HUD from './HUD';
 import Phone from './Phone';
+import Backpack from './Backpack';
+import SleepDialog from './SleepDialog';
 import TouchControls from './TouchControls';
 import PauseMenu from './PauseMenu';
 import DialogueOverlay from './DialogueOverlay';
@@ -77,6 +79,8 @@ export default function GameView() {
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
       <HUD />
       <Phone />
+      <Backpack />
+      <SleepDialog />
       <TouchControls />
       <PauseMenu />
       <DialogueOverlay />

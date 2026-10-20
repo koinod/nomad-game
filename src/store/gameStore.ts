@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { ITEMS } from '../data/items';
+import { ITEMS, FIELD_RECIPES } from '../data/items';
 import { QUESTS } from '../data/quests';
 import { DIFFICULTIES } from './types';
 import type {
@@ -53,6 +53,12 @@ interface GameState {
   phoneUnlocked: boolean;
   battery: number; // 0..100
 
+  // backpack overlay (works with a dead phone — it's your bag, not an app)
+  backpackOpen: boolean;
+  // sleep dialog (Skyrim-style rest at campfires)
+  sleepOpen: boolean;
+  restedMinutesLeft: number; // well-rested buff countdown (game minutes)
+
   // dialogue / interaction
   dialogue: DialogueState | null;
   interactPrompt: string | null;
@@ -104,6 +110,15 @@ interface GameState {
   drainBattery: (amount: number) => void;
   chargeBattery: (amount: number) => void;
 
+  openBackpack: () => void;
+  closeBackpack: () => void;
+  sortInventory: () => void;
+  craftRecipe: (recipeId: string) => void;
+
+  openSleep: () => void;
+  closeSleep: () => void;
+  setWellRested: (minutes: number) => void;
+
   addToast: (text: string) => void;
   dismissToast: (id: number) => void;
 
@@ -149,6 +164,10 @@ export const useGameStore = create<GameState>()((set, get) => {
     phoneUnlocked: false,
     battery: 100,
 
+    backpackOpen: false,
+    sleepOpen: false,
+    restedMinutesLeft: 0,
+
     dialogue: null,
     interactPrompt: null,
 
@@ -162,7 +181,7 @@ export const useGameStore = create<GameState>()((set, get) => {
     pendingSnapshot: null,
     saveSlots: [],
 
-    setScreen: (s) => set({ screen: s, paused: false, dialogue: null, phoneOpen: false }),
+    setScreen: (s) => set({ screen: s, paused: false, dialogue: null, phoneOpen: false, backpackOpen: false, sleepOpen: false }),
     setPaused: (p) => set({ paused: p }),
 
     startNewGame: (d) => {
@@ -181,6 +200,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         flags: {},
         rep: { lighthouse: 0, pier: 0 },
         phoneOpen: false, phoneTab: 'loadout', phoneUnlocked: false, battery: 100,
+        backpackOpen: false, sleepOpen: false, restedMinutesLeft: 0,
         dialogue: { source: 'prologue', nodeId: 'start' },
         interactPrompt: null,
         poiPositions: {},
@@ -207,7 +227,9 @@ export const useGameStore = create<GameState>()((set, get) => {
 
     advanceTime: (minutes) => {
       const s = get();
-      set({ timeMinutes: (s.timeMinutes + minutes) % 1440 });
+      const rested = Math.max(0, s.restedMinutesLeft - minutes);
+      if (s.restedMinutesLeft > 0 && rested === 0) s.addToast('The well-rested feeling fades.');
+      set({ timeMinutes: (s.timeMinutes + minutes) % 1440, restedMinutesLeft: rested });
     },
 
     addItem: (itemId, qty, quiet) => {
@@ -433,6 +455,52 @@ export const useGameStore = create<GameState>()((set, get) => {
       const s = get();
       set({ battery: Math.min(100, s.battery + amount) });
     },
+
+    openBackpack: () => set({ backpackOpen: true }),
+    closeBackpack: () => set({ backpackOpen: false }),
+
+    sortInventory: () => {
+      const s = get();
+      const inv = [...s.inventory].sort((a, b) => {
+        const da = ITEMS[a.itemId];
+        const db = ITEMS[b.itemId];
+        const ca = da?.category ?? '';
+        const cb = db?.category ?? '';
+        if (ca !== cb) return ca < cb ? -1 : 1;
+        return (da?.name ?? '') < (db?.name ?? '') ? -1 : 1;
+      });
+      set({ inventory: inv });
+      s.addToast('Pack organized.');
+    },
+
+    craftRecipe: (recipeId) => {
+      const recipe = FIELD_RECIPES[recipeId];
+      if (!recipe) return;
+      const s = get();
+      for (const c of recipe.components) {
+        if (s.countItem(c.itemId) < c.qty) {
+          s.addToast(`Missing ${c.qty}× ${ITEMS[c.itemId]?.name ?? c.itemId}.`);
+          return;
+        }
+      }
+      // consume components (from the tail so partial stacks stay tidy)
+      for (const c of recipe.components) {
+        let left = c.qty;
+        while (left > 0) {
+          const it = [...s.inventory].reverse().find((i) => i.itemId === c.itemId);
+          if (!it) break;
+          const take = Math.min(it.qty, left);
+          s.removeItem(it.uid, take);
+          left -= take;
+        }
+      }
+      s.addItem(recipe.resultId, recipe.resultQty, true);
+      s.addToast(`Crafted ${recipe.resultQty > 1 ? `${recipe.resultQty}× ` : ''}${ITEMS[recipe.resultId]?.name ?? recipe.resultId}.`);
+    },
+
+    openSleep: () => set({ sleepOpen: true }),
+    closeSleep: () => set({ sleepOpen: false }),
+    setWellRested: (minutes) => set({ restedMinutesLeft: minutes }),
 
     addToast: (text) => {
       const id = toastCounter++;

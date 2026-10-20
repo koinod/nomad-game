@@ -528,3 +528,13 @@ Follow the design plan process from the frontend-design skill before writing any
 - One memorable element: the phone's hardware evolution. Keep everything else quiet.
 - No tracked all-caps eyebrow labels. No middle-dot meta strings. Sentence case copy. Active-voice button labels that match their toast text ("Equip," then "Equipped").
 - This is a mobile + desktop web app, so include a touch joystick option and prevent rubber-banding (overscroll-behavior, touch-action). Without the reference files, create what is necessary — do not make assumptions, create.
+
+---
+
+## APPENDIX C: DIRECTION NOTES (Ian brain dump, 2026-10-19)
+
+**Tone target:** between Skyrim and Starfield — systemic open-world RPG feel, but the State of Decay premise (survival + zombies) stays the critical core: scarcity and the husks are what force the journey to D.C.
+
+**Stage 2 (post-v1 roadmap, not this build):** after reaching an ending, the world evolves — modeled on Far Cry 5 → New Dawn and Terraria's hardmode/secondary overworld. A completed run unlocks an evolved overworld state (new threats, shifted factions, new loot tables) rather than just NG+.
+
+**Shipped 2026-10-19 (improvement push v0.1.1):** WASD inversion fix, sprint discoverability + mobile RUN toggle, locomotion animation (bob/lean/strafe roll/joint pivots/idle breathing), melee swing + ranged recoil arm animation, speed bump (walk 4.9 / sprint 8.8), real-time shadows + ACES tone mapping + grass tufts, loot summary toasts, standalone backpack overlay (I key, dead-phone-proof) with search/organize/drop/field crafting, Skyrim-style sleep dialog (1/2/4/8h, enemy-blocked, well-rested buff), husk clothing variation + searchable corpses with zone-tied loot tables.

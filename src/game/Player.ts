@@ -16,8 +16,8 @@ export interface PlayerCtx {
   camera: THREE.PerspectiveCamera;
 }
 
-const WALK_SPEED = 4.2;
-const SPRINT_SPEED = 7.4;
+const WALK_SPEED = 4.9;
+const SPRINT_SPEED = 8.8;
 const CAM_DIST = 6.4;
 
 export class Player {
@@ -38,6 +38,13 @@ export class Player {
   private armL!: THREE.Mesh;
   private armR!: THREE.Mesh;
   private walkPhase = 0;
+  /** Inner rig: bob + lean ride here so terrain clamping on group.position stays clean. */
+  private rig!: THREE.Group;
+  private leanF = 0; // smoothed forward lean (sprint)
+  private leanS = 0; // smoothed strafe roll
+  private idleT = 0;
+  private attackT = 0; // melee swing timer (arm anim)
+  private recoilT = 0; // ranged recoil timer (arm anim)
 
   constructor(scene: THREE.Scene) {
     this.buildMesh();
@@ -51,19 +58,32 @@ export class Player {
     const skin = new THREE.MeshStandardMaterial({ color: 0xc9a180, roughness: 0.9 });
     const jacket = new THREE.MeshStandardMaterial({ color: 0x2e4a4e, roughness: 1 });
     const pants = new THREE.MeshStandardMaterial({ color: 0x3a3630, roughness: 1 });
+    this.rig = new THREE.Group();
+    this.group.add(this.rig);
     const torso = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.78, 0.34), jacket);
     torso.position.y = 1.18;
+    torso.castShadow = true;
     const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.36, 0.32), skin);
     head.position.y = 1.78;
-    this.legL = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.8, 0.24), pants);
-    this.legL.position.set(-0.16, 0.4, 0);
-    this.legR = this.legL.clone();
-    this.legR.position.x = 0.16;
-    this.armL = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.72, 0.2), jacket);
-    this.armL.position.set(-0.42, 1.18, 0);
-    this.armR = this.armL.clone();
-    this.armR.position.x = 0.42;
-    this.group.add(torso, head, this.legL, this.legR, this.armL, this.armR);
+    head.castShadow = true;
+    // Pivot limbs at the joint: translate geometry so rotation swings from hip/shoulder.
+    const legGeo = new THREE.BoxGeometry(0.22, 0.8, 0.24);
+    legGeo.translate(0, -0.4, 0);
+    this.legL = new THREE.Mesh(legGeo, pants);
+    this.legL.position.set(-0.16, 0.8, 0);
+    this.legL.castShadow = true;
+    this.legR = new THREE.Mesh(legGeo, pants);
+    this.legR.position.set(0.16, 0.8, 0);
+    this.legR.castShadow = true;
+    const armGeo = new THREE.BoxGeometry(0.18, 0.72, 0.2);
+    armGeo.translate(0, -0.36, 0);
+    this.armL = new THREE.Mesh(armGeo, jacket);
+    this.armL.position.set(-0.42, 1.52, 0);
+    this.armL.castShadow = true;
+    this.armR = new THREE.Mesh(armGeo, jacket);
+    this.armR.position.set(0.42, 1.52, 0);
+    this.armR.castShadow = true;
+    this.rig.add(torso, head, this.legL, this.legR, this.armL, this.armR);
   }
 
   setPosition(x: number, y: number, z: number): void {
@@ -117,11 +137,12 @@ export class Player {
     if (sprinting) speed = SPRINT_SPEED * ctx.speedMul;
 
     if (moving) {
-      // camera-relative wish direction
+      // camera-relative wish direction: forward = (sin yaw, cos yaw),
+      // right = (-cos yaw, sin yaw). (Both axes were negated before — W walked backward.)
       const sin = Math.sin(this.camYaw);
       const cos = Math.cos(this.camYaw);
-      const wx = mx * cos - mz * sin;
-      const wz = -mx * sin - mz * cos;
+      const wx = mz * sin - mx * cos;
+      const wz = mz * cos + mx * sin;
       const len = Math.hypot(wx, wz) || 1;
       this.pos.x += (wx / len) * speed * dt;
       this.pos.z += (wz / len) * speed * dt;
@@ -133,13 +154,20 @@ export class Player {
       this.yaw += d * Math.min(1, dt * 10);
       this.group.rotation.y = this.yaw;
 
-      // walk cycle
+      // locomotion cycle: limbs swing from hip/shoulder pivots
       this.walkPhase += dt * (sprinting ? 13 : 9);
-      const sw = Math.sin(this.walkPhase) * 0.5;
-      this.legL.rotation.x = sw;
-      this.legR.rotation.x = -sw;
-      this.armL.rotation.x = -sw * 0.7;
-      this.armR.rotation.x = sw * 0.7;
+      const sw = Math.sin(this.walkPhase);
+      const amp = sprinting ? 0.68 : 0.52;
+      this.legL.rotation.x = sw * amp;
+      this.legR.rotation.x = -sw * amp;
+      this.armL.rotation.x = -sw * amp * 0.75;
+      this.armR.rotation.x = sw * amp * 0.75;
+      // body bob on the rig, forward lean when sprinting, roll into strafes
+      this.rig.position.y = Math.abs(Math.cos(this.walkPhase)) * (sprinting ? 0.085 : 0.05);
+      this.leanF = lerp(this.leanF, sprinting ? 0.17 : 0.05, Math.min(1, dt * 6));
+      this.leanS = lerp(this.leanS, -mx * 0.07, Math.min(1, dt * 6));
+      this.rig.rotation.x = this.leanF;
+      this.rig.rotation.z = this.leanS;
 
       // footsteps + locomotion noise
       this.stepAcc += speed * dt;
@@ -157,6 +185,13 @@ export class Player {
         ctx.emitNoise(this.pos.x, this.pos.z, 6);
       }
     } else {
+      // idle: settle the limbs, breathe
+      this.idleT += dt;
+      this.rig.position.y = Math.sin(this.idleT * 2.1) * 0.015;
+      this.leanF = lerp(this.leanF, 0, Math.min(1, dt * 6));
+      this.leanS = lerp(this.leanS, 0, Math.min(1, dt * 6));
+      this.rig.rotation.x = this.leanF;
+      this.rig.rotation.z = this.leanS;
       this.legL.rotation.x *= 0.9;
       this.legR.rotation.x *= 0.9;
       this.armL.rotation.x *= 0.9;
@@ -175,9 +210,25 @@ export class Player {
     const gy = ctx.groundY(this.pos.x, this.pos.z);
     this.pos.y = lerp(this.pos.y, Math.max(gy, -0.5), Math.min(1, dt * 14));
 
+    // --- attack animation (right-arm override, after locomotion) ---
+    if (this.attackT > 0) {
+      this.attackT -= dt;
+      const k = 1 - Math.max(this.attackT, 0) / 0.28; // 0..1 across the swing
+      this.armR.rotation.x = -2.3 + k * 3.1; // raise, then chop down
+      this.rig.rotation.y = Math.sin(k * Math.PI) * 0.22;
+    } else if (this.recoilT > 0) {
+      this.recoilT -= dt;
+      const k = Math.max(this.recoilT, 0) / 0.16;
+      this.armR.rotation.x = -1.2 - k * 0.35; // arm up, kicked back
+      this.rig.rotation.y *= 0.8;
+    } else {
+      this.rig.rotation.y *= 0.8;
+    }
+
     // --- attacks ---
     if (input.attackMelee && this.meleeCd <= 0) {
       this.meleeCd = 0.45;
+      this.attackT = 0.28; // swing the arm — weapon or bare fist
       tryMelee({
         husks: ctx.husks,
         emitNoise: ctx.emitNoise,
@@ -191,6 +242,7 @@ export class Player {
     }
     if (input.attackRanged && this.rangedCd <= 0) {
       this.rangedCd = 0.4;
+      this.recoilT = 0.16;
       const { eye, dir } = this.aim(ctx.camera);
       tryRanged({
         husks: ctx.husks,

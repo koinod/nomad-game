@@ -171,6 +171,20 @@ export class World {
     this.buildRelayRuin();
   }
 
+  /**
+   * Shadow flags for everything in the scene. Called by Game after all
+   * builders (world, husks, interactables) ran — idempotent, safe to repeat.
+   * Skips terrain (receive only), water, stars, and the translucent beam.
+   */
+  applyShadowFlags(): void {
+    this.scene.traverse((o) => {
+      if (!(o instanceof THREE.Mesh)) return;
+      if (o.name === 'terrain' || o.name === 'water' || o.name === 'beam') return;
+      o.castShadow = true;
+      o.receiveShadow = true;
+    });
+  }
+
   // -- terrain mesh ---------------------------------------------------------
 
   private buildTerrain(): void {
@@ -204,6 +218,7 @@ export class World {
     });
     const mesh = new THREE.Mesh(geo, this.terrainMat);
     mesh.name = 'terrain';
+    mesh.receiveShadow = true;
     this.scene.add(mesh);
   }
 
@@ -225,7 +240,15 @@ export class World {
 
   private buildLights(): void {
     this.sun = new THREE.DirectionalLight(0xfff2dd, 2.6);
-    this.sun.castShadow = false;
+    this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(2048, 2048);
+    this.sun.shadow.camera.left = -60;
+    this.sun.shadow.camera.right = 60;
+    this.sun.shadow.camera.top = 60;
+    this.sun.shadow.camera.bottom = -60;
+    this.sun.shadow.camera.near = 10;
+    this.sun.shadow.camera.far = 700;
+    this.sun.shadow.bias = -0.0006;
     this.scene.add(this.sun);
     this.scene.add(this.sun.target);
     this.hemi = new THREE.HemisphereLight(0xbdd3e6, 0x3a4a35, 0.85);
@@ -319,6 +342,8 @@ export class World {
     });
     trunks.instanceMatrix.needsUpdate = true;
     crowns.instanceMatrix.needsUpdate = true;
+    trunks.castShadow = true;
+    crowns.castShadow = true;
     this.scene.add(trunks, crowns);
 
     // Rocks: scattered, more on beach/dune.
@@ -345,7 +370,47 @@ export class World {
       rocks.setMatrixAt(i, m);
     }
     rocks.instanceMatrix.needsUpdate = true;
+    rocks.castShadow = true;
+    rocks.receiveShadow = true;
     this.scene.add(rocks);
+
+    this.buildGrass();
+  }
+
+  /** Dune-grass tufts: one cheap instanced mesh, big readability payoff. */
+  private buildGrass(): void {
+    const spots: [number, number][] = [];
+    let guard = 0;
+    while (spots.length < 600 && guard++ < 9000) {
+      const x = -680 + this.rng() * 1360;
+      const z = -300 + this.rng() * 600;
+      const b = biomeAt(x, z);
+      if (b !== 'dune' && b !== 'marsh' && b !== 'beach') continue;
+      spots.push([x, z]);
+    }
+    if (spots.length === 0) return;
+    const geo = new THREE.ConeGeometry(0.16, 0.9, 4);
+    geo.translate(0, 0.45, 0);
+    const mat = new THREE.MeshStandardMaterial({ roughness: 1 });
+    const grass = new THREE.InstancedMesh(geo, mat, spots.length);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    const sc = new THREE.Vector3();
+    const col = new THREE.Color();
+    spots.forEach(([x, z], i) => {
+      const s = 0.6 + this.rng() * 1.1;
+      e.set((this.rng() - 0.5) * 0.35, this.rng() * Math.PI * 2, (this.rng() - 0.5) * 0.35);
+      q.setFromEuler(e);
+      m.compose(new THREE.Vector3(x, this.groundY(x, z), z), q, sc.set(s, s, s));
+      grass.setMatrixAt(i, m);
+      grass.setColorAt(i, col.setHSL(0.2 + this.rng() * 0.07, 0.34, 0.3 + this.rng() * 0.14));
+    });
+    grass.instanceMatrix.needsUpdate = true;
+    if (grass.instanceColor) grass.instanceColor.needsUpdate = true;
+    grass.receiveShadow = true;
+    grass.name = 'grass';
+    this.scene.add(grass);
   }
 
   private buildTown(): void {
@@ -480,6 +545,7 @@ export class World {
         blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
       }),
     );
+    this.beam.name = 'beam';
     this.beamPivot.add(this.beam);
     g.add(this.beamPivot);
     this.lampLight = new THREE.PointLight(0xffe9a8, 60, 90, 1.8);
@@ -563,6 +629,19 @@ export class World {
     this.lampLight.intensity = lampOn ? 60 : 0;
     (this.beam.material as THREE.MeshBasicMaterial).opacity = lampOn ? 0.16 : 0;
     return { isNight, sunElevation: elev };
+  }
+
+  /**
+   * Keep the shadow frustum centered on the player. Preserves whatever
+   * direction updateSky set — only re-anchors the light/target pair.
+   */
+  updateShadowTarget(x: number, z: number): void {
+    const dir = this.sun.position.clone().sub(this.sun.target.position);
+    const len = dir.length() || 1;
+    dir.divideScalar(len);
+    this.sun.target.position.set(x, 0, z);
+    this.sun.target.updateMatrixWorld();
+    this.sun.position.set(x + dir.x * 220, dir.y * 220, z + dir.z * 220);
   }
 
   /** Per-frame world animation (beam rotation, water shimmer). */

@@ -73,6 +73,88 @@ export const ITEMS: Record<string, ItemDef> = {
     id: 'flare', name: 'Road flare', category: 'tool', weight: 0.3, slots: 1, stack: 4,
     desc: 'Burns bright and hisses. Husks turn toward the noise.',
   },
+  torch: {
+    id: 'torch', name: 'Torch', category: 'tool', weight: 0.4, slots: 1, stack: 2,
+    desc: 'Cloth-wrapped branch, soaked in fuel. Light for the dark places.',
+  },
+  fire_starter: {
+    id: 'fire_starter', name: 'Fire starter', category: 'tool', weight: 0.2, slots: 1, stack: 3,
+    desc: 'Scrap striker and tinder. Every campfire starts somewhere.',
+  },
+};
+
+// Husk corpse loot, keyed by spawn zone — Skyrim-style: what they were is
+// what they carried. A drowned fisherman and a relay tech drop different kits.
+export interface HuskLootEntry {
+  id: string;
+  min: number;
+  max: number;
+  chance: number;
+}
+
+export const HUSK_LOOT: Record<string, HuskLootEntry[]> = {
+  forest: [
+    { id: 'cloth', min: 1, max: 2, chance: 0.6 },
+    { id: 'bandage', min: 1, max: 1, chance: 0.25 },
+    { id: 'canned_food', min: 1, max: 2, chance: 0.3 },
+    { id: 'flare', min: 1, max: 1, chance: 0.15 },
+    { id: 'scrap', min: 1, max: 2, chance: 0.2 },
+  ],
+  town: [
+    { id: 'canned_food', min: 1, max: 2, chance: 0.35 },
+    { id: 'water_bottle', min: 1, max: 1, chance: 0.3 },
+    { id: 'scrap', min: 1, max: 3, chance: 0.3 },
+    { id: 'cloth', min: 1, max: 2, chance: 0.25 },
+    { id: 'ammo_9mm', min: 2, max: 5, chance: 0.12 },
+  ],
+  relay: [
+    { id: 'wire', min: 1, max: 3, chance: 0.4 },
+    { id: 'scrap', min: 1, max: 2, chance: 0.35 },
+    { id: 'flare', min: 1, max: 1, chance: 0.2 },
+    { id: 'cloth', min: 1, max: 1, chance: 0.15 },
+  ],
+  dunes: [
+    { id: 'water_bottle', min: 1, max: 2, chance: 0.35 },
+    { id: 'bandage', min: 1, max: 1, chance: 0.25 },
+    { id: 'canned_food', min: 1, max: 1, chance: 0.25 },
+    { id: 'cloth', min: 1, max: 2, chance: 0.2 },
+  ],
+  default: [
+    { id: 'cloth', min: 1, max: 2, chance: 0.3 },
+    { id: 'scrap', min: 1, max: 2, chance: 0.25 },
+  ],
+};
+
+// Field crafting — no workbench needed, done from the backpack.
+export interface FieldRecipe {
+  id: string;
+  name: string;
+  components: { itemId: string; qty: number }[];
+  resultId: string;
+  resultQty: number;
+}
+
+export const FIELD_RECIPES: Record<string, FieldRecipe> = {
+  r_bandage: {
+    id: 'r_bandage', name: 'Bandage',
+    components: [{ itemId: 'cloth', qty: 2 }],
+    resultId: 'bandage', resultQty: 1,
+  },
+  r_torch: {
+    id: 'r_torch', name: 'Torch',
+    components: [{ itemId: 'cloth', qty: 1 }, { itemId: 'scrap', qty: 1 }],
+    resultId: 'torch', resultQty: 1,
+  },
+  r_fire_starter: {
+    id: 'r_fire_starter', name: 'Fire starter',
+    components: [{ itemId: 'scrap', qty: 2 }],
+    resultId: 'fire_starter', resultQty: 1,
+  },
+  r_flare: {
+    id: 'r_flare', name: 'Road flare',
+    components: [{ itemId: 'wire', qty: 1 }, { itemId: 'scrap', qty: 1 }],
+    resultId: 'flare', resultQty: 1,
+  },
 };
 
 export const BASE_CARRY_KG = 20;

@@ -3,6 +3,7 @@
 
 import * as THREE from 'three';
 import { useGameStore } from '../store/gameStore';
+import { ITEMS, HUSK_LOOT } from '../data/items';
 import { sfx } from '../systems/audio';
 
 export interface LootEntry {
@@ -29,12 +30,11 @@ export interface InteractHooks {
   isCleared: (id: string) => boolean;
   markCleared: (id: string) => void;
   setLastSafe: (x: number, z: number) => void;
-  rest: () => void;
 }
 
 export interface Interactable {
   id: string;
-  kind: 'container' | 'campfire' | 'switch' | 'npc' | 'beacon';
+  kind: 'container' | 'campfire' | 'switch' | 'npc' | 'beacon' | 'corpse';
   pos: THREE.Vector3;
   label: string;
   use: () => void;
@@ -57,8 +57,11 @@ function personMesh(jacket: number, skin: number): THREE.Group {
 export class InteractSystem {
   readonly interactables: Interactable[] = [];
   private crateMeshes = new Map<string, THREE.Mesh>();
+  private searchedCorpses = new Set<string>();
+  private hooks: InteractHooks;
 
   constructor(hooks: InteractHooks, pois: Record<string, [number, number]>, containers: ContainerDef[]) {
+    this.hooks = hooks;
     const s = useGameStore.getState();
     const at = (id: string): [number, number] => pois[id] ?? [0, 0];
 
@@ -85,17 +88,22 @@ export class InteractSystem {
             return;
           }
           const rng = hooks.rng;
+          const taken: string[] = [];
           let tookAny = false;
           for (const e of c.loot) {
             if (rng() > e.chance) continue;
             const qty = Math.max(1, Math.round((e.min + rng() * (e.max - e.min)) * hooks.resourceMult));
-            if (!s.addItem(e.id, qty)) {
-              s.addToast('Could not take everything.');
-              return; // do NOT mark looted
+            // quiet take: one summary toast below instead of a toast per item
+            if (!s.addItem(e.id, qty, true)) {
+              s.addToast('Pack full — could not take everything.');
+              return; // do NOT mark looted; come back with room
             }
+            s.questEvent('collect', e.id, qty);
             tookAny = true;
+            taken.push(`${qty > 1 ? `${qty}× ` : ''}${ITEMS[e.id]?.name ?? e.id}`);
           }
           if (!tookAny) s.addToast('Nothing useful inside.');
+          else s.addToast(`Looted: ${taken.join(', ')}.`);
           hooks.markLooted(c.id);
           const m = this.crateMeshes.get(c.id);
           if (m) m.visible = false;
@@ -116,7 +124,8 @@ export class InteractSystem {
         use: () => {
           hooks.setLastSafe(x, z);
           s.addToast('Safe point marked.');
-          hooks.rest();
+          s.openSleep();
+          if (document.pointerLockElement) document.exitPointerLock();
         },
       });
     }
@@ -191,6 +200,46 @@ export class InteractSystem {
         },
       });
     }
+  }
+
+  /**
+   * Register a searchable husk corpse. Loot rolls from the zone's table —
+   * what they were is what they carried (Skyrim-style).
+   */
+  registerCorpse(id: string, x: number, z: number, zoneId: string): void {
+    const s = useGameStore.getState();
+    const pos = new THREE.Vector3(x, this.hooks.groundY(x, z), z);
+    const table = HUSK_LOOT[zoneId] ?? HUSK_LOOT.default;
+    const entry: Interactable = {
+      id: `corpse:${id}`,
+      kind: 'corpse',
+      pos,
+      label: 'Search husk',
+      use: () => {
+        if (this.searchedCorpses.has(id)) {
+          s.addToast('Nothing else on the body.');
+          return;
+        }
+        const rng = this.hooks.rng;
+        const taken: string[] = [];
+        for (const e of table) {
+          if (rng() > e.chance) continue;
+          const qty = Math.max(1, Math.round(e.min + rng() * (e.max - e.min)));
+          if (!s.addItem(e.id, qty, true)) {
+            s.addToast('Pack full — left the rest on the body.');
+            break;
+          }
+          s.questEvent('collect', e.id, qty);
+          taken.push(`${qty > 1 ? `${qty}× ` : ''}${ITEMS[e.id]?.name ?? e.id}`);
+        }
+        this.searchedCorpses.add(id);
+        entry.label = 'Searched husk';
+        if (taken.length) s.addToast(`Taken: ${taken.join(', ')}.`);
+        else s.addToast('Empty pockets.');
+        sfx.play('pickup', { volume: 0.6 });
+      },
+    };
+    this.interactables.push(entry);
   }
 
   /** Nearest interactable within maxDist of (x,z), or null. */
