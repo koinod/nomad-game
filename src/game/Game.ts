@@ -254,20 +254,26 @@ export class Game {
     // player
     this.player = new Player(this.scene);
     const s0 = useGameStore.getState();
-    const [sx, sz] = this.world.poi('shore_camp');
-    this.lastSafe = [sx, sz];
+    // New games start at the DEPOT MOTOR POOL (Ian's beta-test logic):
+    // you wake at base with the whole fleet in front of you. The shore
+    // camp is a short drive now — q_prologue step 2 ('Reach the shore
+    // camp') is earned on the road; Jonah and his camp don't move.
+    // Loaded games keep their saved position; only the fresh spawn and
+    // the default respawn point (lastSafe) live at the motor pool.
+    const [ax, az] = this.world.poi('airbase');
+    const spawnX = ax + 13; // apron, ~8m clear of the nearest row car
+    const spawnZ = az + 44; // car row at dz 52, heavy row at dz 64
+    this.lastSafe = [spawnX, spawnZ];
     if (snap) {
       const [px, , pz] = snap.player.pos;
       this.player.setPosition(px, heightAt(px, pz) + 0.5, pz);
       this.player.stamina = s0.stamina;
+      this.player.camYaw = Math.PI * 0.9;
     } else {
-      // spawn a short walk from the shore camp so q_prologue step 2 is earned
-      const px = sx - 14;
-      const pz = sz + 16;
-      this.player.setPosition(px, heightAt(px, pz) + 0.5, pz);
-      this.player.camYaw = Math.atan2(sx - px, sz - pz) + Math.PI;
+      this.player.setPosition(spawnX, heightAt(spawnX, spawnZ) + 0.5, spawnZ);
+      // face the fleet: rows ahead at +Z, noses pointing back at you
+      this.player.camYaw = 0;
     }
-    this.player.camYaw = Math.PI * 0.9;
 
     // husks
     const [carrierX, carrierZ] = this.world.poi('carrier');
