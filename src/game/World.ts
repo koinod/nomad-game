@@ -310,41 +310,79 @@ export class World {
   // -- scatter ---------------------------------------------------------------
 
   private buildScatter(): void {
-    // Trees: maritime forest band. Instanced cone + trunk.
-    const treeSpots: [number, number][] = [];
+    // Trees: maritime forest band. Three looks — tall pines (two-tier cones),
+    // broadleaf (blob crowns), and dead snags — so the woods have real depth.
+    interface TreeSpot { x: number; z: number; kind: 'pine' | 'leaf' | 'snag'; s: number }
+    const treeSpots: TreeSpot[] = [];
     let guard = 0;
-    while (treeSpots.length < 150 && guard++ < 4000) {
+    while (treeSpots.length < 200 && guard++ < 6000) {
       const x = -440 + this.rng() * 880;
       const z = -150 + this.rng() * 300;
       if (biomeAt(x, z) !== 'forest') continue;
-      treeSpots.push([x, z]);
+      const r = this.rng();
+      const kind = r < 0.68 ? 'pine' : r < 0.93 ? 'leaf' : 'snag';
+      treeSpots.push({ x, z, kind, s: 0.9 + this.rng() * 0.85 });
     }
-    const trunkGeo = new THREE.CylinderGeometry(0.22, 0.34, 2.2, 5);
-    const crownGeo = new THREE.ConeGeometry(1.9, 4.6, 6);
     const trunkMat = new THREE.MeshStandardMaterial({ color: 0x4a3826, roughness: 1 });
-    const crownMat = new THREE.MeshStandardMaterial({ color: 0x2c5230, roughness: 1 });
-    const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, treeSpots.length);
-    const crowns = new THREE.InstancedMesh(crownGeo, crownMat, treeSpots.length);
+    const snagMat = new THREE.MeshStandardMaterial({ color: 0x6a655c, roughness: 1 });
+    const pineMat = new THREE.MeshStandardMaterial({ color: 0x2c5230, roughness: 1 });
+    const leafMat = new THREE.MeshStandardMaterial({ color: 0x3a6a34, roughness: 1 });
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const e = new THREE.Euler();
     const sc = new THREE.Vector3();
-    treeSpots.forEach(([x, z], i) => {
-      const s = 0.75 + this.rng() * 0.8;
-      const y = this.groundY(x, z);
-      e.set(0, this.rng() * Math.PI * 2, 0);
+    const setInst = (
+      im: THREE.InstancedMesh, i: number, x: number, y: number, z: number,
+      sx: number, sy: number, sz: number, ry: number,
+    ) => {
+      e.set(0, ry, 0);
       q.setFromEuler(e);
-      sc.set(s, s, s);
-      m.compose(new THREE.Vector3(x, y + 1.1 * s, z), q, sc);
-      trunks.setMatrixAt(i, m);
-      m.compose(new THREE.Vector3(x, y + (2.2 + 2.3) * s, z), q, sc);
-      crowns.setMatrixAt(i, m);
+      m.compose(new THREE.Vector3(x, y, z), q, sc.set(sx, sy, sz));
+      im.setMatrixAt(i, m);
+    };
+    // pines: trunk + two stacked cones — 10–16m tall
+    const pines = treeSpots.filter((t) => t.kind === 'pine');
+    const pineTrunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.24, 0.38, 3.6, 5), trunkMat, Math.max(pines.length, 1));
+    const pineLo = new THREE.InstancedMesh(new THREE.ConeGeometry(2.5, 5.2, 7), pineMat, Math.max(pines.length, 1));
+    const pineHi = new THREE.InstancedMesh(new THREE.ConeGeometry(1.7, 4.2, 7), pineMat, Math.max(pines.length, 1));
+    pineTrunks.count = pines.length; pineLo.count = pines.length; pineHi.count = pines.length;
+    pines.forEach((t, i) => {
+      const y = this.groundY(t.x, t.z);
+      const ry = this.rng() * Math.PI * 2;
+      setInst(pineTrunks, i, t.x, y + 1.8 * t.s, t.z, t.s, t.s, t.s, ry);
+      setInst(pineLo, i, t.x, y + (3.6 + 2.6) * t.s, t.z, t.s, t.s, t.s, ry);
+      setInst(pineHi, i, t.x, y + (3.6 + 5.2 + 2.1) * t.s, t.z, t.s, t.s, t.s, ry + 0.4);
     });
-    trunks.instanceMatrix.needsUpdate = true;
-    crowns.instanceMatrix.needsUpdate = true;
-    trunks.castShadow = true;
-    crowns.castShadow = true;
-    this.scene.add(trunks, crowns);
+    // broadleaf: trunk + three blobs
+    const leaves = treeSpots.filter((t) => t.kind === 'leaf');
+    const leafTrunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.26, 0.4, 2.6, 5), trunkMat, Math.max(leaves.length, 1));
+    const leafCrowns = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1.6, 1), leafMat, Math.max(leaves.length * 3, 1));
+    leafTrunks.count = leaves.length; leafCrowns.count = leaves.length * 3;
+    leaves.forEach((t, i) => {
+      const y = this.groundY(t.x, t.z);
+      const ry = this.rng() * Math.PI * 2;
+      setInst(leafTrunks, i, t.x, y + 1.3 * t.s, t.z, t.s, t.s, t.s, ry);
+      const cy = y + 3.4 * t.s;
+      setInst(leafCrowns, i * 3, t.x, cy, t.z, t.s, t.s * 0.9, t.s, ry);
+      setInst(leafCrowns, i * 3 + 1, t.x + 1.1 * t.s, cy + 0.9 * t.s, t.z + 0.4 * t.s, t.s * 0.7, t.s * 0.65, t.s * 0.7, ry + 1);
+      setInst(leafCrowns, i * 3 + 2, t.x - 1.0 * t.s, cy + 0.7 * t.s, t.z - 0.5 * t.s, t.s * 0.65, t.s * 0.6, t.s * 0.65, ry + 2);
+    });
+    // snags: bare lightning-killed trunks
+    const snags = treeSpots.filter((t) => t.kind === 'snag');
+    const snagTrunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.18, 0.3, 5.2, 5), snagMat, Math.max(snags.length, 1));
+    snagTrunks.count = snags.length;
+    snags.forEach((t, i) => {
+      const y = this.groundY(t.x, t.z);
+      e.set((this.rng() - 0.5) * 0.12, this.rng() * Math.PI * 2, (this.rng() - 0.5) * 0.12);
+      q.setFromEuler(e);
+      m.compose(new THREE.Vector3(t.x, y + 2.6 * t.s, t.z), q, sc.set(t.s, t.s, t.s));
+      snagTrunks.setMatrixAt(i, m);
+    });
+    for (const im of [pineTrunks, pineLo, pineHi, leafTrunks, leafCrowns, snagTrunks]) {
+      im.instanceMatrix.needsUpdate = true;
+      im.castShadow = true;
+      this.scene.add(im);
+    }
 
     // Rocks: scattered, more on beach/dune.
     const rockGeo = new THREE.IcosahedronGeometry(0.8, 0);

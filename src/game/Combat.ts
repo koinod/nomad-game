@@ -152,5 +152,7 @@ function equippedRangedDef() {
   return it ? ITEMS[it.itemId] ?? null : null;
 }
 
+export { equippedRangedDef };
+
 /** Re-export for the controller: which melee item is swinging. */
 export { equippedMeleeId };

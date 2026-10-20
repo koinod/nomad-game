@@ -13,6 +13,7 @@ export interface InputState {
   blocking: boolean; // held: right-click block with melee
   leanLeft: boolean; // held: Q
   leanRight: boolean; // held: E (tap still interacts)
+  fpToggle: boolean; // edge-triggered: V toggles first/third person
   interact: boolean; // edge-triggered
   phone: boolean; // edge-triggered
   backpack: boolean; // edge-triggered
@@ -33,6 +34,7 @@ export const input: InputState = {
   blocking: false,
   leanLeft: false,
   leanRight: false,
+  fpToggle: false,
   interact: false,
   phone: false,
   backpack: false,
@@ -56,5 +58,6 @@ export function resetEdgeTriggers(): void {
   input.phone = false;
   input.backpack = false;
   input.pause = false;
+  input.fpToggle = false;
   input.hotbar = 0;
 }

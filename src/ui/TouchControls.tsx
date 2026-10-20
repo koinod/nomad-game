@@ -230,6 +230,7 @@ export default function TouchControls() {
       <div className="absolute bottom-28 right-6 flex items-end gap-3">
         <div className="flex flex-col gap-3">
           <ControlButton label="JUMP" ariaLabel="Jump" onPress={() => { input.jump = true; }} />
+          <ControlButton label="VIEW" ariaLabel="Toggle first person" onPress={() => { input.fpToggle = true; }} />
           <ControlButton
             label="CRCH"
             ariaLabel="Toggle crouch"

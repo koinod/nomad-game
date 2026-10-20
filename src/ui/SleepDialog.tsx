@@ -61,6 +61,37 @@ export default function SleepDialog() {
             Stay awake
           </button>
         </div>
+
+        {/* fast travel: walk the island's back paths between camps — time passes */}
+        <TravelSection />
+      </div>
+    </div>
+  );
+}
+
+function TravelSection() {
+  const timeMinutes = useGameStore((s) => s.timeMinutes);
+  const camps = getGame()?.campOptions() ?? [];
+  const here = getGame()?.currentCampId();
+  const others = camps.filter((c) => c.id !== here);
+  if (others.length === 0) return null;
+  return (
+    <div className="mt-4 border-t border-[#232b36] pt-3">
+      <div className="mb-2 text-xs text-[#8a94a3]">Travel the island's back paths</div>
+      <div className="flex flex-col gap-2">
+        {others.map((c) => (
+          <button
+            key={c.id}
+            onClick={() => {
+              sfx.play('ui');
+              getGame()?.travelTo(c.id);
+            }}
+            className="flex items-center justify-between rounded border border-[#232b36] bg-[#12161c] px-3 py-2 text-sm text-[#d7dde5] transition-colors hover:border-[#5aa469]"
+          >
+            <span>{c.name}</span>
+            <span className="font-mono text-xs text-[#8a94a3]">leave {fmt(timeMinutes)}</span>
+          </button>
+        ))}
       </div>
     </div>
   );

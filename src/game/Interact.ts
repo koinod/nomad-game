@@ -31,6 +31,7 @@ export interface InteractHooks {
   isCleared: (id: string) => boolean;
   markCleared: (id: string) => void;
   setLastSafe: (x: number, z: number) => void;
+  setCamp?: (poiId: string) => void; // which campfire opened the sleep dialog
 }
 
 export interface Interactable {
@@ -143,6 +144,7 @@ export class InteractSystem {
         label: 'Rest at campfire',
         use: () => {
           hooks.setLastSafe(x, z);
+          hooks.setCamp?.(pid);
           s.addToast('Safe point marked.');
           s.openSleep();
           if (document.pointerLockElement) document.exitPointerLock();

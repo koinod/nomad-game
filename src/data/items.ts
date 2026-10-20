@@ -33,6 +33,14 @@ export const ITEMS: Record<string, ItemDef> = {
     id: 'canned_food', name: 'Canned beans', category: 'food', weight: 0.4, slots: 1, stack: 6,
     desc: 'Cold beans. Better than nothing.', heal: 15,
   },
+  raw_meat: {
+    id: 'raw_meat', name: 'Raw meat', category: 'food', weight: 0.5, slots: 1, stack: 6,
+    desc: 'Fresh from the island. Eat it raw and regret it.', heal: 6,
+  },
+  cooked_meat: {
+    id: 'cooked_meat', name: 'Cooked meat', category: 'food', weight: 0.4, slots: 1, stack: 6,
+    desc: 'Seared over a fire. Real food.', heal: 45,
+  },
   water_bottle: {
     id: 'water_bottle', name: 'Water bottle', category: 'food', weight: 0.5, slots: 1, stack: 4,
     desc: 'Sealed bottle. Drinkable.', heal: 8,
@@ -154,6 +162,11 @@ export const FIELD_RECIPES: Record<string, FieldRecipe> = {
     id: 'r_flare', name: 'Road flare',
     components: [{ itemId: 'wire', qty: 1 }, { itemId: 'scrap', qty: 1 }],
     resultId: 'flare', resultQty: 1,
+  },
+  r_cooked_meat: {
+    id: 'r_cooked_meat', name: 'Cooked meat',
+    components: [{ itemId: 'raw_meat', qty: 1 }],
+    resultId: 'cooked_meat', resultQty: 1,
   },
 };
 

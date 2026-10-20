@@ -17,6 +17,7 @@ const CONTROLS: [string, string][] = [
   ['Jump', 'Space'],
   ['Crouch (quiet)', 'C or Ctrl'],
   ['Lean', 'Hold Q / E'],
+  ['First person', 'V'],
   ['Look', 'Click the world to capture the mouse'],
   ['Interact', 'Tap E'],
   ['Melee', 'F or left click'],

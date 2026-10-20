@@ -239,7 +239,7 @@ export default function HUD() {
       {/* controls hint, desktop only */}
       {!('ontouchstart' in window) && (
         <div className="pointer-events-none absolute bottom-4 right-4 hidden text-right text-[11px] leading-relaxed text-[#8a94a3] md:block">
-          WASD move · Shift run · Space jump · C crouch · Q/E lean
+          WASD move · Shift run · Space jump · C crouch · Q/E lean · V 1st/3rd
           <br />LMB punch · RMB block/fire · E interact · G pack · Tab phone
         </div>
       )}

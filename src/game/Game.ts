@@ -12,12 +12,22 @@ import { Player } from './Player';
 import { HuskManager } from './Husks';
 import type { Husk, SpawnZone } from './Husks';
 import { InteractSystem, buildContainerDefs } from './Interact';
+import { AnimalManager } from './Animals';
 import { sfx, ambience } from '../systems/audio';
 import { ENDING_LINES } from '../narrative/dialogue';
 import {
   totalWeightKg, carryLimitKg, encumbranceTier,
 } from '../store/inventoryUtils';
 import { mulberry32, clamp } from './rng';
+
+function campName(id: string): string {
+  switch (id) {
+    case 'shore_camp': return 'the shore camp';
+    case 'jonah_camp': return "Jonah's camp";
+    case 'lighthouse_base': return 'the lighthouse camp';
+    default: return id;
+  }
+}
 
 export type BiomeId = 'beach' | 'dune' | 'forest' | 'town' | 'marsh' | 'water';
 
@@ -29,6 +39,7 @@ export class Game {
   private world: World | null = null;
   private player: Player | null = null;
   private husks: HuskManager | null = null;
+  private animals: AnimalManager | null = null;
   private interact: InteractSystem | null = null;
 
   private raf = 0;
@@ -40,6 +51,8 @@ export class Game {
 
   private keys = new Set<string>();
   private lastSafe: [number, number] = [0, 0];
+  private lastCampId: string | null = null; // campfire POI used to open the sleep dialog
+  private meatCounter = 0;
 
   private looted = new Set<string>();
   private deadHusks = new Set<string>();
@@ -90,6 +103,8 @@ export class Game {
       0.1,
       3200,
     );
+    // in-scene so first-person view-model children render
+    this.scene.add(this.camera);
 
     this.world = new World(this.scene, opts.seed);
     this.world.build();
@@ -133,6 +148,10 @@ export class Game {
     this.husks = new HuskManager(this.scene, zones, opts.seed);
     this.husks.spawnInitial(this.deadHusks, (x, z) => heightAt(x, z), this.isNight());
 
+    // wildlife: deer + rabbits, huntable for raw meat
+    this.animals = new AnimalManager(this.scene, opts.seed);
+    this.animals.spawnInitial((x, z) => heightAt(x, z));
+
     // interactables
     const resourceMult = DIFFICULTIES[s0.difficulty].resourceMult;
     this.interact = new InteractSystem(
@@ -146,6 +165,7 @@ export class Game {
         isCleared: (id) => this.cleared.has(id),
         markCleared: (id) => { this.cleared.add(id); },
         setLastSafe: (x, z) => { this.lastSafe = [x, z]; },
+        setCamp: (id) => { this.lastCampId = id; },
       },
       this.world.poiPositions,
       buildContainerDefs(this.world.poiPositions),
@@ -216,6 +236,7 @@ export class Game {
     this.canvas.removeEventListener('contextmenu', this.onContextMenu);
     ambience.stop();
     this.husks?.dispose();
+    this.animals?.dispose();
     this.world?.dispose();
     this.renderer?.dispose();
     this.renderer = null;
@@ -254,6 +275,38 @@ export class Game {
     this.player.stamina = 100;
     this.player.camYaw = Math.PI * 0.9;
     sfx.play('quest', { volume: 0.5 });
+  }
+
+  /** Fast travel between campfires: the road takes time, like everything else. */
+  travelTo(poiId: string): void {
+    if (!this.player || !this.world) return;
+    const s = useGameStore.getState();
+    const [x, z] = this.world.poi(poiId);
+    const dist = Math.hypot(x - this.player.pos.x, z - this.player.pos.z);
+    const minutes = Math.max(30, Math.round((dist / 350) * 60));
+    this.player.setPosition(x, heightAt(x, z) + 0.5, z);
+    this.player.camYaw = Math.PI * 0.9;
+    this.lastSafe = [x, z];
+    this.lastCampId = poiId;
+    s.advanceTime(minutes);
+    s.closeSleep();
+    const h = (minutes / 60).toFixed(1);
+    s.addToast(`You walk the island's back paths to ${campName(poiId)} — ${h}h pass.`);
+    sfx.play('quest', { volume: 0.5 });
+    void s.autosave();
+  }
+
+  /** Campfires available for fast travel (all three, labeled for the dialog). */
+  campOptions(): { id: string; name: string }[] {
+    return [
+      { id: 'shore_camp', name: 'Shore camp' },
+      { id: 'jonah_camp', name: "Jonah's camp" },
+      { id: 'lighthouse_base', name: 'Lighthouse camp' },
+    ];
+  }
+
+  currentCampId(): string | null {
+    return this.lastCampId;
   }
 
   /**
@@ -427,7 +480,24 @@ export class Game {
       sprintAllowed: tier === 'ok',
       speedMul,
       husks,
-      emitNoise: (x, z, r) => husks.emitNoise(x, z, r),
+      animals: this.animals!,
+      emitNoise: (x, z, r) => {
+        husks.emitNoise(x, z, r);
+        this.animals?.emitNoise(x, z, r);
+      },
+      onAnimalKill: (kill) => {
+        // gut the kill: raw meat appears where the animal fell
+        const qty = kill.min + Math.floor(this.rng() * (kill.max - kill.min + 1));
+        this.interact?.registerPickup(
+          `meat_${this.meatCounter++}`,
+          kill.id,
+          qty,
+          kill.x + (this.rng() - 0.5) * 1.4,
+          kill.z + (this.rng() - 0.5) * 1.4,
+        );
+        useGameStore.getState().addToast(`Dressed the ${kill.kind} — ${qty}× raw meat.`);
+        sfx.play('pickup', { volume: 0.5 });
+      },
       camera,
     });
     this.world?.updateShadowTarget(player.pos.x, player.pos.z);
@@ -444,6 +514,7 @@ export class Game {
       player.pos,
       night,
     );
+    this.animals?.update(dt, player.pos, (x, z) => heightAt(x, z));
 
     // husk death bookkeeping (kill counted once when the tip-over starts)
     for (const h of husks.husks) {
@@ -581,6 +652,9 @@ export class Game {
       case 'KeyI':
       case 'KeyG':
         input.backpack = true; // G primary, I legacy
+        break;
+      case 'KeyV':
+        input.fpToggle = true;
         break;
       case 'Escape':
         input.pause = true;
