@@ -13,6 +13,7 @@ import { pointAt, stepTrailer, swayDampedHeading } from './trailerPhysics';
 import {
   itemsWeightKg, stepDoors, type DoorAnim, type InteriorSpec, type Vehicle,
 } from './Vehicles';
+import { hullLoft } from './modelKit';
 import type { InvItem } from '../store/types';
 
 export type BeaconMode = 'off' | 'sat' | 'horde';
@@ -395,8 +396,28 @@ function buildBox(g: THREE.Group, t: Trailer): void {
     for (let i = 0; i < 4; i++) box(g, 0.02, 0.07, 0.34, i % 2 ? tailMat() : mat(0xd8d8d0, 0.4, 0), sgn * (W / 2 + 0.01), 0.55, -L * 0.36 + i * L * 0.22);
   }
   box(g, W, wallH, 0.07, shell, 0, cy, L / 2 - 0.035); // front wall
-  const roof = box(g, W, 0.07, L * 0.97, shell, 0, floorY + wallH + 0.03, 0);
+  // CRAFT WAVE reshape: the flat slab roof becomes a CROWNED loft strip
+  // (sheds water, reads as a shaped shell), the front corners get
+  // rounded posts, and an aero deflector caps the front top edge.
+  const roofY = floorY + wallH;
+  const roof = hullLoft([
+    { z: -L * 0.485, halfW: W / 2 - 0.02, yTop: roofY + 0.10, yBot: roofY - 0.4 },
+    { z: 0, halfW: W / 2 - 0.02, yTop: roofY + 0.13, yBot: roofY - 0.4 },
+    { z: L * 0.485, halfW: W / 2 - 0.02, yTop: roofY + 0.10, yBot: roofY - 0.4 },
+  ], shell, { seg: 14, arc: [0.55, Math.PI - 0.55] });
+  g.add(roof);
   t.roofObj = roof;
+  for (const sgn of [1, -1]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, wallH, 10), shell);
+    post.position.set(sgn * (W / 2 - 0.01), cy, L / 2 - 0.01);
+    post.castShadow = true;
+    g.add(post); // rounded front corner
+    // angled aero valance under the side wall
+    const valance = box(g, 0.04, 0.34, L * 0.88, dark, sgn * (W / 2 + 0.03), 0.34, 0);
+    valance.rotation.z = -sgn * 0.22;
+  }
+  const deflector = box(g, W * 0.92, 0.34, 0.05, shell, 0, roofY - 0.08, L / 2 + 0.05);
+  deflector.rotation.x = -0.5;
   // interior liner hint: darker ceiling ribs visible from inside
   for (let i = 0; i < 4; i++) box(g, W * 0.9, 0.04, 0.09, inner, 0, floorY + wallH - 0.05, -L * 0.36 + i * L * 0.24);
   // rear frame + header + marker lights
