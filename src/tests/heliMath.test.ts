@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { approach, hoverDamping, landingSeverity, liftAuthority, tiltForVelocity } from '../game/heliMath';
+import {
+  approach, climbRates, heliImpactDamageMult, heliTopSpeedFactor, hoverDamping,
+  landingSeverity, liftAuthority, spoolSeconds, tiltForVelocity,
+} from '../game/heliMath';
 
 describe('liftAuthority', () => {
   it('is zero with a stopped rotor and full at flight rpm', () => {
@@ -56,5 +59,25 @@ describe('approach + hoverDamping', () => {
   it('hover damping bleeds drift but never reverses it', () => {
     expect(hoverDamping(0.1)).toBeCloseTo(0.84);
     expect(hoverDamping(10)).toBe(0);
+  });
+});
+
+describe('heli upgrades (wave 4)', () => {
+  it('the aviation tune spools the rotor a third faster', () => {
+    expect(spoolSeconds([])).toBeCloseTo(2.2);
+    expect(spoolSeconds(['heli_engine'])).toBeLessThan(spoolSeconds([]) * 0.75);
+  });
+  it('the tune climbs harder and flies faster', () => {
+    const stock = climbRates([]);
+    const tuned = climbRates(['heli_engine']);
+    expect(tuned.up).toBeGreaterThan(stock.up);
+    expect(tuned.down).toBeGreaterThan(stock.down);
+    expect(heliTopSpeedFactor([])).toBe(1);
+    expect(heliTopSpeedFactor(['heli_engine'])).toBeCloseTo(1.12);
+  });
+  it('airframe armor halves felt impact damage, and only that', () => {
+    expect(heliImpactDamageMult([])).toBe(1);
+    expect(heliImpactDamageMult(['heli_armor'])).toBeCloseTo(0.45);
+    expect(heliImpactDamageMult(['heli_engine'])).toBe(1);
   });
 });

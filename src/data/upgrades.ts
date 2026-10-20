@@ -26,6 +26,12 @@ export const UPGRADES: UpgradeDef[] = [
   // Tank tiers (its main cannon is integral; these extend it)
   { id: 'tank_coax', name: 'Coax Machine Gun', desc: 'A coaxial MG beside the tank\u2019s main gun. For the small problems.', cost: [{ itemId: 'gun_parts', qty: 5 }, { itemId: 'scrap', qty: 2 }], kinds: ['car'], onlyIds: ['tank'] },
   { id: 'tank_reactive', name: 'Reactive Armor + Ram Plow', desc: 'ERA blocks and a heavier plow for the tank. Ramming goes up a class.', cost: [{ itemId: 'armor_plate', qty: 3 }, { itemId: 'scrap', qty: 3 }], kinds: ['car'], onlyIds: ['tank'] },
+  // Helicopter line (wave 4 — effects live in game/heliMath.ts, visuals in
+  // Vehicles.applyUpgradeVisuals). kinds: ['heli'] gates the ground fleet out.
+  { id: 'heli_armor', name: 'Rotor & Airframe Armor', desc: 'Plate over the engine deck, rotor head, and cabin floor. Impacts and hard landings land at half strength.', cost: [{ itemId: 'armor_plate', qty: 2 }, { itemId: 'scrap', qty: 3 }], kinds: ['heli'] },
+  { id: 'heli_engine', name: 'Aviation Engine Tune', desc: 'Governors off, mixture rich. Rotor spools a third faster, +12% top speed, stronger climb.', cost: [{ itemId: 'gun_parts', qty: 3 }, { itemId: 'engine_part', qty: 1 }], kinds: ['heli'] },
+  { id: 'heli_racks', name: 'External Cargo Racks', desc: 'Skid racks and a belly sling frame. Storage capacity +60%.', cost: [{ itemId: 'scrap', qty: 4 }, { itemId: 'wood', qty: 2 }], kinds: ['heli'] },
+  { id: 'heli_light', name: 'Searchlight + Night Kit', desc: 'A chin searchlight with a real beam for night work, wired to the ship\u2019s battery.', cost: [{ itemId: 'wire', qty: 3 }, { itemId: 'car_battery', qty: 1 }], kinds: ['heli'] },
 ];
 
 function clamp(v: number, lo: number, hi: number): number {
@@ -74,7 +80,8 @@ export function sandFactor(owned: readonly string[]): number {
 }
 
 export function storageCapKg(baseKg: number, owned: readonly string[]): number {
-  return Math.round(baseKg * (owned.includes('cargo_racks') ? 1.6 : 1));
+  const racked = owned.includes('cargo_racks') || owned.includes('heli_racks');
+  return Math.round(baseKg * (racked ? 1.6 : 1));
 }
 
 export function collisionLossFactor(owned: readonly string[]): number {

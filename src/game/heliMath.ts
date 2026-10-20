@@ -49,3 +49,32 @@ export function tiltForVelocity(vf: number, vs: number): { pitch: number; roll: 
 export function hoverDamping(dt: number): number {
   return Math.max(0, 1 - 1.6 * dt);
 }
+
+// ------------------------------------------------------- heli upgrades ---
+// Wave 4: the upgrade line the ground fleet always had, for the airframes.
+// Installed ids arrive from data/upgrades (kinds: ['heli']).
+
+/** Seconds for the rotor to spool 0→1. The aviation engine tune spins up
+ *  a third faster — cold-and-dark getaways stop being a death sentence. */
+export function spoolSeconds(owned: readonly string[]): number {
+  return owned.includes('heli_engine') ? 1.5 : 2.2;
+}
+
+/** Vertical authority (m/s) the collective can command, up and down. */
+export function climbRates(owned: readonly string[]): { up: number; down: number } {
+  return owned.includes('heli_engine') ? { up: 6.9, down: 5.2 } : { up: 5.4, down: 4.4 };
+}
+
+/** Top-speed factor from the aviation engine tune. */
+export function heliTopSpeedFactor(owned: readonly string[]): number {
+  return owned.includes('heli_engine') ? 1.12 : 1;
+}
+
+/**
+ * How much of an impact the airframe actually feels. Rotor & airframe
+ * armor spreads landing and collision damage across the plate — a hard
+ * touchdown in a plated Hawk is a firm one in a stock one.
+ */
+export function heliImpactDamageMult(owned: readonly string[]): number {
+  return owned.includes('heli_armor') ? 0.45 : 1;
+}

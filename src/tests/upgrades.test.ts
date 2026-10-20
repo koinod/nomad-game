@@ -15,10 +15,10 @@ import {
 import { FURNITURE_LOOT, HUSK_LOOT, ITEMS, STATION_RECIPES } from '../data/items';
 
 describe('UPGRADES data', () => {
-  it('has 10 unique ids', () => {
-    expect(UPGRADES).toHaveLength(10);
+  it('has 14 unique ids', () => {
+    expect(UPGRADES).toHaveLength(14);
     const ids = UPGRADES.map((u) => u.id);
-    expect(new Set(ids).size).toBe(10);
+    expect(new Set(ids).size).toBe(14);
   });
 
   it('every cost itemId exists as a key in ITEMS', () => {
@@ -197,5 +197,30 @@ describe('weapon mounts (Ian correction: Goliath 6x6 + tank tiers)', () => {
 
   it('tank_reactive ram factor is 2.2', () => {
     expect(ramDamageFactor(['tank_reactive'])).toBe(2.2);
+  });
+});
+
+describe('helicopter line (wave 4)', () => {
+  const heli = { kind: 'heli', id: 'seahawk' };
+  const car = { kind: 'car', id: 'pickup' };
+
+  it('all four heli upgrades install on a helicopter', () => {
+    for (const id of ['heli_armor', 'heli_engine', 'heli_racks', 'heli_light']) {
+      expect(canInstallUpgrade(heli, id, []), id).toBe(true);
+    }
+  });
+
+  it('the two fleets cannot take each other\u2019s line', () => {
+    expect(canInstallUpgrade(car, 'heli_armor', [])).toBe(false);
+    expect(canInstallUpgrade(car, 'heli_light', [])).toBe(false);
+    expect(canInstallUpgrade(heli, 'armor', [])).toBe(false);
+    expect(canInstallUpgrade(heli, 'engine_tune', [])).toBe(false);
+    expect(canInstallUpgrade(heli, 'cargo_racks', [])).toBe(false);
+  });
+
+  it('heli_racks raise storage through the shared capacity helper', () => {
+    expect(storageCapKg(300, ['heli_racks'])).toBe(480);
+    expect(storageCapKg(300, [])).toBe(300);
+    expect(storageCapKg(300, ['cargo_racks'])).toBe(480);
   });
 });
