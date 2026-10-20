@@ -313,6 +313,204 @@ function warehouse(cx: number, cz: number, groundY: GroundY): B {
   return b;
 }
 
+/** store_convenience_small (Stitch): white block walls, flat roof +
+ *  parapet, glass storefront, sign band, and shelving/fridges inside
+ *  stocked food/produce/medical-leaning. */
+function convenienceStore(cx: number, cz: number, groundY: GroundY): B {
+  const b = new B(cx, cz, 12, 10, 3.4, 0.2, groundY(cx, cz) - 0.1, 0xdcd8d0);
+  b.shell({ doorW: 1.4, winN: 2 });
+  b.flatRoof(0x6a6a6e);
+  const glassMat = new THREE.MeshStandardMaterial({ color: 0x2a3540, roughness: 0.15, metalness: 0.4 });
+  // storefront glass flanking the door
+  for (const gx of [-3.4, 3.4]) {
+    const pane = new THREE.Mesh(new THREE.BoxGeometry(3.6, 1.9, 0.06), glassMat);
+    pane.position.set(gx, 1.35, 5.02);
+    pane.castShadow = true;
+    b.group.add(pane);
+    const mull = new THREE.Mesh(new THREE.BoxGeometry(0.07, 1.9, 0.08), new THREE.MeshStandardMaterial({ color: 0xe8e2d4, roughness: 1 }));
+    mull.position.set(gx, 1.35, 5.03);
+    b.group.add(mull);
+  }
+  // sign band + lit strip + a little OPEN glow by the door
+  const sign = new THREE.Mesh(new THREE.BoxGeometry(11.6, 0.85, 0.12), new THREE.MeshStandardMaterial({ color: 0x2e7a6e, roughness: 0.8 }));
+  sign.position.set(0, 2.95, 5.06);
+  b.group.add(sign);
+  const strip = new THREE.Mesh(new THREE.BoxGeometry(11.2, 0.09, 0.06), new THREE.MeshStandardMaterial({ color: 0xf2e3b3, emissive: 0xf2e3b3, emissiveIntensity: 0.5 }));
+  strip.position.set(0, 2.45, 5.07);
+  b.group.add(strip);
+  const open = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.3, 0.05), new THREE.MeshStandardMaterial({ color: 0xffb35c, emissive: 0xff9a3c, emissiveIntensity: 0.9 }));
+  open.position.set(1.35, 1.7, 5.05);
+  b.group.add(open);
+  // rooftop AC unit
+  const ac = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.7, 1.5), new THREE.MeshStandardMaterial({ color: 0x9aa0a4, roughness: 0.9 }));
+  ac.position.set(-3, 3.55, -2);
+  ac.castShadow = true;
+  b.group.add(ac);
+  // interior: shelf runs down the back + a freestanding aisle, fridge +
+  // cooler by the walls — food/produce with a medical lean at the counter
+  const GROCERY = [
+    { id: 'canned_food', min: 1, max: 3, chance: 0.85 },
+    { id: 'water_bottle', min: 1, max: 2, chance: 0.6 },
+    { id: 'cooked_meat', min: 1, max: 1, chance: 0.3 },
+  ];
+  const PHARMACY = [
+    { id: 'bandage', min: 1, max: 2, chance: 0.65 },
+    { id: 'medkit', min: 1, max: 1, chance: 0.22 },
+    { id: 'cloth', min: 1, max: 2, chance: 0.4 },
+  ];
+  b.furnish('bookshelf', -3.6, -3.9, 'store_shelf_1', GROCERY, 'Search grocery shelf');
+  b.furnish('bookshelf', 0, -3.9, 'store_shelf_2', GROCERY, 'Search grocery shelf');
+  b.furnish('bookshelf', 0, 0.4, 'store_aisle', GROCERY, 'Search grocery shelf');
+  b.furnish('cabinets', 3.6, -3.9, 'store_pharmacy', PHARMACY, 'Search pharmacy shelf');
+  b.furnish('fridge', -5.0, 1.6, 'store_fridge', FURNITURE_LOOT.fridge.suburban);
+  b.furnish('cooler', 5.0, 3.4, 'store_cooler', FURNITURE_LOOT.cooler.suburban);
+  b.furnish('crate', -5.0, -3.6, 'store_stock', FURNITURE_LOOT.crate.suburban);
+  b.finalize();
+  return b;
+}
+
+/** industrial_garage_1 (Stitch): red-brown brick auto shop, corrugated
+ *  gable roof, two roll-up bays (one rolled open, one shut), rooftop
+ *  vents, and the repair economy's parts caches. The home POI for
+ *  tire/engine_part/car_battery/armor_plate loot. */
+function autoGarage(cx: number, cz: number, groundY: GroundY): B {
+  const b = new B(cx, cz, 15, 12, 4.2, 0.22, groundY(cx, cz) - 0.1, 0x7a4438);
+  const { w, d, h, t } = b;
+  const hw = w / 2;
+  const hd = d / 2;
+  const seg = (sw: number, sd: number, x: number, z: number) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(sw, h, sd), new THREE.MeshStandardMaterial({ color: b.color, roughness: 1 }));
+    m.position.set(x, h / 2 - 0.3, z);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    b.group.add(m);
+    b.colliders.push(aabb(x - sw / 2, z - sd / 2, x + sw / 2, z + sd / 2));
+    return m;
+  };
+  // back + sides solid; front gets two 3.4m bays and a pedestrian door
+  // in the middle pier
+  seg(w, t, 0, -hd + t / 2);
+  seg(t, d - 2 * t, -hw + t / 2, 0);
+  seg(t, d - 2 * t, hw - t / 2, 0);
+  seg(2.2, t, -hw + 1.1, hd - t / 2); // front-left run
+  seg(2.2, t, hw - 1.1, hd - t / 2); // front-right run
+  seg(1.4, t, -1.2, hd - t / 2); // pier left of the walk door
+  seg(1.4, t, 1.2, hd - t / 2); // pier right of the walk door
+  // header band above the bays + walk door — VISUAL ONLY: a collider
+  // here would seal the open bay (colliders are height-blind)
+  const header = new THREE.Mesh(new THREE.BoxGeometry(w, h - 3.05, t), new THREE.MeshStandardMaterial({ color: b.color, roughness: 1 }));
+  header.position.set(0, 3.05 - 0.3 + (h - 3.05) / 2, hd - t / 2);
+  header.castShadow = true;
+  b.group.add(header);
+  // pedestrian door leaf, ajar
+  const leaf = new THREE.Mesh(new THREE.BoxGeometry(0.94, 2.0, 0.06), new THREE.MeshStandardMaterial({ color: 0x4a3a30, roughness: 1 }));
+  leaf.geometry.translate(-0.47, 0, 0);
+  leaf.position.set(-0.47, 0.72, hd - t / 2 - 0.05);
+  leaf.rotation.y = 0.4;
+  leaf.castShadow = true;
+  b.group.add(leaf);
+  // high side windows (garage glass sits tall)
+  for (const sx of [-1, 1]) {
+    for (const wz of [-2.6, 2.6]) {
+      const glass = new THREE.Mesh(
+        new THREE.BoxGeometry(0.06, 0.9, 1.4),
+        new THREE.MeshStandardMaterial({ color: 0x2a3540, roughness: 0.2, metalness: 0.4 }),
+      );
+      glass.position.set(sx * (hw - t / 2), 2.6, wz);
+      b.group.add(glass);
+    }
+  }
+  // foundation skirt + concrete floor (same recipe as B.shell)
+  const skirt = new THREE.Mesh(new THREE.BoxGeometry(w + 0.24, 0.55, d + 0.24), new THREE.MeshStandardMaterial({ color: 0x6a625a, roughness: 1 }));
+  skirt.position.set(0, -0.14, 0);
+  b.group.add(skirt);
+  const slabM = new THREE.Mesh(new THREE.BoxGeometry(w - t, 0.14, d - t), new THREE.MeshStandardMaterial({ color: 0x8a8078, roughness: 1 }));
+  slabM.position.set(0, 0.07, 0);
+  slabM.receiveShadow = true;
+  b.group.add(slabM);
+  const fr = aabb(-hw + t / 2, -hd + t / 2, hw - t / 2, hd - t / 2);
+  b.floors.push({ x0: fr.x0, z0: fr.z0, x1: fr.x1, z1: fr.z1, y: 0.14 });
+  b.gableRoof(0.32, 0x8a5a40); // corrugated, rust-brown
+  // ----- roll-up doors -----
+  const slatMat = new THREE.MeshStandardMaterial({ color: 0x8b9299, roughness: 0.6, metalness: 0.35 });
+  const railMat = new THREE.MeshStandardMaterial({ color: 0x3a3f45, roughness: 0.8 });
+  for (const bx of [-3.6, 3.6]) {
+    for (const rx of [bx - 1.74, bx + 1.74]) {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.09, 3.05, 0.12), railMat);
+      rail.position.set(rx, 1.22, hd - t / 2);
+      b.group.add(rail);
+    }
+  }
+  // bay 1 (left): door rolled OPEN — coil drum + a couple of slats below it
+  const coil = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 3.4, 12), slatMat);
+  coil.rotation.z = Math.PI / 2;
+  coil.position.set(-3.6, 3.0, hd - 0.42);
+  coil.castShadow = true;
+  b.group.add(coil);
+  for (let i = 0; i < 2; i++) {
+    const s = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.17, 0.05), slatMat);
+    s.position.set(-3.6, 2.78 - i * 0.18, hd - t / 2);
+    b.group.add(s);
+  }
+  // bay 2 (right): door SHUT — full slat curtain + collider
+  for (let i = 0; i < 8; i++) {
+    const s = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.37, 0.05), slatMat);
+    s.position.set(3.6, 0.32 + i * 0.37, hd - t / 2);
+    s.castShadow = true;
+    b.group.add(s);
+  }
+  b.colliders.push(aabb(1.86, hd - 0.16, 5.34, hd + 0.02));
+  // rooftop vents: two louver boxes riding the slopes + an exhaust stack
+  const ventMat = new THREE.MeshStandardMaterial({ color: 0x9aa0a4, roughness: 0.7, metalness: 0.3 });
+  const slopeA = Math.atan2(0.32 * hd + 0.08, hd + 0.39);
+  for (const [vx, vz, sgn] of [[-3.5, -2.2, 1], [3.5, 2.2, -1]] as [number, number, number][]) {
+    const vent = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.65, 0.95), ventMat);
+    const surfY = h - 0.2 + 0.32 * hd * (1 - Math.abs(vz) / (hd + 0.39));
+    vent.position.set(vx, surfY + 0.12, vz);
+    vent.rotation.x = sgn * slopeA;
+    vent.castShadow = true;
+    b.group.add(vent);
+  }
+  const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.9, 10), ventMat);
+  stack.position.set(2.0, h - 0.2 + 0.32 * hd + 0.35, 0);
+  stack.castShadow = true;
+  b.group.add(stack);
+  // interior: workbench (visual) + a tire stack beside the parts caches
+  const bench = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.85, 0.8), new THREE.MeshStandardMaterial({ color: 0x5a4632, roughness: 1 }));
+  bench.position.set(-4.4, 0.56, -5.3);
+  bench.castShadow = true;
+  b.group.add(bench);
+  b.colliders.push(aabb(-6.0, -5.7, -2.8, -4.9));
+  const tireMat = new THREE.MeshStandardMaterial({ color: 0x1c1c1e, roughness: 1 });
+  for (let i = 0; i < 3; i++) {
+    const tire = new THREE.Mesh(new THREE.CylinderGeometry(0.37, 0.37, 0.26, 14), tireMat);
+    tire.position.set(6.2, 0.27 + i * 0.27, 3.4);
+    tire.castShadow = true;
+    b.group.add(tire);
+  }
+  b.colliders.push(aabb(5.83, 3.03, 6.57, 3.77));
+  const PARTS = [
+    { id: 'tire', min: 1, max: 1, chance: 0.5 },
+    { id: 'engine_part', min: 1, max: 1, chance: 0.4 },
+    { id: 'car_battery', min: 1, max: 1, chance: 0.45 },
+    { id: 'armor_plate', min: 1, max: 1, chance: 0.3 },
+    { id: 'scrap', min: 2, max: 4, chance: 0.85 },
+  ];
+  const BATTERIES = [
+    { id: 'car_battery', min: 1, max: 2, chance: 0.7 },
+    { id: 'wire', min: 1, max: 2, chance: 0.5 },
+    { id: 'scrap', min: 1, max: 2, chance: 0.6 },
+  ];
+  b.furnish('bookshelf', 0.5, -5.2, 'garage_parts_shelf', PARTS, 'Search parts shelf');
+  b.furnish('cabinets', 6.5, -0.6, 'garage_battery_rack', BATTERIES, 'Search battery rack');
+  b.furnish('toolbox', -6.4, -4.6, 'garage_toolbox_1', FURNITURE_LOOT.toolbox.suburban);
+  b.furnish('toolbox', 6.4, -4.6, 'garage_toolbox_2', FURNITURE_LOOT.toolbox.suburban);
+  b.furnish('crate', -6.4, 3.6, 'garage_crate', FURNITURE_LOOT.crate.suburban);
+  b.furnish('barrel', -6.5, 0.8, 'garage_barrel', FURNITURE_LOOT.barrel.suburban);
+  b.finalize();
+  return b;
+}
+
 function school(cx: number, cz: number, groundY: GroundY): B {
   const b = new B(cx, cz, 19, 10, 3.8, 0.2, groundY(cx, cz) - 0.1, 0xa8785a);
   b.shell({ doorW: 2.2, winN: 4 });
@@ -437,6 +635,8 @@ export function poiFootprints(pois: Record<string, [number, number]>): PoiFootpr
     [55, -30, 8.5, 4], // strip mall
     [105, 55, 9, 6], // warehouse
     [-30, 60, 10, 5.5], // school
+    [30, 48, 6.5, 5.5], // convenience store
+    [130, 58, 8, 6.5], // auto garage (by the warehouse)
   ];
   const out: PoiFootprint[] = town.map(([dx, dz, hw, hd]) => {
     const [cx, cz] = at('town', dx, dz);
@@ -502,6 +702,10 @@ export function buildPoiBuildings(
   add(warehouse(m[0], m[1], groundY));
   m = at('town', -30, 60);
   add(school(m[0], m[1], groundY));
+  m = at('town', 30, 48);
+  add(convenienceStore(m[0], m[1], groundY));
+  m = at('town', 130, 58);
+  add(autoGarage(m[0], m[1], groundY));
   m = at('jonah_camp', -16, -10);
   add(barn(m[0], m[1], groundY));
   m = at('marina', 0, 0);
