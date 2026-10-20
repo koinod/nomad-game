@@ -61,3 +61,17 @@ Deviations/notes:
 - Open: husk attack uses `damagePlayer` (store applies difficulty mult — per contract); player spawn is
   offset ~20m from shore_camp so q_prologue step 2 requires walking in; no per-frame allocations in the
   hot loop (sky updates throttled to 4Hz, shared geometries/materials).
+
+## 2026-10-19 — Coordinator: deploy v0.1.0 (m1/deploy)
+- Pushed `main` to github.com/koinod/nomad-game (gh OAuth token lacks `workflow` scope, so
+  `.github/workflows/ci.yml` could not be pushed — neither via gh nor the GitHub App API;
+  re-add via Vercel dashboard or `gh auth refresh -s workflow`).
+- Vercel project `nomad-game` (prj_KnJrWyBAKWnJCvQCsw5hkxO4Mq6c) created in personal scope.
+  `create_git_project` is blocked (requires teamId; the only resolvable id maps to the
+  koinocapital team scope which 403s), so no auto-deploy on push yet — redeploys via
+  create_deployment with gitSource.
+- Production deploy dpl_CKYqJNYAsSzWxJzPZuXJm4PVfd4U from main@396f24a — READY.
+  Disabled SSO protection (was 302-gating the public URL).
+- Verified: https://nomad-game-koinocapital-7163s-projects.vercel.app → 200, title NOMAD,
+  JS bundle 734,885 bytes + CSS 200.
+- Bug fixed in review: Esc/pointer-lock double-toggle (Game.ts handleLockChange).
