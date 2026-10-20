@@ -175,10 +175,15 @@ export class Game {
       for (const id of snap.world.deadHusks) this.deadHusks.add(id);
       for (const id of snap.world.cleared) this.cleared.add(id);
       // vehicles back where the run left them (fuel + condition included);
-      // v1 saves migrate with an empty list and keep their fresh spawns
+      // v1 saves migrate with an empty list and keep their fresh spawns.
+      // Matching consumes instances in spawn order — the fleet now has
+      // duplicate hulls of a def (carrier deck spawns), so a plain find
+      // would stack every save entry onto the first hull.
+      const usedVeh = new Set<string>();
       for (const vs of snap.vehicles ?? []) {
-        const v = this.vehicles.vehicles.find((x) => x.def.id === (vs.defId === 'apc' ? 'goliath' : vs.defId));
+        const v = this.vehicles.vehicles.find((x) => !usedVeh.has(x.uid) && x.def.id === (vs.defId === 'apc' ? 'goliath' : vs.defId));
         if (!v) continue;
+        usedVeh.add(v.uid);
         v.group.position.set(vs.x, vs.y, vs.z);
         v.group.rotation.y = vs.heading;
         v.heading = vs.heading;

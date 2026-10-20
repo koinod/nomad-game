@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { clamp } from './rng';
 import { resolveCollisions, type Collider } from './Colliders';
+import { CARRIER_DECK_Y } from './Airbase';
 import { ITEMS } from '../data/items';
 import type { InvItem } from '../store/types';
 import {
@@ -75,6 +76,7 @@ export const VEHICLE_DEFS: VehicleDef[] = [
   { id: 'atv', name: 'ATV', kind: 'atv', length: 2.1, width: 1.1, fuelMax: 15, burnClass: 0.6, topSpeed: 19, noiseDrive: 42, color: 0x4a5230, storageKg: 25 },
   { id: 'marsh_buggy', name: 'Marsh Buggy', kind: 'car', length: 3.6, width: 1.9, fuelMax: 30, burnClass: 0.8, topSpeed: 17, noiseDrive: 52, color: 0xd8621e, storageKg: 40, sandRunner: true, armorMul: 1.6 },
   { id: 'skiff', name: 'Skiff', kind: 'skiff', length: 5.5, width: 2.0, fuelMax: 24, burnClass: 0.9, topSpeed: 14, noiseDrive: 38, color: 0xd8d8d0, water: true, storageKg: 120 },
+  { id: 'tug', name: 'Armored Tug', kind: 'skiff', length: 13, width: 4.6, fuelMax: 160, burnClass: 2.2, topSpeed: 7, noiseDrive: 50, color: 0x4d565e, water: true, storageKg: 1500, armorMul: 0.3 },
   { id: 'sedan', name: 'Sedan', kind: 'car', length: 4.7, width: 1.8, fuelMax: 40, burnClass: 1.0, topSpeed: 21, noiseDrive: 45, color: 0x5a6a7a, storageKg: 70 },
   { id: 'mustang', name: 'Mustang Dark Horse', kind: 'car', length: 4.8, width: 1.9, fuelMax: 45, burnClass: 1.1, topSpeed: 42, noiseDrive: 55, color: 0x2f4d7d, storageKg: 45 },
   { id: 'van', name: 'Utility Van', kind: 'car', length: 5.2, width: 2.0, fuelMax: 55, burnClass: 1.3, topSpeed: 19, noiseDrive: 50, color: 0xb8b8b0, storageKg: 260 },
@@ -140,6 +142,14 @@ const mat = (c: number, rough = 0.75, metal = 0.15) =>
   new THREE.MeshStandardMaterial({ color: c, roughness: rough, metalness: metal });
 const glass = () =>
   new THREE.MeshStandardMaterial({ color: 0x2a3540, roughness: 0.15, metalness: 0.5 });
+
+/** Tinted, TRANSPARENT canopy/wheelhouse glass (the cockpit standard):
+ *  you can see the modeled interior — and the pilot — through it. */
+export const glassTint = () =>
+  new THREE.MeshStandardMaterial({
+    color: 0x39505e, roughness: 0.08, metalness: 0.65,
+    transparent: true, opacity: 0.42, side: THREE.DoubleSide,
+  });
 
 function box(g: THREE.Group, w: number, h: number, d: number, m: THREE.Material, x = 0, y = 0, z = 0): THREE.Mesh {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
@@ -737,6 +747,191 @@ function buildSkiff(g: THREE.Group, def: VehicleDef): void {
   box(g, 0.04, 0.22, 0.3, mat(0x23272c, 0.6, 0.3), 0, 0.05, -2.86);
 }
 
+// ---------------------------------------------------------------------------
+// Armored Tug (render 02) — a working boat, not a box: the hull is an
+// EXTRUDED plan outline (parallel midbody, tapered bow, beveled sheer),
+// wearing patchwork scrap-plate armor, with a glazed wheelhouse (helm,
+// wheel, seats inside), a stern crane, and two cable winch drums.
+
+function buildTug(g: THREE.Group, def: VehicleDef): void {
+  const L = def.length;
+  const W = def.width;
+  const hullM = mat(def.color, 0.72, 0.3);
+  const deckM = mat(0x59614f, 0.9, 0.05);
+  const rustM = mat(0x77543a, 0.9, 0.1);
+  const darkM = mat(0x2b2f33, 0.8, 0.2);
+  // hull: plan-view outline extruded vertically, beveled at the sheer
+  const s = new THREE.Shape();
+  const hl = L / 2;
+  const hw = W / 2;
+  s.moveTo(-hw, hl);
+  s.lineTo(hw, hl);
+  s.lineTo(hw, 1.5);
+  s.lineTo(hw * 0.82, -2.5);
+  s.lineTo(hw * 0.48, -hl + 1.3);
+  s.lineTo(0, -hl - 0.1);
+  s.lineTo(-hw * 0.48, -hl + 1.3);
+  s.lineTo(-hw * 0.82, -2.5);
+  s.lineTo(-hw, 1.5);
+  s.closePath();
+  const hullGeo = new THREE.ExtrudeGeometry(s, {
+    depth: 1.7, bevelEnabled: true, bevelThickness: 0.35, bevelSize: 0.28, bevelSegments: 2, steps: 1,
+  });
+  hullGeo.rotateX(-Math.PI / 2); // shape +Y (stern) → -Z... bow (-Y) lands at +Z
+  const hull = new THREE.Mesh(hullGeo, hullM);
+  hull.position.y = -1.15; // extrude+bevel spans -0.35..2.05 → keel ≈ -1.5, sheer rim ≈ +0.9
+  hull.castShadow = true;
+  hull.receiveShadow = true;
+  g.add(hull);
+  // deck plate + a low bulwark lip aft
+  box(g, W - 0.55, 0.09, L - 1.6, deckM, 0, 0.58, -0.3);
+  for (const sgn of [1, -1]) box(g, 0.09, 0.34, 5.4, hullM, sgn * (hw - 0.18), 0.82, -3.6);
+  box(g, W - 0.4, 0.34, 0.09, hullM, 0, 0.82, -6.3);
+  // scrap-plate patchwork: angled plates down the bow and shoulders
+  const plateCols = [0x5d686f, 0x646e66, 0x535c60, 0x6b6257];
+  const plateSpots: [number, number, number, number, number][] = [
+    // x, y, z, rotY, rotZ
+    [1.35, 0.1, 4.6, 0.5, 0.15], [-1.35, 0.1, 4.6, -0.5, -0.15],
+    [1.75, -0.25, 3.1, 0.28, 0.1], [-1.75, -0.25, 3.1, -0.28, -0.1],
+    [2.18, 0.15, 0.9, 0.06, 0.05], [-2.18, 0.15, 0.9, -0.06, -0.05],
+    [2.2, -0.3, -1.1, 0.03, -0.08], [-2.2, -0.3, -1.1, -0.03, 0.08],
+    [1.5, -0.35, 5.6, 0.72, 0.1], [-1.5, -0.35, 5.6, -0.72, -0.1],
+    [0.7, -0.15, 6.2, 0.9, 0.06], [-0.7, -0.15, 6.2, -0.9, -0.06],
+  ];
+  plateSpots.forEach(([px, py, pz, ry, rz], i) => {
+    const p = box(g, 0.05, 1.05, 1.35, mat(plateCols[i % plateCols.length], 0.85, 0.25), px, py, pz);
+    p.rotation.y = ry;
+    p.rotation.z = rz;
+    if (i % 3 === 0) {
+      const patch = box(g, 0.055, 0.5, 0.6, rustM, px * 1.01, py - 0.2, pz + 0.2);
+      patch.rotation.y = ry;
+    }
+  });
+  // ---- wheelhouse (z +1.4): glazed, with a real helm inside ----
+  const houseM = mat(0x59646c, 0.7, 0.3);
+  box(g, 3.3, 0.14, 2.7, darkM, 0, 0.66, 1.4); // house floor
+  // corner posts + aft/side walls (front + sides are glass)
+  for (const [px, pz] of [[-1.55, 2.6], [1.55, 2.6], [-1.55, 0.2], [1.55, 0.2]] as [number, number][]) {
+    box(g, 0.16, 1.75, 0.16, houseM, px, 1.55, pz);
+  }
+  box(g, 3.26, 1.75, 0.12, houseM, 0, 1.55, 0.14); // aft wall
+  box(g, 3.5, 0.16, 2.9, houseM, 0, 2.5, 1.4); // roof
+  box(g, 3.26, 0.5, 0.1, houseM, 0, 0.95, 2.66); // front lower panel
+  for (const sgn of [1, -1]) box(g, 0.1, 0.5, 2.3, houseM, sgn * 1.6, 0.95, 1.4); // side lower panels
+  const gt = glassTint();
+  const frontGlass = box(g, 3.1, 1.05, 0.05, gt, 0, 1.95, 2.66);
+  frontGlass.rotation.x = -0.1;
+  for (const sgn of [1, -1]) {
+    const sideGlass = box(g, 0.05, 1.05, 2.25, gt, sgn * 1.6, 1.95, 1.4);
+    sideGlass.castShadow = false;
+  }
+  frontGlass.castShadow = false;
+  // helm interior: console with gauges, a spoked wheel, two seats
+  const console_ = box(g, 2.2, 0.62, 0.5, darkM, 0, 1.15, 2.15);
+  console_.rotation.x = -0.16;
+  for (const gx of [-0.6, 0, 0.6]) {
+    const gauge = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.03, 14), mat(0xd8dccf, 0.35, 0.4));
+    gauge.rotation.x = Math.PI / 2 - 0.16;
+    gauge.position.set(gx, 1.32, 2.33);
+    g.add(gauge);
+  }
+  const wheelCol = box(g, 0.09, 0.55, 0.09, darkM, 0.35, 1.15, 1.82);
+  wheelCol.rotation.x = 0.5;
+  const helm = new THREE.Mesh(new THREE.TorusGeometry(0.27, 0.032, 8, 18), mat(0x3a2e20, 0.7, 0.1));
+  helm.position.set(0.35, 1.42, 1.68);
+  helm.rotation.x = 0.5;
+  helm.castShadow = true;
+  g.add(helm);
+  for (let i = 0; i < 3; i++) {
+    const spoke = box(g, 0.045, 0.5, 0.045, mat(0x3a2e20, 0.7, 0.1), 0.35, 1.42, 1.68);
+    spoke.rotation.z = (i / 3) * Math.PI;
+    spoke.rotation.x = 0.5;
+  }
+  for (const sx of [0.35, -0.75]) {
+    box(g, 0.55, 0.12, 0.55, mat(0x4a3b2c, 0.9, 0), sx, 0.98, 1.05); // seat cushion
+    box(g, 0.55, 0.65, 0.12, mat(0x4a3b2c, 0.9, 0), sx, 1.3, 0.78); // seat back
+    box(g, 0.4, 0.28, 0.4, darkM, sx, 0.78, 1.05); // pedestal
+  }
+  // mast + crossbar + spotlight + whips on the wheelhouse roof
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 1.7, 8), darkM);
+  mast.position.set(0, 3.4, 0.6);
+  mast.castShadow = true;
+  g.add(mast);
+  box(g, 1.5, 0.07, 0.07, darkM, 0, 3.95, 0.6);
+  box(g, 0.34, 0.2, 0.24, mat(0xe8e2c8, 0.4, 0.2), 0.8, 3.15, 1.9);
+  // exhaust stack behind the house
+  const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.19, 1.5, 10), rustM);
+  stack.position.set(-1.1, 1.6, -0.35);
+  stack.castShadow = true;
+  g.add(stack);
+  // ---- winch drums amidships: flanged drums wound with cable ----
+  const drumM = mat(0x37414a, 0.6, 0.45);
+  for (const dz of [-0.9, -2.15]) {
+    const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 1.15, 14), drumM);
+    drum.rotation.z = Math.PI / 2;
+    drum.position.set(0, 1.0, dz);
+    drum.castShadow = true;
+    g.add(drum);
+    for (const fx of [-0.62, 0.62]) {
+      const flange = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 0.08, 14), drumM);
+      flange.rotation.z = Math.PI / 2;
+      flange.position.set(fx, 1.0, dz);
+      g.add(flange);
+    }
+    for (let wi = -2; wi <= 2; wi++) {
+      const wrap = new THREE.Mesh(new THREE.TorusGeometry(0.41, 0.028, 6, 16), darkM);
+      wrap.rotation.y = Math.PI / 2;
+      wrap.position.set(wi * 0.16, 1.0, dz);
+      g.add(wrap);
+    }
+    box(g, 1.7, 0.55, 0.3, drumM, 0, 0.72, dz);
+  }
+  // ---- stern crane: pedestal, angled boom, cable + hook ----
+  const craneM = mat(0x707880, 0.65, 0.35);
+  const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.42, 1.5, 12), craneM);
+  ped.position.set(-1.2, 1.3, -4.9);
+  ped.castShadow = true;
+  g.add(ped);
+  const boom = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.13, 4.8, 8), craneM);
+  boom.position.set(-1.55, 3.3, -5.9);
+  boom.rotation.x = 0.72;
+  boom.rotation.z = 0.22;
+  boom.castShadow = true;
+  g.add(boom);
+  const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 2.1, 5), darkM);
+  cable.position.set(-2.05, 3.6, -7.45);
+  g.add(cable);
+  box(g, 0.16, 0.26, 0.1, darkM, -2.05, 2.5, -7.45);
+  // foredeck cargo: crates, barrels, a hatch
+  box(g, 1.5, 0.12, 1.8, darkM, 0, 0.66, 4.6);
+  const crateM = mat(0x6a7a4a, 0.9, 0.05);
+  box(g, 0.85, 0.65, 0.85, crateM, -1.15, 0.95, -3.9);
+  box(g, 0.85, 0.65, 0.85, crateM, -1.15, 1.6, -3.9);
+  box(g, 0.7, 0.55, 0.7, mat(0x707880, 0.8, 0.2), 1.25, 0.9, -3.8);
+  for (const [bx, bz] of [[1.5, 4.9], [0.85, 5.2]] as [number, number][]) {
+    const drumB = new THREE.Mesh(new THREE.CylinderGeometry(0.29, 0.29, 0.85, 12), rustM);
+    drumB.position.set(bx, 1.0, bz);
+    drumB.castShadow = true;
+    g.add(drumB);
+  }
+  // tire fenders along both rails
+  for (const sgn of [1, -1]) {
+    for (const fz of [-3.4, -0.4, 2.6]) {
+      const fender = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.13, 8, 12, Math.PI), mat(0x1c1c1e, 1, 0));
+      fender.position.set(sgn * (hw + 0.16), 0.35, fz);
+      fender.rotation.z = sgn > 0 ? -Math.PI / 2 : Math.PI / 2;
+      fender.rotation.y = Math.PI / 2;
+      g.add(fender);
+    }
+  }
+  // bollards
+  for (const [bx, bz] of [[-1.8, 5.9], [1.8, 5.9], [-1.9, -5.9], [1.9, -5.9]] as [number, number][]) {
+    const bol = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 0.4, 8), darkM);
+    bol.position.set(bx, 0.8, bz);
+    g.add(bol);
+  }
+}
+
 function makeVehicle(def: VehicleDef, x: number, z: number, heading: number, groundY: (x: number, z: number) => number): Vehicle {
   const g = new THREE.Group();
   const v: Vehicle = {
@@ -767,7 +962,10 @@ function makeVehicle(def: VehicleDef, x: number, z: number, heading: number, gro
     doors: [],
     loadedOn: null,
   };
-  if (def.kind === 'skiff') buildSkiff(g, def);
+  if (def.kind === 'skiff') {
+    if (def.id === 'tug') buildTug(g, def);
+    else buildSkiff(g, def);
+  }
   else if (def.kind === 'bike' || def.kind === 'moto' || def.kind === 'atv') buildBike(g, def, v);
   else buildCarBody(g, def, v);
   g.position.set(x, Math.max(groundY(x, z), def.water ? 0.05 : 0), z);
@@ -782,27 +980,41 @@ export interface SpawnDef {
   dx: number;
   dz: number;
   heading: number;
+  /** Absolute deck height for vehicles parked aboard a structure (the
+   *  carrier) — terrain height does not apply there. */
+  y?: number;
 }
 
+// AIRBASE wave: the fleet consolidates at the depot motor pool — two
+// apron rows south of the MAINT-BAY, heavies behind. The carrier keeps a
+// pickup + bronco aboard as deck spawns; boats stay at the marina.
 const SPAWNS: SpawnDef[] = [
-  { id: 'pickup', poi: 'shore_camp', dx: 8, dz: 4, heading: Math.PI / 2 },
-  { id: 'atv', poi: 'jonah_camp', dx: 10, dz: -4, heading: 0 },
-  { id: 'sedan', poi: 'town', dx: 18, dz: 10, heading: Math.PI / 2 },
-  { id: 'mustang', poi: 'town', dx: -14, dz: -16, heading: -Math.PI / 2 },
-  { id: 'sportbike', poi: 'town', dx: 70, dz: 20, heading: 0 },
-  { id: 'van', poi: 'town', dx: 98, dz: 46, heading: Math.PI },
-  { id: 'boxtruck', poi: 'town', dx: 48, dz: -24, heading: Math.PI / 2 },
-  { id: 'bronco', poi: 'forest_cache', dx: 6, dz: 4, heading: Math.PI / 2 },
-  { id: 'f250', poi: 'wreck', dx: 5, dz: 3, heading: 0 },
-  { id: 'motocross', poi: 'dune_cache', dx: 4, dz: 4, heading: Math.PI / 2 },
-  { id: 'semi', poi: 'dune_cache', dx: 55, dz: -18, heading: Math.PI / 2 },
-  { id: 'semi_day', poi: 'dune_cache', dx: 38, dz: -30, heading: Math.PI / 2 },
-  { id: 'sprinter', poi: 'town', dx: 88, dz: 58, heading: Math.PI },
-  { id: 'v03_hauler', poi: 'town', dx: 96, dz: 68, heading: Math.PI },
-  { id: 'marsh_buggy', poi: 'marina', dx: 16, dz: 12, heading: 0.7 },
-  { id: 'goliath', poi: 'lighthouse_base', dx: 12, dz: -8, heading: -Math.PI / 2 },
-  { id: 'tank', poi: 'lighthouse_base', dx: 24, dz: -18, heading: -Math.PI / 2 },
+  // light row (bikes, ATV, buggy)
+  { id: 'sportbike', poi: 'airbase', dx: -24, dz: 52, heading: Math.PI },
+  { id: 'motocross', poi: 'airbase', dx: -20, dz: 52, heading: Math.PI },
+  { id: 'atv', poi: 'airbase', dx: -16, dz: 52, heading: Math.PI },
+  { id: 'marsh_buggy', poi: 'airbase', dx: -11, dz: 52, heading: Math.PI },
+  // car row
+  { id: 'sedan', poi: 'airbase', dx: -4, dz: 52, heading: Math.PI },
+  { id: 'mustang', poi: 'airbase', dx: 3, dz: 52, heading: Math.PI },
+  { id: 'pickup', poi: 'airbase', dx: 10, dz: 52, heading: Math.PI },
+  { id: 'bronco', poi: 'airbase', dx: 17, dz: 52, heading: Math.PI },
+  { id: 'f250', poi: 'airbase', dx: 25, dz: 52, heading: Math.PI },
+  { id: 'van', poi: 'airbase', dx: 33, dz: 52, heading: Math.PI },
+  { id: 'sprinter', poi: 'airbase', dx: 41, dz: 52, heading: Math.PI },
+  { id: 'v03_hauler', poi: 'airbase', dx: 50, dz: 52, heading: Math.PI },
+  // heavy row
+  { id: 'boxtruck', poi: 'airbase', dx: -2, dz: 64, heading: Math.PI },
+  { id: 'semi', poi: 'airbase', dx: 10, dz: 64, heading: Math.PI },
+  { id: 'semi_day', poi: 'airbase', dx: 21, dz: 64, heading: Math.PI },
+  { id: 'goliath', poi: 'airbase', dx: 32, dz: 64, heading: Math.PI },
+  { id: 'tank', poi: 'airbase', dx: 44, dz: 64, heading: Math.PI },
+  // aboard the Heavy Logistics Carrier (deck spawns, second hulls)
+  { id: 'pickup', poi: 'carrier', dx: 10, dz: -3.2, heading: Math.PI / 2, y: CARRIER_DECK_Y },
+  { id: 'bronco', poi: 'carrier', dx: -8, dz: 3.6, heading: Math.PI / 2, y: CARRIER_DECK_Y },
+  // boats stay at the marina
   { id: 'skiff', poi: 'marina', dx: -64, dz: 8, heading: Math.PI / 2 },
+  { id: 'tug', poi: 'marina', dx: -26, dz: 16, heading: Math.PI / 2 },
 ];
 
 export class VehicleManager {
@@ -820,6 +1032,14 @@ export class VehicleManager {
         for (let i = 0; i < 12 && groundY(x, z) > -0.3; i++) x -= 8;
       }
       const v = makeVehicle(def, x, z, s.heading, groundY);
+      if (s.y !== undefined) v.group.position.y = s.y; // parked on a deck, not terrain
+      // duplicate hulls of one def (the carrier's second pickup/bronco)
+      // need unique uids — storage, hitching, and the fleet list key on uid
+      if (this.vehicles.some((o) => o.uid === v.uid)) {
+        let n = 2;
+        while (this.vehicles.some((o) => o.uid === `${def.id}#${n}`)) n++;
+        v.uid = `${def.id}#${n}`;
+      }
       this.vehicles.push(v);
       scene.add(v.group);
     }

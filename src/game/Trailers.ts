@@ -533,13 +533,13 @@ export function refreshTrailerCargoVisuals(t: Trailer): void {
 export interface TrailerSpawn { id: string; poi: string; dx: number; dz: number; heading: number }
 
 export const TRAILER_SPAWNS: TrailerSpawn[] = [
-  { id: 't_utility', poi: 'jonah_camp', dx: 16, dz: 8, heading: 0.4 },
-  { id: 't_flatbed', poi: 'town', dx: 112, dz: 48, heading: Math.PI },
-  { id: 't_box', poi: 'dune_cache', dx: 46, dz: -6, heading: Math.PI / 2 },
-  { id: 't_tanker', poi: 'town', dx: 84, dz: 26, heading: 0 },
-  { id: 't_carrier', poi: 'wreck', dx: 16, dz: 10, heading: -Math.PI / 3 },
-  // the HET-70 sits at the logistics warehouse, ready for heavy work
-  { id: 't_lowboy', poi: 'town', dx: 126, dz: 34, heading: Math.PI / 2 },
+  // AIRBASE wave: the trailer yard — one of each, in a row on the apron
+  { id: 't_utility', poi: 'airbase', dx: -108, dz: 54, heading: Math.PI },
+  { id: 't_flatbed', poi: 'airbase', dx: -99, dz: 54, heading: Math.PI },
+  { id: 't_box', poi: 'airbase', dx: -90, dz: 54, heading: Math.PI },
+  { id: 't_tanker', poi: 'airbase', dx: -81, dz: 54, heading: Math.PI },
+  { id: 't_carrier', poi: 'airbase', dx: -72, dz: 54, heading: Math.PI },
+  { id: 't_lowboy', poi: 'airbase', dx: -61, dz: 56, heading: Math.PI },
 ];
 
 function makeTrailer(def: TrailerDef, x: number, z: number, heading: number, groundY: (x: number, z: number) => number): Trailer {

@@ -742,6 +742,7 @@ export class Player {
           break;
         case 'skiff':
           lx = 0.3; lz = -0.6; gy = -0.22;
+          if (seat.id === 'tug') { lx = 0.35; lz = 1.15; gy = 0.35; } // at the helm, head in the glass band
           break;
         default: {
           lx = W * 0.21; // driver's seat, left-hand drive (+X = vehicle left)

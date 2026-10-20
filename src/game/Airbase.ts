@@ -18,6 +18,10 @@ type GroundY = (x: number, z: number) => number;
 
 export interface AirbaseFootprint { cx: number; cz: number; hw: number; hd: number }
 
+/** The carrier's main deck height (world Y). Vehicle spawns aboard and
+ *  the carrier builder both anchor to this one number. */
+export const CARRIER_DECK_Y = 3.1;
+
 const mat = (color: number, rough = 0.95, metal = 0.05, flat = false) =>
   new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal, flatShading: flat });
 const STEEL = () => mat(0x5f6a72, 0.8, 0.25);
@@ -760,9 +764,10 @@ function buildGroundWorks(ax: number, az: number, groundY: GroundY): AB {
       b.group.add(lamp);
     }
   }
-  // taxiway from the runway down to the apron + the apron itself
+  // taxiway from the runway down to the apron + the motor-pool apron
+  // (wide enough for the fleet rows and the trailer yard)
   slab(40, -26, 15, 30, 0x3a3f45);
-  slab(8, 20, 210, 34, 0x3d4148);
+  slab(2, 40, 235, 76, 0x3d4148);
   // helipads ×3: concrete, painted ring + H, teal corner lights
   const ringM = mat(0xd8d4c8, 0.9, 0);
   const cornerM = mat(0x7ae0d4, 0.4, 0, true);
