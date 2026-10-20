@@ -55,6 +55,11 @@ export default function Backpack() {
   const inventory = useGameStore((s) => s.inventory);
   const equipped = useGameStore((s) => s.equipped);
   const difficulty = useGameStore((s) => s.difficulty);
+  const phoneUnlocked = useGameStore((s) => s.phoneUnlocked);
+  const battery = useGameStore((s) => s.battery);
+  // limited mode: no live phone (dead battery or no phone) — a
+  // semi-translucent stripped pack, no field crafting
+  const limited = !phoneUnlocked || battery <= 0;
   const hp = useGameStore((s) => s.hp);
   const maxHp = useGameStore((s) => s.maxHp);
   const rested = useGameStore((s) => s.restedMinutesLeft);
@@ -100,9 +105,18 @@ export default function Backpack() {
   };
 
   return (
-    <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/60 p-4" onClick={close}>
+    <div
+      className={`absolute inset-0 z-30 flex items-center justify-center p-4 ${
+        limited ? 'bg-black/35' : 'bg-black/60'
+      }`}
+      onClick={close}
+    >
       <div
-        className="flex max-h-full w-[880px] max-w-full flex-col rounded border border-[#232b36] bg-[#0b0e12]"
+        className={`flex max-h-full w-[880px] max-w-full flex-col rounded border ${
+          limited
+            ? 'border-[#2c3644]/80 bg-[#0b0e12]/70 backdrop-blur-sm'
+            : 'border-[#232b36] bg-[#0b0e12]'
+        }`}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-label="Backpack"
@@ -110,9 +124,13 @@ export default function Backpack() {
         {/* header */}
         <div className="flex items-center justify-between border-b border-[#232b36] px-4 py-3">
           <div>
-            <div className="text-sm font-semibold text-[#d7dde5]">Backpack</div>
+            <div className="text-sm font-semibold text-[#d7dde5]">
+              Backpack
+              {limited && <span className="ml-2 text-[10px] font-normal text-[#8a94a3]">— field pack (no phone)</span>}
+            </div>
             <div className="text-[11px] text-[#8a94a3]">
-              Your bag — no phone needed{rested > 0 ? ' · Well rested' : ''}
+              {limited ? 'Phone offline — essentials only' : 'Your bag — no phone needed'}
+              {rested > 0 ? ' · Well rested' : ''}
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -132,7 +150,7 @@ export default function Backpack() {
               aria-label="Close backpack"
               className="rounded border border-[#232b36] px-3 py-1.5 text-sm text-[#d7dde5] transition-colors hover:border-[#e8b34b]"
             >
-              Close [I]
+              Close [G]
             </button>
           </div>
         </div>
@@ -279,7 +297,8 @@ export default function Backpack() {
               )}
             </div>
 
-            {/* field crafting */}
+            {/* field crafting — live-phone perk, hidden in the limited field pack */}
+            {!limited && (
             <div className="rounded border border-[#232b36] bg-[#12161c] p-2.5">
               <div className="mb-1.5 text-xs text-[#8a94a3]">Field craft</div>
               <div className="flex flex-col gap-1.5">
@@ -313,6 +332,7 @@ export default function Backpack() {
                 })}
               </div>
             </div>
+            )}
           </div>
         </div>
       </div>

@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { input, consumeLook } from './input';
 import { tryMelee, tryRanged } from './Combat';
+import { buildHandMesh, activeHandItemId } from './weaponMeshes';
 import { sfx } from '../systems/audio';
 import type { HuskManager } from './Husks';
 import { clamp, lerp } from './rng';
@@ -56,6 +57,10 @@ export class Player {
   private grounded = true;
   private crouching = false;
   private landDip = 0; // camera dip on hard landing, decays
+  private handAnchor!: THREE.Group; // right-hand weapon mount
+  private handItemId: string | null = null;
+  private smoothCamMinY = 0; // smoothed ground clearance — kills the hard-clamp snap
+  private blockBlend = 0; // 0..1 block pose blend
 
   constructor(scene: THREE.Scene) {
     this.buildMesh();
@@ -94,6 +99,10 @@ export class Player {
     this.armR = new THREE.Mesh(armGeo, jacket);
     this.armR.position.set(0.42, 1.52, 0);
     this.armR.castShadow = true;
+    // weapon mount at the fist (arm geometry is translated -0.36, so hand ≈ -0.72)
+    this.handAnchor = new THREE.Group();
+    this.handAnchor.position.set(0, -0.7, 0.08);
+    this.armR.add(this.handAnchor);
     this.rig.add(torso, head, this.legL, this.legR, this.armL, this.armR);
   }
 
@@ -124,10 +133,34 @@ export class Player {
     return { eye, dir };
   }
 
+  /** Keep the right-hand mesh in sync with what's actually equipped. */
+  private syncHandWeapon(): void {
+    const s = useGameStore.getState();
+    const want = activeHandItemId(s.equipped, s.inventory);
+    if (want === this.handItemId) return;
+    this.handItemId = want;
+    // clear old mesh
+    while (this.handAnchor.children.length > 0) {
+      const c = this.handAnchor.children[0];
+      this.handAnchor.remove(c);
+    }
+    if (want) {
+      const mesh = buildHandMesh(want);
+      // slight grip tilt so weapons read naturally in hand
+      mesh.rotation.x = 0.15;
+      this.handAnchor.add(mesh);
+    }
+  }
+
   update(dt: number, ctx: PlayerCtx): void {
+    this.syncHandWeapon();
     const [ldx, ldy] = consumeLook();
     // touch drag-look arrives in pixels too; scale both the same
     this.camYaw -= ldx * 0.0026;
+    // wrap yaw to [-PI, PI] — unbounded growth loses float precision and
+    // makes sin/cos stutter after many full turns (the "gyro hit something" snap)
+    while (this.camYaw > Math.PI) this.camYaw -= Math.PI * 2;
+    while (this.camYaw < -Math.PI) this.camYaw += Math.PI * 2;
     this.camPitch = clamp(this.camPitch - ldy * 0.0022, -1.15, 0.55);
 
     this.meleeCd -= dt;
@@ -270,7 +303,15 @@ export class Player {
     }
 
     // --- attack animation (right-arm override, after locomotion) ---
-    if (this.attackT > 0) {
+    const blocking = input.blocking && this.handItemId != null;
+    this.blockBlend = lerp(this.blockBlend, blocking ? 1 : 0, Math.min(1, dt * 12));
+    if (this.blockBlend > 0.02) {
+      // block pose: arm across the chest, weapon up — blends in/out, overrides
+      const b = this.blockBlend;
+      this.armR.rotation.x = lerp(this.armR.rotation.x, -1.45, b);
+      this.armR.rotation.y = lerp(this.armR.rotation.y, -0.9, b);
+      this.rig.rotation.y = lerp(this.rig.rotation.y, 0.25, b);
+    } else if (this.attackT > 0) {
       this.attackT -= dt;
       const k = 1 - Math.max(this.attackT, 0) / 0.28; // 0..1 across the swing
       this.armR.rotation.x = -2.3 + k * 3.1; // raise, then chop down
@@ -282,10 +323,11 @@ export class Player {
       this.rig.rotation.y *= 0.8;
     } else {
       this.rig.rotation.y *= 0.8;
+      this.armR.rotation.y *= 0.9; // release the block pose's cross-body angle
     }
 
-    // --- attacks ---
-    if (input.attackMelee && this.meleeCd <= 0) {
+    // --- attacks (blocked while guarding) ---
+    if (input.attackMelee && this.meleeCd <= 0 && this.blockBlend < 0.5) {
       this.meleeCd = 0.45;
       this.attackT = 0.28; // swing the arm — weapon or bare fist
       tryMelee({
@@ -299,7 +341,7 @@ export class Player {
         flashMuzzle: () => undefined,
       });
     }
-    if (input.attackRanged && this.rangedCd <= 0) {
+    if (input.attackRanged && this.rangedCd <= 0 && this.blockBlend < 0.5) {
       this.rangedCd = 0.4;
       this.recoilT = 0.16;
       const { eye, dir } = this.aim(ctx.camera);
@@ -318,7 +360,14 @@ export class Player {
     // --- third-person camera ---
     const cam = ctx.camera;
     const camH = (this.crouching ? 1.35 : 1.9) - this.landDip;
+    // lean: Q left, E right — shift the camera sideways + roll it
+    const leanDir = (input.leanLeft ? -1 : 0) + (input.leanRight ? 1 : 0);
+    const leanAmt = lerp((this.rig.userData.leanCamAmt as number) ?? 0, leanDir, Math.min(1, dt * 10));
+    this.rig.userData.leanCamAmt = leanAmt;
     const target = new THREE.Vector3(this.pos.x, this.pos.y + camH, this.pos.z);
+    // shift the target sideways along the camera's right vector so the lean peeks around cover
+    const right = new THREE.Vector3(Math.cos(this.camYaw), 0, -Math.sin(this.camYaw));
+    target.addScaledVector(right, leanAmt * 0.9);
     const cp = Math.cos(this.camPitch);
     const off = new THREE.Vector3(
       -Math.sin(this.camYaw) * cp,
@@ -326,9 +375,14 @@ export class Player {
       -Math.cos(this.camYaw) * cp,
     ).multiplyScalar(CAM_DIST);
     const camPos = target.clone().add(off);
-    const minY = ctx.groundY(camPos.x, camPos.z) + 0.5;
-    if (camPos.y < minY) camPos.y = minY;
+    // smoothed ground clearance: the hard clamp snapped when the camera
+    // swung over a hill or rock edge — ride over it instead
+    const targetMinY = ctx.groundY(camPos.x, camPos.z) + 0.5;
+    if (this.smoothCamMinY === 0) this.smoothCamMinY = targetMinY;
+    this.smoothCamMinY = lerp(this.smoothCamMinY, targetMinY, Math.min(1, dt * 6));
+    if (camPos.y < this.smoothCamMinY) camPos.y = this.smoothCamMinY;
     cam.position.lerp(camPos, Math.min(1, dt * 18));
     cam.lookAt(target);
+    cam.rotateZ(-leanAmt * 0.28); // roll the view with the lean
   }
 }

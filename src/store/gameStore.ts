@@ -11,6 +11,7 @@ import {
 } from './inventoryUtils';
 import { deleteSaveSlot, listSaveSlots, loadGameFromSlot, saveGameToSlot } from '../systems/save';
 import { getGame } from '../game/instance';
+import { input } from '../game/input';
 
 let uidCounter = 1;
 const newUid = () => `i${Date.now().toString(36)}${(uidCounter++).toString(36)}`;
@@ -226,7 +227,12 @@ export const useGameStore = create<GameState>()((set, get) => {
       const s = get();
       if (s.dead || s.screen !== 'game') return;
       const mult = DIFFICULTIES[s.difficulty].playerDamageTaken;
-      const hp = Math.max(0, s.hp - amount * mult);
+      let dealt = amount * mult;
+      // blocking with a melee weapon out: 75% reduction on husk hits
+      if (cause === 'husk' && input.blocking) {
+        dealt *= 0.25;
+      }
+      const hp = Math.max(0, s.hp - dealt);
       set({ hp });
       if (hp <= 0) s.die(cause);
     },
@@ -275,9 +281,15 @@ export const useGameStore = create<GameState>()((set, get) => {
       }
       const added = qty - remaining;
       if (added <= 0) return false;
-      set({ inventory: inv });
+      const patch: { inventory: InvItem[]; phoneUnlocked?: boolean } = { inventory: inv };
+      // picking up the AppBoy actually unlocks the phone (Tab/P)
+      if (itemId === 'phone' && !s.phoneUnlocked) {
+        patch.phoneUnlocked = true;
+      }
+      set(patch);
       if (!quiet) {
         s.addToast(`Picked up ${added > 1 ? `${added}x ` : ''}${def.name}`);
+        if (itemId === 'phone') s.addToast('Phone unlocked — press Tab or P to open it.');
         // collect-type quest steps
         s.questEvent('collect', itemId, added);
       }
@@ -368,7 +380,9 @@ export const useGameStore = create<GameState>()((set, get) => {
     setFlag: (flag) => {
       const s = get();
       if (s.flags[flag]) return;
-      set({ flags: { ...s.flags, [flag]: true } });
+      const patch: Record<string, unknown> = { flags: { ...s.flags, [flag]: true } };
+      if (flag === 'phone_unlocked') patch.phoneUnlocked = true;
+      set(patch);
       get().checkQuestStarts();
     },
 

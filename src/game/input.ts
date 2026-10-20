@@ -10,6 +10,9 @@ export interface InputState {
   crouch: boolean; // held
   attackMelee: boolean; // edge-triggered: set true on press, controller clears
   attackRanged: boolean; // edge-triggered
+  blocking: boolean; // held: right-click block with melee
+  leanLeft: boolean; // held: Q
+  leanRight: boolean; // held: E (tap still interacts)
   interact: boolean; // edge-triggered
   phone: boolean; // edge-triggered
   backpack: boolean; // edge-triggered
@@ -27,6 +30,9 @@ export const input: InputState = {
   crouch: false,
   attackMelee: false,
   attackRanged: false,
+  blocking: false,
+  leanLeft: false,
+  leanRight: false,
   interact: false,
   phone: false,
   backpack: false,

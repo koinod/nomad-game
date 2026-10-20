@@ -9,11 +9,13 @@ const JOY_RADIUS = 44;
 function ControlButton({
   label,
   onPress,
+  onRelease,
   ariaLabel,
   className,
 }: {
   label: string;
   onPress: () => void;
+  onRelease?: () => void;
   ariaLabel: string;
   className?: string;
 }) {
@@ -27,6 +29,11 @@ function ControlButton({
         sfx.play('ui');
         onPress();
       }}
+      onTouchEnd={(e) => {
+        e.preventDefault();
+        onRelease?.();
+      }}
+      onTouchCancel={() => onRelease?.()}
       onContextMenu={(e) => e.preventDefault()}
     >
       {label}
@@ -236,6 +243,12 @@ export default function TouchControls() {
         </div>
         <div className="flex flex-col gap-3">
           <ControlButton label="ATK" ariaLabel="Melee attack" onPress={() => { input.attackMelee = true; }} />
+          <ControlButton
+            label="BLK"
+            ariaLabel="Hold to block"
+            onPress={() => { input.blocking = true; }}
+            onRelease={() => { input.blocking = false; }}
+          />
           <ControlButton label="E" ariaLabel="Interact" onPress={() => { input.interact = true; }} />
         </div>
         <div className="flex flex-col items-center gap-3">

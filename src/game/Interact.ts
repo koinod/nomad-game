@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { useGameStore } from '../store/gameStore';
 import { ITEMS, HUSK_LOOT } from '../data/items';
+import { buildGroundMesh } from './weaponMeshes';
 import { sfx } from '../systems/audio';
 
 export interface LootEntry {
@@ -54,34 +55,21 @@ function personMesh(jacket: number, skin: number): THREE.Group {
   return g;
 }
 
-/** Small readable weapon/item mesh lying on the ground. */
-function buildPickupMesh(category: string): THREE.Group {
+/** Distinct physical mesh per item — see weaponMeshes.ts. */
+function buildPickupMesh(itemId: string, qty: number): THREE.Group {
+  const inner = buildGroundMesh(itemId, qty);
+  // lay flat on the ground plane, slight lift so it doesn't z-fight
+  inner.position.y = 0.06;
   const g = new THREE.Group();
-  const steel = new THREE.MeshStandardMaterial({ color: 0x8a8f96, roughness: 0.5, metalness: 0.6 });
-  const wood = new THREE.MeshStandardMaterial({ color: 0x5a4632, roughness: 0.9 });
-  const dark = new THREE.MeshStandardMaterial({ color: 0x2c2c30, roughness: 0.7 });
-  if (category === 'weapon-melee') {
-    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.05, 0.85), steel);
-    blade.position.z = 0.3;
-    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.28), wood);
-    grip.position.z = -0.28;
-    g.add(blade, grip);
-  } else if (category === 'weapon-ranged') {
-    const bodyM = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.13, 0.4), dark);
-    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.2, 0.1), wood);
-    grip.position.set(0, -0.12, 0.1);
-    grip.rotation.x = 0.25;
-    g.add(bodyM, grip);
-  } else {
-    const box = new THREE.Mesh(
-      new THREE.BoxGeometry(0.34, 0.24, 0.34),
-      new THREE.MeshStandardMaterial({ color: 0x9a8a6a, roughness: 0.95 }),
-    );
-    g.add(box);
-  }
-  g.traverse((o) => {
-    if (o instanceof THREE.Mesh) o.castShadow = true;
-  });
+  g.add(inner);
+  // soft glow ring so it reads as interactive without floating text
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.32, 0.4, 24),
+    new THREE.MeshBasicMaterial({ color: 0xe8b34b, transparent: true, opacity: 0.35, side: THREE.DoubleSide }),
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.02;
+  g.add(ring);
   return g;
 }
 
@@ -261,7 +249,7 @@ export class InteractSystem {
     const def = ITEMS[itemId];
     if (!def) return;
     const y = this.hooks.groundY(x, z);
-    const mesh = buildPickupMesh(def.category);
+    const mesh = buildPickupMesh(itemId, qty);
     mesh.position.set(x, y + 0.32, z);
     mesh.rotation.y = this.hooks.rng() * Math.PI * 2;
     mesh.userData.baseY = y + 0.32;

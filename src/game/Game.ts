@@ -58,6 +58,7 @@ export class Game {
   private onKeyUp = (e: KeyboardEvent) => this.handleKeyUp(e);
   private onMouseMove = (e: MouseEvent) => this.handleMouseMove(e);
   private onMouseDown = (e: MouseEvent) => this.handleMouseDown(e);
+  private onMouseUp = (e: MouseEvent) => this.handleMouseUp(e);
   private onCanvasClick = () => this.handleCanvasClick();
   private onResize = () => this.handleResize();
   private onPointerLockChange = () => this.handleLockChange();
@@ -157,6 +158,7 @@ export class Game {
     window.addEventListener('keyup', this.onKeyUp);
     window.addEventListener('mousemove', this.onMouseMove);
     window.addEventListener('mousedown', this.onMouseDown);
+    window.addEventListener('mouseup', this.onMouseUp);
     window.addEventListener('resize', this.onResize);
     document.addEventListener('pointerlockchange', this.onPointerLockChange);
     this.canvas.addEventListener('click', this.onCanvasClick);
@@ -195,6 +197,7 @@ export class Game {
     window.removeEventListener('keyup', this.onKeyUp);
     window.removeEventListener('mousemove', this.onMouseMove);
     window.removeEventListener('mousedown', this.onMouseDown);
+    window.removeEventListener('mouseup', this.onMouseUp);
     window.removeEventListener('resize', this.onResize);
     document.removeEventListener('pointerlockchange', this.onPointerLockChange);
     this.canvas.removeEventListener('click', this.onCanvasClick);
@@ -327,9 +330,19 @@ export class Game {
       sfx.play('phone', { volume: 0.5 });
     }
     if (input.backpack && s.screen === 'game' && !s.dead && !s.dialogue && !this.cutscene) {
+      // G = inventory, unified: live phone opens its Loadout (the phone's
+      // inventory UI); dead / no phone opens the translucent limited pack.
       const st = useGameStore.getState();
-      if (st.backpackOpen) st.closeBackpack();
-      else {
+      if (st.backpackOpen) {
+        st.closeBackpack();
+      } else if (st.phoneOpen) {
+        st.closePhone();
+      } else if (st.phoneUnlocked && st.battery > 0) {
+        st.openPhone('loadout');
+        if (useGameStore.getState().phoneOpen && document.pointerLockElement) {
+          document.exitPointerLock();
+        }
+      } else {
         st.openBackpack();
         if (useGameStore.getState().backpackOpen && document.pointerLockElement) {
           document.exitPointerLock();
@@ -540,20 +553,22 @@ export class Game {
         input.crouch = true;
         break;
       case 'KeyE':
-        input.interact = true;
+        input.interact = true; // tap: interact (E to open crates stays)
+        input.leanRight = true; // held: lean right
+        break;
+      case 'KeyQ':
+        input.leanLeft = true; // held: lean left
         break;
       case 'KeyF':
         input.attackMelee = true;
-        break;
-      case 'KeyQ':
-        input.attackRanged = true;
         break;
       case 'Tab':
       case 'KeyP':
         input.phone = true;
         break;
       case 'KeyI':
-        input.backpack = true;
+      case 'KeyG':
+        input.backpack = true; // G primary, I legacy
         break;
       case 'Escape':
         input.pause = true;
@@ -579,6 +594,8 @@ export class Game {
     if (e.code === 'KeyC' || e.code === 'ControlLeft' || e.code === 'ControlRight') {
       input.crouch = this.keys.has('KeyC') || this.keys.has('ControlLeft') || this.keys.has('ControlRight');
     }
+    if (e.code === 'KeyQ') input.leanLeft = false;
+    if (e.code === 'KeyE') input.leanRight = false;
     this.applyMoveKeys();
   }
 
@@ -604,7 +621,16 @@ export class Game {
     if (s.screen !== 'game' || s.paused || s.dialogue != null || this.cutscene) return;
     if (document.pointerLockElement !== this.canvas) return;
     if (e.button === 0) input.attackMelee = true;
-    else if (e.button === 2) input.attackRanged = true;
+    else if (e.button === 2) {
+      // right click: block with a melee weapon, fire with a ranged one
+      const hasMelee = s.equipped.melee != null;
+      if (hasMelee) input.blocking = true;
+      else input.attackRanged = true;
+    }
+  }
+
+  private handleMouseUp(e: MouseEvent): void {
+    if (e.button === 2) input.blocking = false;
   }
 
   private handleCanvasClick(): void {
