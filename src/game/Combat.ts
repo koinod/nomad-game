@@ -100,7 +100,19 @@ export function tryMelee(h: CombatHooks): MeleeResult {
   sfx.play('swing', { volume: 0.8 });
   h.emitNoise(h.playerPos.x, h.playerPos.z, 8);
 
-  const targets = h.husks.meleeSweep(h.playerPos, h.playerYaw, stats.range, stats.halfArcRad, stats.cleave);
+  const targets = h.husks.meleeSweep(
+    h.playerPos,
+    h.playerYaw,
+    stats.range,
+    stats.halfArcRad,
+    stats.cleave + (useGameStore.getState().perks.includes('br_cleaver') ? 1 : 0),
+  );
+  const perks = useGameStore.getState().perks;
+  const dmgMult =
+    (perks.includes('br_heavy') ? 1.15 : 1) *
+    (perks.includes('br_juggernaut') && useGameStore.getState().hp < useGameStore.getState().maxHp / 2 ? 1.3 : 1);
+  const execMult = perks.includes('br_executioner') ? 1.5 : 1;
+  const backstab = perks.includes('gh_backstab');
   let kills = 0;
   for (const t of targets) {
     const dir = new THREE.Vector3(
@@ -110,7 +122,15 @@ export function tryMelee(h: CombatHooks): MeleeResult {
     ).normalize();
     // edge hits do less — rewards centering the swing
     const falloff = t.centered ? 1 : 0.7;
-    const killed = t.husk.damage(Math.round(stats.damage * falloff), dir, stats.knockback, true);
+    let mult = dmgMult * falloff;
+    if (t.husk.stunT > 0) mult *= execMult; // Executioner: the helpless take double
+    if (backstab) {
+      const fwd = new THREE.Vector3(Math.sin(t.husk.group.rotation.y), 0, Math.cos(t.husk.group.rotation.y));
+      const behind = fwd.dot(dir) > 0.5; // player is behind the husk's facing
+      const unaware = t.husk.state === 'idle' || t.husk.state === 'wander' || t.husk.state === 'investigate';
+      if (behind || unaware) mult *= 3;
+    }
+    const killed = t.husk.damage(Math.round(stats.damage * mult), dir, stats.knockback, true);
     t.husk.investigateAt(h.playerPos);
     sfx.play('hit', { volume: 0.9 });
     if (killed) {

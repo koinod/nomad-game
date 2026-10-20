@@ -3,6 +3,8 @@ import { useGameStore } from '../store/gameStore';
 import { ITEMS } from '../data/items';
 import { QUESTS } from '../data/quests';
 import { FACTIONS, repTier } from '../data/factions';
+import { SKILLS, TREES, PERKS, xpToNext } from '../data/skills';
+import { traitName, moraleBand, type SurvivorJob } from '../data/survivors';
 import { carryLimitKg, encumbranceTier, totalWeightKg } from '../store/inventoryUtils';
 import { DIFFICULTIES } from '../store/types';
 import type { PhoneTab } from '../store/types';
@@ -397,12 +399,125 @@ function CommandTab() {
   );
 }
 
+/* ---------------- SKILLS & CREW tab ---------------- */
+
+const JOBS: SurvivorJob[] = ['Idle', 'Builder', 'Mechanic', 'Medic', 'Farmer', 'Scavenger', 'Guard', 'Operator'];
+
+function SkillsTab() {
+  const skills = useGameStore((s) => s.skills);
+  const perkPoints = useGameStore((s) => s.perkPoints);
+  const perks = useGameStore((s) => s.perks);
+  const buyPerk = useGameStore((s) => s.buyPerk);
+  const survivors = useGameStore((s) => s.survivors);
+  const assignJob = useGameStore((s) => s.assignJob);
+
+  return (
+    <div className="nomad-scroll flex h-full flex-col gap-4 overflow-y-auto">
+      <section>
+        <h3 className="mb-2 flex items-center justify-between text-xs font-semibold text-[#8a94a3]">
+          Skills <span className="text-[#e8b34b]">{perkPoints} perk point{perkPoints === 1 ? '' : 's'}</span>
+        </h3>
+        <div className="grid grid-cols-2 gap-1.5">
+          {SKILLS.map((sk) => {
+            const st = skills[sk.id];
+            const need = xpToNext(st.level);
+            return (
+              <div key={sk.id} className="rounded border border-[#232b36] bg-[#0b0e12] p-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-[#d7dde5]">{sk.name}</span>
+                  <span className="font-mono text-xs text-[#e8b34b]">Lv {st.level}</span>
+                </div>
+                <div className="mt-1 h-1.5 overflow-hidden rounded bg-[#232b36]">
+                  <div className="h-full bg-[#5aa469]" style={{ width: `${st.level >= 10 ? 100 : Math.round((st.xp / need) * 100)}%` }} />
+                </div>
+                <div className="mt-0.5 text-[10px] text-[#8a94a3]">
+                  {st.level >= 10 ? 'maxed' : `${st.xp}/${need} xp`}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      {TREES.map((tree) => (
+        <section key={tree.id}>
+          <h3 className="mb-1 text-xs font-semibold text-[#8a94a3]">{tree.name}</h3>
+          <p className="mb-2 text-[11px] text-[#8a94a3]">{tree.blurb}</p>
+          <div className="flex flex-col gap-1.5">
+            {PERKS.filter((p) => p.tree === tree.id).map((p) => {
+              const owned = perks.includes(p.id);
+              return (
+                <div key={p.id} className={`flex items-start justify-between gap-2 rounded border p-2 ${owned ? 'border-[#5aa469] bg-[#101812]' : 'border-[#232b36] bg-[#0b0e12]'}`}>
+                  <div>
+                    <div className="text-xs font-medium text-[#d7dde5]">
+                      {p.tier === 4 ? '★ ' : ''}{p.name} <span className="text-[10px] text-[#8a94a3]">T{p.tier}</span>
+                    </div>
+                    <div className="text-[11px] text-[#8a94a3]">{p.desc}</div>
+                  </div>
+                  {!owned && (
+                    <button
+                      onClick={() => { sfx.play('ui'); buyPerk(p.id); }}
+                      className="shrink-0 rounded border border-[#232b36] px-2 py-1 text-[11px] text-[#e8b34b] transition-colors hover:border-[#e8b34b]"
+                    >
+                      Learn (1)
+                    </button>
+                  )}
+                  {owned && <span className="shrink-0 text-[11px] text-[#5aa469]">Learned</span>}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ))}
+
+      <section>
+        <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Crew ({survivors.length})</h3>
+        {survivors.length === 0 && (
+          <p className="text-sm text-[#8a94a3]">Nobody yet. There are people out there — Elena at the lighthouse, Mateo near the relay, Lina in the dunes.</p>
+        )}
+        {survivors.map((sv) => (
+          <div key={sv.id} className="mb-2 rounded border border-[#232b36] bg-[#0b0e12] p-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-[#d7dde5]">{sv.name}</span>
+              <span className="text-[11px] text-[#8a94a3]">{sv.background} · {sv.age}</span>
+            </div>
+            <div className="mt-0.5 text-[11px] text-[#8a94a3]">
+              {sv.traits.map(traitName).join(' · ') || 'No notable traits'} · HP {sv.hp}
+            </div>
+            <div className="mt-1 flex items-center gap-2">
+              <span className="text-[11px] text-[#8a94a3]">Morale {sv.morale} ({moraleBand(sv.morale)})</span>
+              <div className="h-1.5 flex-1 overflow-hidden rounded bg-[#232b36]">
+                <div className={`h-full ${sv.morale >= 40 ? 'bg-[#5aa469]' : 'bg-[#d9534f]'}`} style={{ width: `${sv.morale}%` }} />
+              </div>
+            </div>
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {JOBS.map((j) => (
+                <button
+                  key={j}
+                  onClick={() => { sfx.play('ui'); assignJob(sv.id, j); }}
+                  className={`rounded border px-1.5 py-0.5 text-[10px] ${sv.job === j ? 'border-[#e8b34b] text-[#e8b34b]' : 'border-[#232b36] text-[#8a94a3]'}`}
+                >
+                  {j}
+                </button>
+              ))}
+            </div>
+            <div className="mt-1 text-[10px] text-[#8a94a3]">
+              Best: {Object.entries(sv.skills).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${k} ${v}`).join(' · ')}
+            </div>
+          </div>
+        ))}
+      </section>
+    </div>
+  );
+}
+
 /* ---------------- Phone shell ---------------- */
 
 const TABS: { id: PhoneTab; label: string }[] = [
   { id: 'loadout', label: 'Loadout' },
   { id: 'world', label: 'World' },
   { id: 'command', label: 'Command' },
+  { id: 'skills', label: 'Skills' },
 ];
 
 export default function Phone() {
@@ -458,6 +573,7 @@ export default function Phone() {
           {phoneTab === 'loadout' && <LoadoutTab />}
           {phoneTab === 'world' && <WorldMap />}
           {phoneTab === 'command' && <CommandTab />}
+          {phoneTab === 'skills' && <SkillsTab />}
         </div>
       </aside>
     </div>

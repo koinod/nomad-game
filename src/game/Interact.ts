@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { useGameStore } from '../store/gameStore';
 import { ITEMS, HUSK_LOOT, LOG_LOOT, BUSH_LOOT } from '../data/items';
+import { DESIGNED_RECRUITS } from '../data/survivors';
 import { buildGroundMesh } from './weaponMeshes';
 import { buildFurnitureMesh, FURNITURE_LABEL, type FurnitureKind } from './furnitureMeshes';
 import { sfx } from '../systems/audio';
@@ -214,6 +215,40 @@ export class InteractSystem {
           s.setFlag('relay_online');
           sfx.play('switch', { volume: 1 });
           s.addToast('The relay hums back to life.');
+        },
+      });
+    }
+
+    // ---- designed recruits: talk them into joining the crew ----
+    const recruitDefs: { key: string; poiId: string; dx: number; dz: number; jacket: number; line: string }[] = [
+      { key: 'elena', poiId: 'lighthouse_base', dx: -3, dz: 4, jacket: 0xd8d8d0, line: 'Elena: "I ran an ER before the silence. Patch me a place to work and I\u2019m yours."' },
+      { key: 'mateo', poiId: 'relay_station', dx: -14, dz: 8, jacket: 0x7a4a2a, line: 'Mateo: "Truck died two miles back. Nobody\u2019s coming. Say the word and I\u2019ll walk with you."' },
+      { key: 'lina', poiId: 'dune_cache', dx: 2, dz: -3, jacket: 0x4a5a3a, line: 'Lina: "I\u2019ve been watching the road from the dunes. You walk loud — I can fix that. Take me with you."' },
+    ];
+    for (const r of recruitDefs) {
+      const def = DESIGNED_RECRUITS[r.key];
+      if (!def) continue;
+      const [px, pz] = at(r.poiId);
+      const x = px + r.dx;
+      const z = pz + r.dz;
+      const y = hooks.groundY(x, z);
+      const mesh = personMesh(r.jacket, 0xa8785a);
+      mesh.position.set(x, y, z);
+      mesh.rotation.y = Math.PI * 0.3;
+      hooks.scene.add(mesh);
+      this.interactables.push({
+        id: `recruit:${r.key}`,
+        kind: 'npc',
+        pos: mesh.position.clone(),
+        label: `Recruit ${def.name}`,
+        use: () => {
+          if (s.survivors.some((sv) => sv.id === def.id)) {
+            s.addToast(`${def.name} is already with your crew.`);
+            return;
+          }
+          s.addToast(r.line);
+          s.recruitSurvivor({ ...def });
+          sfx.play('quest', { volume: 0.5 });
         },
       });
     }

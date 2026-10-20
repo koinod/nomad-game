@@ -540,6 +540,7 @@ export class Player {
           this.hitPunch = res.kills > 0 ? 0.34 : 0.22;
           useGameStore.getState().setHitmark(res.kills > 0 ? 'kill' : 'hit');
         }
+        if (res.kills > 0) useGameStore.getState().addSkillXp('combat', 10 * res.kills);
       }
     }
     if (input.attackRanged && this.rangedCd <= 0 && this.blockBlend < 0.5) {
@@ -562,6 +563,7 @@ export class Player {
         if (fired.hit) {
           useGameStore.getState().setHitmark(fired.killed ? 'kill' : 'hit');
           this.hitPunch = fired.killed ? 0.3 : 0.18;
+          if (fired.killed) useGameStore.getState().addSkillXp('combat', 8);
         } else {
           // a miss can still drop a rabbit or deer downrange
           const rdef = equippedRangedDef();

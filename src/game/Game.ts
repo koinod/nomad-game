@@ -58,6 +58,7 @@ export class Game {
   vehicles!: VehicleManager;
   driving: Vehicle | null = null;
   private wasFirstPerson = false;
+  private cleanMeters = 0;
   private houseColliders: Collider[] = [];
   private houseFloors: FloorRect[] = [];
   private houseRoofs: { bounds: Collider; group: THREE.Group }[] = [];
@@ -518,8 +519,11 @@ export class Game {
     // clock: 1 real second = 1 game minute
     this.timeT += dt;
     if (this.timeT >= 1) {
+      const before = s.timeMinutes;
       s.advanceTime(this.timeT);
       this.timeT = 0;
+      // a new day (clock wrapped past midnight): crew morale settles
+      if (s.timeMinutes < before) s.moraleTick();
     }
 
     // crafting-station proximity: stand within 4.5m of a station to use it
@@ -539,7 +543,7 @@ export class Game {
     // encumbrance gates sprint + slows movement
     const tier = encumbranceTier(
       totalWeightKg(s.inventory),
-      carryLimitKg(s.equipped, s.inventory, s.difficulty),
+      carryLimitKg(s.equipped, s.inventory, s.difficulty, s.perks.includes('sc_packmule') ? 8 : 0),
     );
     const speedMul = tier === 'ok' ? 1 : tier === 'heavy' ? 0.75 : 0.55;
 
@@ -550,10 +554,11 @@ export class Game {
       husks,
       animals: this.animals!,
       emitNoise: (x: number, z: number, r: number) => {
-        husks.emitNoise(x, z, r);
-        this.animals?.emitNoise(x, z, r);
+        const eff = useGameStore.getState().perks.includes('gh_soft') ? r * 0.75 : r;
+        husks.emitNoise(x, z, eff);
+        this.animals?.emitNoise(x, z, eff);
         // the HUD noise meter tracks the loudest sound at the player
-        useGameStore.getState().setNoiseLevel(Math.min(100, (r / 80) * 100));
+        useGameStore.getState().setNoiseLevel(Math.min(100, (eff / 80) * 100));
       },
       onThrow: (itemId: string) => this.throwGrenade(itemId),
       onAnimalKill: (kill: { id: string; kind: string; x: number; z: number; min: number; max: number }) => {
@@ -679,10 +684,18 @@ export class Game {
           const def = this.interact!.containerDef(q.id);
           if (def?.locked) {
             const lp = s.inventory.find((i) => i.itemId === 'lockpick');
-            if (lp) {
+            if (lp && !s.perks.includes('sc_locksmith')) {
               s.removeItem(lp.uid, 1);
               s.addToast('The lockpick turns. One less in the kit.');
+            } else if (lp) {
+              s.addToast('Picked clean — the pick survives. (Locksmith)');
             }
+            s.addSkillXp('scavenging', 10);
+          } else if (q.label.startsWith('Gather')) {
+            s.addSkillXp('scavenging', 3);
+          } else {
+            s.addSkillXp('scavenging', 4);
+            s.addSkillXp('stealth', 5);
           }
           this.searching = null;
           s.setSearch(null);
@@ -906,7 +919,8 @@ export class Game {
       s.addToast('Locked. You need a lockpick.');
       return true;
     }
-    const dur = def?.searchTime ?? (near.kind === 'corpse' ? 1 : 2);
+    const baseDur = def?.searchTime ?? (near.kind === 'corpse' ? 1 : 2);
+    const dur = s.perks.includes('sc_fingers') ? baseDur * 0.75 : baseDur;
     this.searching = {
       id: near.id,
       label: near.label,
@@ -928,6 +942,8 @@ export class Game {
     if (!v) return;
     const player = this.player!;
     const husks = this.husks!;
+    const condBefore = v.condition;
+    const posBefore = v.group.position.clone();
     this.vehicles.drive(dt, v, input.moveY, input.moveX, {
       groundY: (x, z) => this.groundY(x, z),
       colliders: this.houseColliders,
@@ -948,6 +964,16 @@ export class Game {
     });
     const pos = v.group.position;
     player.driveUpdate(dt, playerCtx, pos.x, pos.y, pos.z, v.def.length * 0.9 + 4);
+    // Driver XP: clean miles count — a collision resets the streak
+    if (v.condition < condBefore - 0.001) {
+      this.cleanMeters = 0;
+    } else {
+      this.cleanMeters += Math.hypot(pos.x - posBefore.x, pos.z - posBefore.z);
+      if (this.cleanMeters >= 100) {
+        this.cleanMeters = 0;
+        s.addSkillXp('driver', 5);
+      }
+    }
     s.setVehicle({
       name: v.def.name,
       speedKmh: Math.round(Math.abs(v.speed) * 3.6),
@@ -1045,7 +1071,11 @@ export class Game {
     const s = useGameStore.getState();
     const husks = this.husks!;
     const def = ITEMS[g.itemId];
-    const th = def.thrown!;
+    const raw = def.thrown!;
+    // Demolitionist: bigger bang, wider blast
+    const th = useGameStore.getState().perks.includes('me_demolition')
+      ? { ...raw, aoe: raw.aoe + 1, dmg: Math.round(raw.dmg * 1.25) }
+      : raw;
     const p = g.mesh.position;
     this.scene!.remove(g.mesh);
     if (th.lure) {

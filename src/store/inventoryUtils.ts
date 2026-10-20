@@ -20,24 +20,24 @@ export function usedSlots(inv: InvItem[]): number {
   return s;
 }
 
-export function carryLimitKg(equipped: Equipped, inv: InvItem[], difficulty: DifficultyId): number {
+export function carryLimitKg(equipped: Equipped, inv: InvItem[], difficulty: DifficultyId, bonusKg = 0): number {
   let limit = BASE_CARRY_KG * (1 + DIFFICULTIES[difficulty].carryBonus);
   if (equipped.pack) {
     const pack = inv.find((i) => i.uid === equipped.pack);
     const def = pack ? ITEMS[pack.itemId] : undefined;
     if (def?.carryBonus) limit += def.carryBonus;
   }
-  return limit;
+  return limit + bonusKg;
 }
 
-export function slotLimit(equipped: Equipped, inv: InvItem[]): number {
+export function slotLimit(equipped: Equipped, inv: InvItem[], bonusSlots = 0): number {
   let limit = BASE_SLOTS;
   if (equipped.pack) {
     const pack = inv.find((i) => i.uid === equipped.pack);
     const def = pack ? ITEMS[pack.itemId] : undefined;
     if (def?.packSlots) limit += def.packSlots;
   }
-  return limit;
+  return limit + bonusSlots;
 }
 
 // Encumbrance tiers per spec: >100% no sprint, >130% no dodge, >160% cannot pick up.

@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import { ITEMS, FIELD_RECIPES, STATION_RECIPES, STATION_LABEL } from '../data/items';
+import { PERKS as PERKS_ALL } from '../data/skills';
+import { TRAITS as TRAIT_DEFS } from '../data/survivors';
 import { QUESTS } from '../data/quests';
 import { DIFFICULTIES } from './types';
 import type {
@@ -10,6 +12,7 @@ import {
   carryLimitKg, encumbranceTier, slotLimit, totalWeightKg, usedSlots,
 } from './inventoryUtils';
 import { deleteSaveSlot, listSaveSlots, loadGameFromSlot, saveGameToSlot } from '../systems/save';
+import { sfx } from '../systems/audio';
 import { getGame } from '../game/instance';
 import { input } from '../game/input';
 
@@ -79,6 +82,20 @@ interface GameState {
   // noise: loudest recent noise radius at the player (0–100, decays). HUD meter.
   noiseLevel: number;
   setNoiseLevel: (n: number) => void;
+
+  // skills & archetypes (SYSTEMS_SPEC §6)
+  skills: Record<import('../data/skills').SkillId, { level: number; xp: number }>;
+  perkPoints: number;
+  perks: string[];
+  addSkillXp: (skill: import('../data/skills').SkillId, amt: number) => void;
+  buyPerk: (perkId: string) => void;
+  hasPerk: (perkId: string) => boolean;
+
+  // survivors (SYSTEMS_SPEC §5)
+  survivors: import('../data/survivors').SurvivorDef[];
+  recruitSurvivor: (def: import('../data/survivors').SurvivorDef) => void;
+  assignJob: (id: string, job: import('../data/survivors').SurvivorJob) => void;
+  moraleTick: () => void;
 
   // hold-to-search: active search of a container / corpse / safe
   search: { id: string; label: string; frac: number } | null;
@@ -282,6 +299,7 @@ export const useGameStore = create<GameState>()((set, get) => {
           const def = ITEMS[it.itemId];
           if (def?.armor) prot += def.armor * it.qty;
         }
+        if (s.perks.includes('br_thickskin')) prot += 0.05;
         dealt *= Math.max(0.5, 1 - Math.min(prot, 0.5));
       }
       const hp = Math.max(0, s.hp - dealt);
@@ -307,7 +325,7 @@ export const useGameStore = create<GameState>()((set, get) => {
       const s = get();
       // weight gate: >160% of limit blocks pickup
       const addedW = def.weight * qty;
-      const limit = carryLimitKg(s.equipped, s.inventory, s.difficulty);
+      const limit = carryLimitKg(s.equipped, s.inventory, s.difficulty, s.perks.includes('sc_packmule') ? 8 : 0);
       if (encumbranceTier(totalWeightKg(s.inventory) + addedW, limit) === 'immobile') {
         if (!quiet) s.addToast('Too heavy — drop something first.');
         return false;
@@ -323,7 +341,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         }
       }
       while (remaining > 0) {
-        if (usedSlots(inv) + def.slots > slotLimit(s.equipped, inv)) {
+        if (usedSlots(inv) + def.slots > slotLimit(s.equipped, inv, s.perks.includes('sc_pockets') ? 4 : 0)) {
           if (!quiet) s.addToast('No pack space left.');
           break;
         }
@@ -401,6 +419,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         s.healPlayer(def.heal);
         s.removeItem(uid, 1);
         s.addToast(`Used ${def.name} (+${def.heal} HP).`);
+        if (def.category === 'medical') s.addSkillXp('medicine', 4);
       } else if (def.category === 'weapon-melee' || def.category === 'weapon-ranged' || def.category === 'pack') {
         s.equipUid(uid);
       } else {
@@ -523,6 +542,100 @@ export const useGameStore = create<GameState>()((set, get) => {
     },
     setSearch: (s) => set({ search: s }),
 
+    skills: {
+      combat: { level: 0, xp: 0 },
+      mechanics: { level: 0, xp: 0 },
+      medicine: { level: 0, xp: 0 },
+      stealth: { level: 0, xp: 0 },
+      driver: { level: 0, xp: 0 },
+      scavenging: { level: 0, xp: 0 },
+      leadership: { level: 0, xp: 0 },
+    },
+    perkPoints: 0,
+    perks: [],
+    addSkillXp: (skill, amt) => {
+      const s = get();
+      const cur = s.skills[skill];
+      if (!cur || cur.level >= 10) return;
+      let { level, xp } = cur;
+      xp += amt;
+      let gained = 0;
+      while (level < 10 && xp >= 80 + 40 * level) {
+        xp -= 80 + 40 * level;
+        level++;
+        gained++;
+      }
+      if (level >= 10) xp = 0;
+      set({
+        skills: { ...s.skills, [skill]: { level, xp } },
+        perkPoints: s.perkPoints + gained,
+      });
+      if (gained > 0) {
+        const label = skill[0].toUpperCase() + skill.slice(1);
+        get().addToast(`${label} level ${level} — +${gained} perk point${gained > 1 ? 's' : ''}.`);
+        sfx.play('quest', { volume: 0.5 });
+      }
+    },
+    buyPerk: (perkId) => {
+      const s = get();
+      const def = PERKS_ALL.find((p) => p.id === perkId);
+      if (!def || s.perks.includes(perkId)) return;
+      if (s.perkPoints < 1) {
+        s.addToast('No perk points — earn skill levels first.');
+        return;
+      }
+      const tree = PERKS_ALL.filter((p) => p.tree === def.tree && s.perks.includes(p.id));
+      if (def.tier === 4) {
+        if (tree.length < 4) {
+          s.addToast('A capstone needs 4 perks in its tree first.');
+          return;
+        }
+        if (PERKS_ALL.some((p) => p.tier === 4 && s.perks.includes(p.id))) {
+          s.addToast('One capstone per run — this is who you are now.');
+          return;
+        }
+      } else if (def.tier > 1 && !tree.some((p) => p.tier === def.tier - 1)) {
+        s.addToast(`Learn a tier ${def.tier - 1} perk in this tree first.`);
+        return;
+      }
+      set({ perks: [...s.perks, perkId], perkPoints: s.perkPoints - 1 });
+      s.addToast(`Perk learned: ${def.name}.`);
+      sfx.play('quest', { volume: 0.6 });
+    },
+    hasPerk: (perkId) => get().perks.includes(perkId),
+
+    survivors: [],
+    recruitSurvivor: (def) => {
+      const s = get();
+      if (s.survivors.some((x) => x.id === def.id)) return;
+      // a new recruit lifts the whole crew (+2 morale, spec driver)
+      const crew = s.survivors.map((x) => ({ ...x, morale: Math.min(100, x.morale + 2) }));
+      set({ survivors: [...crew, def] });
+      s.addToast(`${def.name} joined your crew.`);
+      s.addSkillXp('leadership', 15);
+      sfx.play('quest', { volume: 0.6 });
+    },
+    assignJob: (id, job) => {
+      const s = get();
+      set({ survivors: s.survivors.map((x) => (x.id === id ? { ...x, job } : x)) });
+      s.addSkillXp('leadership', 2);
+    },
+    moraleTick: () => {
+      const s = get();
+      if (s.survivors.length === 0) return;
+      const next = s.survivors.map((x) => {
+        let d = 2; // fed + watered baseline (stockpile abstraction, v1)
+        for (const tid of x.traits) {
+          const t = TRAIT_DEFS.find((td) => td.id === tid);
+          if (t?.moraleDrift) d += t.moraleDrift;
+        }
+        if (x.traits.includes('loner')) d += s.survivors.length <= 3 ? 1 : -1;
+        if (x.traits.includes('social')) d += s.survivors.length >= 6 ? 1 : -1;
+        return { ...x, morale: Math.max(0, Math.min(100, x.morale + d)) };
+      });
+      set({ survivors: next });
+    },
+
     openPhone: (tab) => {
       const s = get();
       if (!s.phoneUnlocked) { s.addToast('You don’t have a phone yet.'); return; }
@@ -590,6 +703,12 @@ export const useGameStore = create<GameState>()((set, get) => {
       }
       s.addItem(recipe.resultId, recipe.resultQty, true);
       s.addToast(`Crafted ${recipe.resultQty > 1 ? `${recipe.resultQty}× ` : ''}${ITEMS[recipe.resultId]?.name ?? recipe.resultId}.`);
+      s.addSkillXp('mechanics', 6);
+      // Efficient Hands: one in five crafts comes back with a spare part
+      if (s.perks.includes('me_efficient') && recipe.components.length > 0 && Math.random() < 0.2) {
+        s.addItem(recipe.components[0].itemId, 1, true);
+        s.addToast('Efficient hands — one component came back.');
+      }
     },
 
     openSleep: () => set({ sleepOpen: true }),

@@ -3,7 +3,7 @@
 
 export type DifficultyId = 'story' | 'survivor' | 'hardcore';
 export type Screen = 'title' | 'difficulty' | 'prologue' | 'game' | 'ending';
-export type PhoneTab = 'loadout' | 'world' | 'command';
+export type PhoneTab = 'loadout' | 'world' | 'command' | 'skills';
 
 export interface DifficultyDef {
   id: DifficultyId;
