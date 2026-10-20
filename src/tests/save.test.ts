@@ -163,6 +163,14 @@ describe('migrate()', () => {
     expect(out.baseQueue).toBeUndefined();
   });
 
+  it('passes the wave-4 appearance through unchanged, absent stays absent', () => {
+    const appearance = { skinTone: 4, hairStyle: 'hawk' as const, hairColor: 3, build: 'heavy' as const };
+    const out = migrate({ ...fullV2Snapshot(), appearance, slot: '3' });
+    expect(out.appearance).toEqual(appearance);
+    const older = migrate({ ...fullV2Snapshot(), slot: '1' });
+    expect(older.appearance).toBeUndefined();
+  });
+
   it('round-trips: v0 -> v3 -> migrate again is stable', () => {
     const once = migrate(v0Snapshot());
     const twice = migrate({ ...once, slot: '1' });

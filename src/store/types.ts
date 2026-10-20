@@ -65,6 +65,28 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyDef> = {
   },
 };
 
+// ---------- appearance (wave 4: character design v1) ----------
+
+export type HairStyle = 'crop' | 'long' | 'hawk' | 'bald';
+export type BuildType = 'slim' | 'standard' | 'heavy';
+
+export interface Appearance {
+  skinTone: number; // index into SKIN_TONES
+  hairStyle: HairStyle;
+  hairColor: number; // index into HAIR_COLORS
+  build: BuildType;
+}
+
+export const SKIN_TONES = [0x8a5a3b, 0xa8785a, 0xc9a180, 0xe0bfa0, 0x6e4530, 0x54331f];
+export const HAIR_COLORS = [0x2a1e16, 0x4a3220, 0x8a6a42, 0xb8b0a4, 0x7a2e1e, 0x22252a];
+
+export const DEFAULT_APPEARANCE: Appearance = {
+  skinTone: 2,
+  hairStyle: 'crop',
+  hairColor: 0,
+  build: 'standard',
+};
+
 // ---------- inventory ----------
 export type ItemCategory =
   | 'weapon-melee' | 'weapon-ranged' | 'ammo' | 'food' | 'medical'
@@ -309,6 +331,8 @@ export interface SaveSnapshot {
   journal?: JournalEntry[];
   scouted?: Record<string, ScoutReport>;
   baseQueue?: BaseBuildOrder[];
+  // wave 4: character appearance — optional on v3, store defaults on load
+  appearance?: Appearance;
 }
 
 export interface SaveMeta {

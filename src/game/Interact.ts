@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { useGameStore } from '../store/gameStore';
 import { ITEMS, HUSK_LOOT, HUSK_KIND_LOOT, LOG_LOOT, BUSH_LOOT } from '../data/items';
-import { DESIGNED_RECRUITS } from '../data/survivors';
+import { DESIGNED_RECRUITS, SURVIVOR_LOOKS } from '../data/survivors';
 import { CLAIMABLE } from '../data/base';
 import { buildGroundMesh } from './weaponMeshes';
 import { buildFurnitureMesh, FURNITURE_LABEL, type FurnitureKind } from './furnitureMeshes';
@@ -57,15 +57,23 @@ export interface Interactable {
   use: () => void;
 }
 
-function personMesh(jacket: number, skin: number): THREE.Group {
+function personMesh(
+  jacket: number,
+  skin: number,
+  opts?: { pants?: number; build?: 'slim' | 'standard' | 'heavy' },
+): THREE.Group {
   const g = new THREE.Group();
   const jm = new THREE.MeshStandardMaterial({ color: jacket, roughness: 1 });
   const sm = new THREE.MeshStandardMaterial({ color: skin, roughness: 0.9 });
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.75, 0.34), jm);
+  const buildW = opts?.build === 'slim' ? 0.88 : opts?.build === 'heavy' ? 1.16 : 1;
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.6 * buildW, 0.75, 0.34 * buildW), jm);
   torso.position.y = 1.15;
   const head = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.34, 0.3), sm);
   head.position.y = 1.72;
-  const legs = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.78, 0.3), new THREE.MeshStandardMaterial({ color: 0x35322c, roughness: 1 }));
+  const legs = new THREE.Mesh(
+    new THREE.BoxGeometry(0.5 * buildW, 0.78, 0.3),
+    new THREE.MeshStandardMaterial({ color: opts?.pants ?? 0x35322c, roughness: 1 }),
+  );
   legs.position.y = 0.39;
   g.add(torso, head, legs);
   return g;
@@ -252,7 +260,10 @@ export class InteractSystem {
       const x = px + r.dx;
       const z = pz + r.dz;
       const y = hooks.groundY(x, z);
-      const mesh = personMesh(r.jacket, 0xa8785a);
+      const look = SURVIVOR_LOOKS[r.key];
+      const mesh = look
+        ? personMesh(look.jacket, look.skin, { pants: look.pants, build: look.build })
+        : personMesh(r.jacket, 0xa8785a);
       mesh.position.set(x, y, z);
       mesh.rotation.y = Math.PI * 0.3;
       hooks.scene.add(mesh);

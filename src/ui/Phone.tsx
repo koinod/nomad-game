@@ -15,7 +15,8 @@ import { VEHICLE_DEFS } from '../game/Vehicles';
 import { carryLimitKg, encumbranceTier, totalWeightKg } from '../store/inventoryUtils';
 import { packGridDims, canPlace, layoutItems } from '../store/gridUtils';
 import GridInventory from './GridInventory';
-import { DIFFICULTIES } from '../store/types';
+import { DIFFICULTIES, HAIR_COLORS, SKIN_TONES } from '../store/types';
+import type { BuildType, HairStyle } from '../store/types';
 import type { PhoneTab } from '../store/types';
 import { getGame } from '../game/instance';
 import { sfx } from '../systems/audio';
@@ -815,6 +816,8 @@ function CrewSection() {
 /* ---------------- CHARACTER app: vitals + skills/perks ---------------- */
 
 function CharacterTab() {
+  const appearance = useGameStore((s) => s.appearance);
+  const setAppearance = useGameStore((s) => s.setAppearance);
   const hp = useGameStore((s) => s.hp);
   const maxHp = useGameStore((s) => s.maxHp);
   const stamina = useGameStore((s) => s.stamina);
@@ -871,6 +874,70 @@ function CharacterTab() {
         </div>
         <p className="mt-2 text-[11px] text-[#8a94a3]">
           Heal from the Pack (bandages, medkits). Rest at campfires or in a claimed base to recover.
+        </p>
+      </section>
+
+      {/* wave 4: appearance — the figure in the world IS this, driver included */}
+      <section className="rounded border border-[#232b36] bg-[#0b0e12] p-3">
+        <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Appearance</h3>
+        <div className="flex flex-col gap-2.5 text-xs">
+          <div>
+            <div className="mb-1 text-[11px] text-[#8a94a3]">Skin tone</div>
+            <div className="flex gap-1.5">
+              {SKIN_TONES.map((c, i) => (
+                <button
+                  key={i}
+                  aria-label={`Skin tone ${i + 1}`}
+                  onClick={() => setAppearance({ skinTone: i })}
+                  className={`h-6 w-6 rounded-full border-2 ${appearance.skinTone === i ? 'border-[#e8b34b]' : 'border-[#232b36]'}`}
+                  style={{ backgroundColor: `#${c.toString(16).padStart(6, '0')}` }}
+                />
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="mb-1 text-[11px] text-[#8a94a3]">Hair</div>
+            <div className="flex flex-wrap gap-1.5">
+              {(['crop', 'long', 'hawk', 'bald'] as HairStyle[]).map((h) => (
+                <button
+                  key={h}
+                  onClick={() => setAppearance({ hairStyle: h })}
+                  className={`rounded border px-2 py-1 text-[11px] capitalize ${appearance.hairStyle === h ? 'border-[#e8b34b] text-[#e8b34b]' : 'border-[#232b36] text-[#d7dde5]'}`}
+                >
+                  {h}
+                </button>
+              ))}
+            </div>
+            <div className="mt-1.5 flex gap-1.5">
+              {HAIR_COLORS.map((c, i) => (
+                <button
+                  key={i}
+                  aria-label={`Hair color ${i + 1}`}
+                  onClick={() => setAppearance({ hairColor: i })}
+                  className={`h-5 w-5 rounded border-2 ${appearance.hairColor === i ? 'border-[#e8b34b]' : 'border-[#232b36]'}`}
+                  style={{ backgroundColor: `#${c.toString(16).padStart(6, '0')}` }}
+                />
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="mb-1 text-[11px] text-[#8a94a3]">Build</div>
+            <div className="flex gap-1.5">
+              {(['slim', 'standard', 'heavy'] as BuildType[]).map((b) => (
+                <button
+                  key={b}
+                  onClick={() => setAppearance({ build: b })}
+                  className={`rounded border px-2 py-1 text-[11px] capitalize ${appearance.build === b ? 'border-[#e8b34b] text-[#e8b34b]' : 'border-[#232b36] text-[#d7dde5]'}`}
+                >
+                  {b}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <p className="mt-2 text-[11px] text-[#8a94a3]">
+          Worn gear shows on the figure: your pack rides your back, a carried vest bulks the torso,
+          a riot helmet sits on the head — in third person and in the driver's seat alike.
         </p>
       </section>
 

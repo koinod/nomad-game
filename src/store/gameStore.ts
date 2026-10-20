@@ -8,9 +8,9 @@ import { FACILITIES as FACILITY_DEFS, baseHeat, buildMinutes } from '../data/bas
 import { dispatchDurationMin, poiName, resolveDispatch } from '../data/dispatch';
 import { TRAITS as TRAIT_DEFS } from '../data/survivors';
 import { QUESTS } from '../data/quests';
-import { DIFFICULTIES } from './types';
+import { DEFAULT_APPEARANCE, DIFFICULTIES } from './types';
 import type {
-  DifficultyId, Equipped, FleetEntry, InvItem, PhoneTab, QuestProgress, QuestStepType,
+  Appearance, DifficultyId, Equipped, FleetEntry, InvItem, PhoneTab, QuestProgress, QuestStepType,
   SaveMeta, SaveSnapshot, Screen, ToastMsg, TrailerFleetEntry,
   Dispatch, JournalEntry, ScoutReport, BaseBuildOrder,
 } from './types';
@@ -37,6 +37,10 @@ interface GameState {
   difficulty: DifficultyId;
   bodyType: 'male' | 'female'; // avatar variant, chosen on the run setup screen
   setBodyType: (b: 'male' | 'female') => void;
+  /** Wave 4: character appearance (Character app) — rides the v3 save. */
+  appearance: Appearance;
+  appearanceCustomized: boolean; // session flag: setBodyType stops restyling hair once true
+  setAppearance: (patch: Partial<Appearance>) => void;
   seed: number;
   paused: boolean;
 
@@ -394,7 +398,22 @@ export const useGameStore = create<GameState>()((set, get) => {
       : 'male') as 'male' | 'female',
     setBodyType: (b) => {
       set({ bodyType: b });
+      // until the player styles themselves, the hair default follows the frame
+      if (!get().appearanceCustomized) {
+        set({ appearance: { ...get().appearance, hairStyle: b === 'female' ? 'long' : 'crop' } });
+      }
       try { localStorage.setItem('nomad-body', b); } catch { /* private mode */ }
+    },
+    appearance: {
+      ...DEFAULT_APPEARANCE,
+      hairStyle: (typeof localStorage !== 'undefined' && localStorage.getItem('nomad-body') === 'female'
+        ? 'long'
+        : 'crop') as Appearance['hairStyle'],
+    },
+    appearanceCustomized: false,
+    setAppearance: (patch) => {
+      set({ appearance: { ...get().appearance, ...patch }, appearanceCustomized: true });
+      sfx.play('ui', { volume: 0.4 });
     },
     seed: 1337,
     paused: false,
@@ -1635,6 +1654,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         journal: s.journal,
         scouted: s.scouted,
         baseQueue: s.baseQueue,
+        appearance: s.appearance,
       };
       try {
         await saveGameToSlot(slot, snapshot);
@@ -1683,6 +1703,9 @@ export const useGameStore = create<GameState>()((set, get) => {
         journal: snap.journal ?? [],
         scouted: snap.scouted ?? {},
         baseQueue: snap.baseQueue ?? [],
+        // wave 4: appearance — absent on older v3 saves, keep the current look
+        appearance: snap.appearance ?? get().appearance,
+        appearanceCustomized: snap.appearance !== undefined,
         dayStats: { kills: 0, crafts: 0, pickups: 0 },
         pendingSnapshot: snap,
       });

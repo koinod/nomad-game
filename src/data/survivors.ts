@@ -127,6 +127,24 @@ export const DESIGNED_RECRUITS: Record<string, SurvivorDef> = {
   },
 };
 
+/**
+ * Wave 4: how each designed recruit LOOKS in the world — skin, jacket,
+ * pants, and frame — so the crew never reads as clones in different coats.
+ * Interact's personMesh builds from this.
+ */
+export interface SurvivorLook {
+  skin: number;
+  jacket: number;
+  pants: number;
+  build: 'slim' | 'standard' | 'heavy';
+}
+
+export const SURVIVOR_LOOKS: Record<string, SurvivorLook> = {
+  elena: { skin: 0xa8785a, jacket: 0xd8d8d0, pants: 0x3c4a56, build: 'slim' },
+  mateo: { skin: 0x8a5a3b, jacket: 0x7a4a2a, pants: 0x35322c, build: 'heavy' },
+  lina: { skin: 0xe0bfa0, jacket: 0x4a5a3a, pants: 0x2c3540, build: 'slim' },
+};
+
 export function traitName(id: string): string {
   return TRAITS.find((t) => t.id === id)?.name ?? id;
 }

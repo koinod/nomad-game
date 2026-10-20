@@ -7,7 +7,7 @@ import { buildHandMesh, activeHandItemId } from './weaponMeshes';
 import { getGame } from './instance';
 import type { AnimalManager, AnimalKill } from './Animals';
 import { resolveCollisions, type Collider } from './Colliders';
-import { DIFFICULTIES } from '../store/types';
+import { DIFFICULTIES, HAIR_COLORS, SKIN_TONES } from '../store/types';
 import { sfx } from '../systems/audio';
 import type { HuskManager } from './Husks';
 import { clamp, lerp } from './rng';
@@ -115,6 +115,8 @@ export class Player {
   private viewModel!: THREE.Group; // FP arm + weapon, parented to the camera
   private vmAnchor!: THREE.Group; // weapon mount inside the view model
   private headRef!: THREE.Mesh; // head, for walk bob
+  private figureParts: THREE.Object3D[] = []; // avatar figure meshes (rebuilt on appearance/gear change)
+  private figureSig = ''; // last figureSignature() the meshes were built from
   private smoothTarget = new THREE.Vector3(); // damped look target (TP)
   private smoothInit = false; // snap the camera once on teleport/respawn
   private fpEyeYSmooth = 0; // damped eye height (FP)
@@ -130,64 +132,33 @@ export class Player {
     scene.add(this.group);
   }
 
+  /** Everything the figure is wearing/looking like, as one cheap string —
+   *  when it changes, the figure rebuilds. Polled in update(). */
+  private figureSignature(): string {
+    const s = useGameStore.getState();
+    const a = s.appearance;
+    const packIt = s.equipped.pack ? s.inventory.find((i) => i.uid === s.equipped.pack) : undefined;
+    const vest = s.inventory.some((i) => i.itemId === 'armored_vest' && i.qty > 0) ? 1 : 0;
+    const helm = s.inventory.some((i) => i.itemId === 'riot_helmet' && i.qty > 0) ? 1 : 0;
+    return [
+      s.bodyType, a.skinTone, a.hairStyle, a.hairColor, a.build,
+      packIt?.itemId ?? '-', vest, helm,
+    ].join('|');
+  }
+
   private buildMesh(): void {
-    const female = useGameStore.getState().bodyType === 'female';
-    const skin = new THREE.MeshStandardMaterial({ color: 0xc9a180, roughness: 0.9 });
-    const jacket = new THREE.MeshStandardMaterial({
-      color: female ? 0x5a3a4e : 0x2e4a4e,
-      roughness: 1,
-    });
-    const pants = new THREE.MeshStandardMaterial({ color: 0x3a3630, roughness: 1 });
     this.rig = new THREE.Group();
     this.group.add(this.rig);
-    // female: slimmer shoulders/torso, fractionally shorter frame
-    const torsoW = female ? 0.52 : 0.62;
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(torsoW, 0.78, 0.32), jacket);
-    torso.position.y = 1.18;
-    torso.castShadow = true;
-    this.headRef = new THREE.Mesh(
-      new THREE.BoxGeometry(female ? 0.3 : 0.34, 0.36, female ? 0.3 : 0.32),
-      skin,
-    );
-    this.headRef.position.y = 1.78;
-    this.headRef.castShadow = true;
-    if (female) {
-      // hair: fall behind the head + shoulder-length sides
-      const hairMat = new THREE.MeshStandardMaterial({ color: 0x2a1e16, roughness: 1 });
-      const back = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.52, 0.1), hairMat);
-      back.position.set(0, 1.7, -0.17);
-      const top = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.1, 0.34), hairMat);
-      top.position.set(0, 1.98, -0.01);
-      back.castShadow = true;
-      this.rig.add(back, top);
-    }
-    const head = this.headRef;
-    // Pivot limbs at the joint: translate geometry so rotation swings from hip/shoulder.
-    const legGeo = new THREE.BoxGeometry(0.22, 0.8, 0.24);
-    legGeo.translate(0, -0.4, 0);
-    this.legL = new THREE.Mesh(legGeo, pants);
-    this.legL.position.set(-0.16, 0.8, 0);
-    this.legL.castShadow = true;
-    this.legR = new THREE.Mesh(legGeo, pants);
-    this.legR.position.set(0.16, 0.8, 0);
-    this.legR.castShadow = true;
-    const armGeo = new THREE.BoxGeometry(0.18, 0.72, 0.2);
-    armGeo.translate(0, -0.36, 0);
-    const shoulderW = female ? 0.36 : 0.42;
-    this.armL = new THREE.Mesh(armGeo, jacket);
-    this.armL.position.set(-shoulderW, 1.52, 0);
-    this.armL.castShadow = true;
-    this.armR = new THREE.Mesh(armGeo, jacket);
-    this.armR.position.set(shoulderW, 1.52, 0);
-    this.armR.castShadow = true;
-    if (female) this.rig.scale.setScalar(0.96);
     // Rotated +90° about X so the weapon's forward (+Z in mesh space) aligns
     // with the ARM's direction: blade/gun point where the arm points — down at
     // rest, forward when raised to aim, sweeping with the arm on a swing.
+    // Created before the figure so buildFigure can mount it on the arm;
+    // rebuilds re-mount the SAME anchor (and its weapon mesh) on the new arm.
     this.handAnchor = new THREE.Group();
     this.handAnchor.position.set(0, -0.7, 0.08);
     this.handAnchor.rotation.x = Math.PI / 2;
-    this.armR.add(this.handAnchor);
+    this.buildFigure();
+    this.figureSig = this.figureSignature();
     // swing trail: the equipped weapon's real hit zone, drawn at chest height —
     // inner 0.9m, outer = weapon range, arc = full swing wedge, centered on facing
     const trailGeo = new THREE.RingGeometry(0.9, 2.7, 24, 1, -Math.PI / 2 - 0.85, 1.7);
@@ -217,7 +188,143 @@ export class Player {
     this.viewModel.add(forearm, this.vmAnchor);
     this.viewModel.position.set(0.32, -0.3, -0.55);
     this.viewModel.visible = false;
-    this.rig.add(torso, head, this.legL, this.legR, this.armL, this.armR);
+  }
+
+  /**
+   * The avatar figure itself — WAVE 4 character design: built from the
+   * store's appearance (skin tone, hair style/color, build) + bodyType,
+   * with carried gear rendered ON the body: the equipped pack on the back
+   * (sized by tier), an armored vest's bulk, a riot helmet's shell. The
+   * same figure third-person shows is the one seated in every vehicle.
+   * Rebuilt wholesale whenever figureSignature() changes.
+   */
+  private buildFigure(): void {
+    const s = useGameStore.getState();
+    const female = s.bodyType === 'female';
+    const a = s.appearance;
+    const skin = new THREE.MeshStandardMaterial({
+      color: SKIN_TONES[a.skinTone] ?? SKIN_TONES[2], roughness: 0.9,
+    });
+    const jacket = new THREE.MeshStandardMaterial({
+      color: female ? 0x5a3a4e : 0x2e4a4e,
+      roughness: 1,
+    });
+    const pants = new THREE.MeshStandardMaterial({ color: 0x3a3630, roughness: 1 });
+    const parts: THREE.Object3D[] = [];
+    const add = (o: THREE.Object3D) => { parts.push(o); this.rig.add(o); return o; };
+    // build: slim narrows the frame, heavy broadens it (rig scale carries width)
+    const buildW = a.build === 'slim' ? 0.9 : a.build === 'heavy' ? 1.14 : 1;
+    this.rig.scale.set(buildW, female ? 0.96 : 1, buildW);
+    // female: slimmer shoulders/torso, fractionally shorter frame
+    const torsoW = (female ? 0.52 : 0.62) * (a.build === 'heavy' ? 1.1 : a.build === 'slim' ? 0.92 : 1);
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(torsoW, 0.78, 0.32), jacket);
+    torso.position.y = 1.18;
+    torso.castShadow = true;
+    add(torso);
+    this.headRef = new THREE.Mesh(
+      new THREE.BoxGeometry(female ? 0.3 : 0.34, 0.36, female ? 0.3 : 0.32),
+      skin,
+    );
+    this.headRef.position.y = 1.78;
+    this.headRef.castShadow = true;
+    add(this.headRef);
+    // ---- hair: the Character app's styles, in its colors ----
+    const hairMat = new THREE.MeshStandardMaterial({
+      color: HAIR_COLORS[a.hairColor] ?? HAIR_COLORS[0], roughness: 1,
+    });
+    if (a.hairStyle === 'crop' || a.hairStyle === 'long') {
+      const top = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.09, 0.35), hairMat);
+      top.position.set(0, 1.99, -0.01);
+      top.castShadow = true;
+      add(top);
+    }
+    if (a.hairStyle === 'long') {
+      const back = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.52, 0.1), hairMat);
+      back.position.set(0, 1.7, -0.17);
+      back.castShadow = true;
+      add(back);
+    }
+    if (a.hairStyle === 'hawk') {
+      const strip = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.17, 0.37), hairMat);
+      strip.position.set(0, 2.02, -0.01);
+      strip.castShadow = true;
+      add(strip);
+    }
+    // Pivot limbs at the joint: translate geometry so rotation swings from hip/shoulder.
+    const legGeo = new THREE.BoxGeometry(0.22, 0.8, 0.24);
+    legGeo.translate(0, -0.4, 0);
+    this.legL = new THREE.Mesh(legGeo, pants);
+    this.legL.position.set(-0.16, 0.8, 0);
+    this.legL.castShadow = true;
+    this.legR = new THREE.Mesh(legGeo, pants);
+    this.legR.position.set(0.16, 0.8, 0);
+    this.legR.castShadow = true;
+    const armGeo = new THREE.BoxGeometry(0.18, 0.72, 0.2);
+    armGeo.translate(0, -0.36, 0);
+    const shoulderW = female ? 0.36 : 0.42;
+    this.armL = new THREE.Mesh(armGeo, jacket);
+    this.armL.position.set(-shoulderW, 1.52, 0);
+    this.armL.castShadow = true;
+    this.armR = new THREE.Mesh(armGeo, jacket);
+    this.armR.position.set(shoulderW, 1.52, 0);
+    this.armR.castShadow = true;
+    add(this.legL); add(this.legR); add(this.armL); add(this.armR);
+    // the weapon mount rides the (possibly brand-new) right arm
+    if (this.handAnchor) this.armR.add(this.handAnchor);
+    // ---- worn gear renders on the body ----
+    const packIt = s.equipped.pack ? s.inventory.find((i) => i.uid === s.equipped.pack) : undefined;
+    if (packIt?.itemId === 'pack_t1' || packIt?.itemId === 'pack_t2') {
+      const big = packIt.itemId === 'pack_t2';
+      const packMat = new THREE.MeshStandardMaterial({ color: big ? 0x3a3f35 : 0x4a4438, roughness: 1 });
+      const pack = new THREE.Mesh(
+        new THREE.BoxGeometry(big ? 0.52 : 0.44, big ? 0.66 : 0.54, big ? 0.3 : 0.23),
+        packMat,
+      );
+      pack.position.set(0, 1.26, -(0.16 + (big ? 0.15 : 0.115)));
+      pack.castShadow = true;
+      add(pack);
+      if (big) {
+        // a bedroll strapped across the top — the rigger pack reads expedition-grade
+        const roll = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.5, 10), new THREE.MeshStandardMaterial({ color: 0x5a5148, roughness: 1 }));
+        roll.rotation.z = Math.PI / 2;
+        roll.position.set(0, 1.66, -0.31);
+        add(roll);
+      }
+    }
+    if (s.inventory.some((i) => i.itemId === 'armored_vest' && i.qty > 0)) {
+      // the vest's bulk over the torso + its front plate
+      const kevlar = new THREE.MeshStandardMaterial({ color: 0x2c2c30, roughness: 0.95 });
+      const vest = new THREE.Mesh(new THREE.BoxGeometry(torsoW + 0.12, 0.6, 0.44), kevlar);
+      vest.position.y = 1.22;
+      vest.castShadow = true;
+      add(vest);
+      const plate = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.4, 0.05), new THREE.MeshStandardMaterial({ color: 0x3d434b, roughness: 0.6, metalness: 0.4 }));
+      plate.position.set(0, 1.22, 0.24);
+      add(plate);
+    }
+    if (s.inventory.some((i) => i.itemId === 'riot_helmet' && i.qty > 0)) {
+      const shell = new THREE.Mesh(
+        new THREE.SphereGeometry(0.215, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.55),
+        new THREE.MeshStandardMaterial({ color: 0x35322c, roughness: 0.7 }),
+      );
+      shell.position.y = 1.82;
+      shell.castShadow = true;
+      add(shell);
+      const visor = new THREE.Mesh(
+        new THREE.BoxGeometry(0.3, 0.09, 0.03),
+        new THREE.MeshStandardMaterial({ color: 0x14181d, roughness: 0.2, metalness: 0.4 }),
+      );
+      visor.position.set(0, 1.8, 0.18);
+      add(visor);
+    }
+    this.figureParts = parts;
+  }
+
+  /** Swap the whole figure for a fresh build (appearance/gear changed). */
+  private rebuildFigure(): void {
+    for (const p of this.figureParts) this.rig.remove(p);
+    this.figureParts = [];
+    this.buildFigure();
   }
 
   setPosition(x: number, y: number, z: number): void {
@@ -300,6 +407,12 @@ export class Player {
   }
 
   update(dt: number, ctx: PlayerCtx): void {
+    // appearance or worn gear changed → rebuild the figure to match
+    const sig = this.figureSignature();
+    if (sig !== this.figureSig) {
+      this.figureSig = sig;
+      this.rebuildFigure();
+    }
     this.syncHandWeapon();
     this.timeS += dt;
     if (this.drawT > 0) this.drawT -= dt;
