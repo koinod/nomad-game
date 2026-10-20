@@ -11,6 +11,8 @@ import { UPGRADES, canInstallUpgrade } from '../data/upgrades';
 import { MODULE_DEFS } from '../data/trailerData';
 import { VEHICLE_DEFS } from '../game/Vehicles';
 import { carryLimitKg, encumbranceTier, totalWeightKg } from '../store/inventoryUtils';
+import { packGridDims, canPlace, layoutItems } from '../store/gridUtils';
+import GridInventory from './GridInventory';
 import { DIFFICULTIES } from '../store/types';
 import type { PhoneTab } from '../store/types';
 import { getGame } from '../game/instance';
@@ -36,7 +38,14 @@ function LoadoutTab() {
   const unequipSlot = useGameStore((s) => s.unequipSlot);
   const useItemUid = useGameStore((s) => s.useItemUid);
   const dropUid = useGameStore((s) => s.dropUid);
+  const hotbar = useGameStore((s) => s.hotbar);
+  const useHotbar = useGameStore((s) => s.useHotbar);
+  const assignHotbar = useGameStore((s) => s.assignHotbar);
+  const moveInvItem = useGameStore((s) => s.moveInvItem);
+  const arrangeInventory = useGameStore((s) => s.arrangeInventory);
   const [selected, setSelected] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [chip, setChip] = useState<string>('all');
 
   const sel = selected ? inventory.find((i) => i.uid === selected) : undefined;
   const selDef = sel ? ITEMS[sel.itemId] : undefined;
@@ -112,37 +121,90 @@ function LoadoutTab() {
         </div>
       </div>
 
-      {/* inventory */}
+      {/* inventory — wave 3: the true grid. Drag to move, R or double-tap
+          rotates, red frame = illegal spot. Search/chips dim non-matches. */}
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="mb-1.5 text-xs text-[#8a94a3]">Inventory</div>
-        <div className="nomad-scroll min-h-0 flex-1 overflow-y-auto rounded border border-[#232b36] bg-[#0b0e12]">
-          {inventory.length === 0 && (
-            <p className="p-3 text-sm text-[#8a94a3]">Nothing carried.</p>
-          )}
-          {inventory.map((it) => {
-            const def = ITEMS[it.itemId];
-            if (!def) return null;
-            const isEq = equippedUids.includes(it.uid);
+        <div className="mb-1.5 flex items-center gap-1.5">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search pack…"
+            aria-label="Search inventory"
+            className="min-w-0 flex-1 rounded border border-[#232b36] bg-[#0b0e12] px-2 py-1 text-xs text-[#d7dde5] placeholder:text-[#8a94a3] focus:border-[#e8b34b] focus:outline-none"
+          />
+          <button
+            onClick={() => { sfx.play('ui'); arrangeInventory('size'); }}
+            className="shrink-0 rounded border border-[#232b36] px-2 py-1 text-[11px] text-[#d7dde5] hover:border-[#e8b34b]"
+          >
+            Auto-arrange
+          </button>
+          <button
+            onClick={() => { sfx.play('ui'); arrangeInventory('category'); }}
+            className="shrink-0 rounded border border-[#232b36] px-2 py-1 text-[11px] text-[#d7dde5] hover:border-[#e8b34b]"
+          >
+            Sort
+          </button>
+        </div>
+        <div className="mb-1.5 flex flex-wrap gap-1">
+          {['all', ...new Set(inventory.map((i) => ITEMS[i.itemId]?.category ?? ''))].map((c) => (
+            <button
+              key={c}
+              onClick={() => { sfx.play('ui'); setChip(c); }}
+              className={`rounded-full border px-2 py-0.5 text-[10px] capitalize ${
+                chip === c ? 'border-[#e8b34b] text-[#e8b34b]' : 'border-[#232b36] text-[#8a94a3]'
+              }`}
+            >
+              {c === 'all' ? 'All' : c.replace('weapon-', '')}
+            </button>
+          ))}
+        </div>
+        {/* quick-use row 1-4 */}
+        <div className="mb-1.5 flex gap-1.5">
+          {hotbar.map((uid, i) => {
+            const it = uid ? inventory.find((x) => x.uid === uid) : undefined;
             return (
               <button
-                key={it.uid}
-                onClick={() => {
-                  sfx.play('ui');
-                  setSelected(it.uid);
-                }}
-                className={`flex w-full items-center justify-between border-b border-[#1a2029] px-3 py-2 text-left text-sm transition-colors hover:bg-[#1a2029] ${
-                  selected === it.uid ? 'bg-[#1a2029] text-[#e8b34b]' : 'text-[#d7dde5]'
-                }`}
+                key={i}
+                onClick={() => { if (it) { sfx.play('ui'); useHotbar(i); } }}
+                className="flex-1 truncate rounded border border-[#232b36] bg-[#0b0e12] px-1.5 py-1 text-left text-[10px] text-[#d7dde5]"
+                aria-label={`Quick slot ${i + 1}`}
               >
-                <span>
-                  {def.name}
-                  {it.qty > 1 && <span className="ml-2 text-[#8a94a3]">×{it.qty}</span>}
-                  {isEq && <span className="ml-2 text-xs text-[#5aa469]">equipped</span>}
-                </span>
-                <span className="font-mono text-xs text-[#8a94a3]">{(def.weight * it.qty).toFixed(1)} kg</span>
+                <span className="mr-1 font-mono text-[#8a94a3]">{i + 1}</span>
+                {it ? ITEMS[it.itemId]?.name : '—'}
               </button>
             );
           })}
+        </div>
+        <div className="nomad-scroll min-h-0 flex-1 overflow-y-auto">
+          {inventory.length === 0 ? (
+            <p className="p-3 text-sm text-[#8a94a3]">Nothing carried.</p>
+          ) : (
+            <GridInventory
+              items={inventory}
+              cols={packGridDims(equipped.pack ? inventory.find((i) => i.uid === equipped.pack)?.itemId : null).cols}
+              rows={packGridDims(equipped.pack ? inventory.find((i) => i.uid === equipped.pack)?.itemId : null).rows}
+              cell={40}
+              selectedUid={selected}
+              onSelect={setSelected}
+              onMove={moveInvItem}
+              equippedUids={new Set(equippedUids.filter((u): u is string => !!u))}
+              dimmedUids={
+                query.trim() || chip !== 'all'
+                  ? new Set(
+                      inventory
+                        .filter((it) => {
+                          const def = ITEMS[it.itemId];
+                          if (!def) return true;
+                          if (chip !== 'all' && def.category !== chip) return true;
+                          return !def.name.toLowerCase().includes(query.trim().toLowerCase());
+                        })
+                        .map((it) => it.uid),
+                    )
+                  : undefined
+              }
+            />
+          )}
+          <p className="mt-1 text-[10px] text-[#5a6472]">Drag to move · R / double-tap rotates · red frame = no fit</p>
         </div>
       </div>
 
@@ -168,6 +230,35 @@ function LoadoutTab() {
               dropUid(sel.uid);
               setSelected(null);
             }, { danger: true })}
+            {act('Rotate', () => {
+              const dims = packGridDims(equipped.pack ? inventory.find((i) => i.uid === equipped.pack)?.itemId : null);
+              const lay = layoutItems(inventory, dims.cols, dims.rows);
+              const p = lay.placed.get(sel.uid);
+              if (!p) return;
+              const byUid = new Map(inventory.map((i) => [i.uid, i]));
+              if (canPlace(lay.placed, byUid, sel.uid, p.gx, p.gy, !p.rot, dims.cols, dims.rows)) {
+                moveInvItem(sel.uid, p.gx, p.gy, !p.rot);
+              }
+            })}
+          </div>
+          <div className="mt-2 flex items-center gap-1.5">
+            <span className="text-[11px] text-[#8a94a3]">Quick slot:</span>
+            {[0, 1, 2, 3].map((i) => (
+              <button
+                key={i}
+                onClick={() => {
+                  sfx.play('ui');
+                  assignHotbar(i, sel.uid);
+                  useGameStore.getState().addToast(`${selDef.name} → quick slot ${i + 1}.`);
+                }}
+                aria-label={`Assign to quick slot ${i + 1}`}
+                className={`rounded border px-2 py-0.5 font-mono text-[11px] ${
+                  hotbar[i] === sel.uid ? 'border-[#e8b34b] text-[#e8b34b]' : 'border-[#232b36] text-[#d7dde5]'
+                }`}
+              >
+                {i + 1}
+              </button>
+            ))}
           </div>
         </div>
       )}
