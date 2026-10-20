@@ -5,7 +5,8 @@
 export type SfxName =
   | 'swing' | 'shot' | 'hit' | 'hurt' | 'pickup' | 'ui'
   | 'step' | 'quest' | 'eat' | 'phone' | 'switch' | 'beacon' | 'craft'
-  | 'tick' | 'killconfirm' | 'headshot' | 'thud' | 'jam' | 'dryfire';
+  | 'tick' | 'killconfirm' | 'headshot' | 'thud' | 'jam' | 'dryfire'
+  | 'shriek' | 'burst' | 'spit';
 
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
@@ -205,6 +206,25 @@ export const sfx = {
           // hammer on an empty chamber: one flat click
           noise({ filterType: 'highpass', freq: 2000, e: { t0: now, peak: 0.2 * v, decay: 0.03 } });
           osc('square', 420, { t0: now, peak: 0.08 * v, decay: 0.03, slideTo: 240 });
+          break;
+        case 'shriek':
+          // the screamer lets go: two detuned saws climbing into a peak,
+          // with a breath of noise tearing over the top
+          osc('sawtooth', 480, { t0: now, peak: 0.16 * v, attack: 0.25, decay: 0.75, slideTo: 1450 });
+          osc('sawtooth', 512, { t0: now + 0.05, peak: 0.13 * v, attack: 0.25, decay: 0.7, slideTo: 1390 });
+          osc('square', 960, { t0: now + 0.1, peak: 0.07 * v, attack: 0.2, decay: 0.6, slideTo: 2200 });
+          noise({ filterType: 'bandpass', freq: 1800, q: 1.4, slideTo: 2600, e: { t0: now, peak: 0.12 * v, attack: 0.2, decay: 0.8 } });
+          break;
+        case 'burst':
+          // a bloater going off: gas boom first, wet splatter after
+          osc('sine', 96, { t0: now, peak: 0.6 * v, decay: 0.32, slideTo: 36 });
+          noise({ filterType: 'lowpass', freq: 900, slideTo: 220, e: { t0: now, peak: 0.35 * v, decay: 0.22 } });
+          noise({ filterType: 'bandpass', freq: 500, q: 0.8, e: { t0: now + 0.08, peak: 0.2 * v, decay: 0.3 } });
+          break;
+        case 'spit':
+          // a wet hock: a falling blip with a noisy throat behind it
+          osc('sine', 340, { t0: now, peak: 0.2 * v, decay: 0.16, slideTo: 130 });
+          noise({ filterType: 'bandpass', freq: 900, q: 1.2, slideTo: 400, e: { t0: now, peak: 0.14 * v, decay: 0.12 } });
           break;
       }
     } catch {
