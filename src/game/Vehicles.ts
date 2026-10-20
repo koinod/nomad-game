@@ -15,6 +15,7 @@ import {
 } from '../data/upgrades';
 import { box, chrome, darkTrim, glassTint, lampMat, loftMesh, mat, tailMat, tube } from './modelKit';
 import { buildStallion, applyStallionUpgrades } from './carModels';
+import { buildBoxtruck } from './truckModels';
 import {
   cgHeightM, cornerRoll, effectiveSteerAngle, impactBounce, impactDamage,
   understeerK, vehicleMassKg, weightTransferPitch,
@@ -200,6 +201,7 @@ function mirrors(g: THREE.Group, W: number, y: number, z: number, spread = 0.06)
 
 function buildCarBody(g: THREE.Group, def: VehicleDef, v: Vehicle): void {
   if (def.id === 'mustang') { buildStallion(g, def, v); return; } // CRAFT WAVE: lofted Stallion family
+  if (def.id === 'boxtruck') { buildBoxtruck(g, def, v); return; }
   const { length: L, width: W } = def;
   const color = def.id === 'semi' ? SEMI_PAINTS[v.colorPick % SEMI_PAINTS.length] : def.color;
   const body = mat(color, 0.55, 0.35);
