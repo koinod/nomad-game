@@ -660,6 +660,60 @@ export class Player {
     }
   }
 
+  /**
+   * Driving rig: the player rides the vehicle — position glued to it, body
+   * hidden, chase camera with free look. Call instead of update() while driving.
+   */
+  driveUpdate(dt: number, ctx: PlayerCtx, tx: number, ty: number, tz: number, camDist: number): void {
+    if (this.viewModel.parent === ctx.camera) ctx.camera.remove(this.viewModel);
+    this.viewModel.visible = false;
+    this.swingTrail.visible = false;
+    this.group.visible = false;
+    this.pos.x = tx;
+    this.pos.z = tz;
+    this.pos.y = ty;
+    const [ldxRaw, ldyRaw] = consumeLook();
+    const ldx = clamp(ldxRaw, -90, 90);
+    const ldy = clamp(ldyRaw, -90, 90);
+    this.camYaw -= ldx * 0.0026;
+    while (this.camYaw > Math.PI) this.camYaw -= Math.PI * 2;
+    while (this.camYaw < -Math.PI) this.camYaw += Math.PI * 2;
+    this.camPitch = clamp(this.camPitch - ldy * 0.0022, -0.9, 0.4);
+    const cam = ctx.camera;
+    const cp = Math.cos(this.camPitch);
+    const target = new THREE.Vector3(tx, ty + 1.9, tz);
+    if (!this.smoothInit) {
+      this.smoothTarget.copy(target);
+      this.smoothInit = true;
+    }
+    this.smoothTarget.lerp(target, Math.min(1, dt * 22));
+    const dist = Math.max(this.zoomDist, camDist);
+    const off = new THREE.Vector3(
+      -Math.sin(this.camYaw) * cp,
+      -Math.sin(this.camPitch),
+      -Math.cos(this.camYaw) * cp,
+    ).multiplyScalar(dist);
+    const camPos = this.smoothTarget.clone().add(off);
+    const minY = ctx.groundY(camPos.x, camPos.z) + 0.6;
+    if (camPos.y < minY) camPos.y = minY;
+    cam.position.lerp(camPos, Math.min(1, dt * 18));
+    cam.lookAt(this.smoothTarget);
+    if (Math.abs(cam.fov - 62) > 0.05) {
+      cam.fov = lerp(cam.fov, 62, Math.min(1, dt * 8));
+      cam.updateProjectionMatrix();
+    }
+  }
+
+  /** Restore the on-foot body after exiting a vehicle. */
+  endDrive(): void {
+    this.group.visible = true;
+  }
+
+  /** Vehicles drive from the chase camera: force the mode from outside. */
+  forceFirstPerson(v: boolean, camera: THREE.PerspectiveCamera): void {
+    this.setFirstPerson(v, camera);
+  }
+
   /** First-person arm: bob, swing thrust, and block guard. */
   private updateViewModel(dt: number, leanAmt: number): void {
     const vm = this.viewModel;

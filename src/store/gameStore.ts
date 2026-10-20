@@ -103,6 +103,8 @@ interface GameState {
 
   syncPlayer: (pos: [number, number, number], hp: number, stamina: number) => void;
   damagePlayer: (amount: number, cause: string) => void;
+  vehicle: { name: string; speedKmh: number; fuelPct: number; condPct: number } | null;
+  setVehicle: (v: { name: string; speedKmh: number; fuelPct: number; condPct: number } | null) => void;
   healPlayer: (amount: number) => void;
   advanceTime: (minutes: number) => void;
 
@@ -257,11 +259,18 @@ export const useGameStore = create<GameState>()((set, get) => {
 
     syncPlayer: (pos, hp, stamina) => set({ pos, hp: Math.max(0, hp), stamina }),
 
+    vehicle: null,
+    setVehicle: (v) => set({ vehicle: v }),
+
     damagePlayer: (amount, cause) => {
       const s = get();
       if (s.dead || s.screen !== 'game') return;
       const mult = DIFFICULTIES[s.difficulty].playerDamageTaken;
       let dealt = amount * mult;
+      // inside a vehicle: the steel takes most of it
+      if (cause === 'husk' && s.vehicle) {
+        dealt *= 0.3;
+      }
       // blocking with a melee weapon out: 75% reduction on husk hits
       if (cause === 'husk' && input.blocking) {
         dealt *= 0.25;

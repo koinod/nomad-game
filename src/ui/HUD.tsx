@@ -23,6 +23,30 @@ function Bar({
   );
 }
 
+function VehiclePanel() {
+  const vehicle = useGameStore((s) => s.vehicle);
+  if (!vehicle) return null;
+  return (
+    <div className="absolute bottom-4 left-4 w-52 rounded bg-[#141a21]/85 p-3 backdrop-blur">
+      <div className="mb-1 flex items-center justify-between">
+        <span className="text-xs font-semibold uppercase tracking-wider text-[#e8b34b]">{vehicle.name}</span>
+        <span className="font-mono text-lg text-[#d7dde5]">{vehicle.speedKmh}<span className="text-xs text-[#8a94a3]"> km/h</span></span>
+      </div>
+      <div className="mb-1 flex items-center justify-between text-[11px] text-[#8a94a3]">
+        <span>Fuel</span>
+        <span>{Math.round(vehicle.fuelPct * 100)}%</span>
+      </div>
+      <Bar value={vehicle.fuelPct} max={1} fill={vehicle.fuelPct < 0.15 ? 'bg-[#d9534f]' : 'bg-[#c9a44a]'} bg="bg-[#232b36]" />
+      <div className="mb-1 mt-2 flex items-center justify-between text-[11px] text-[#8a94a3]">
+        <span>Condition</span>
+        <span>{Math.round(vehicle.condPct * 100)}%</span>
+      </div>
+      <Bar value={vehicle.condPct} max={1} fill={vehicle.condPct < 0.3 ? 'bg-[#d9534f]' : 'bg-[#5aa469]'} bg="bg-[#232b36]" />
+      <div className="mt-2 text-[11px] text-[#8a94a3]">W/S drive · A/D steer · F exit</div>
+    </div>
+  );
+}
+
 function Clock() {
   const timeMinutes = useGameStore((s) => s.timeMinutes);
   const hh = String(Math.floor(timeMinutes / 60)).padStart(2, '0');
@@ -264,6 +288,7 @@ export default function HUD() {
       <div className="pointer-events-auto absolute bottom-4 left-1/2 -translate-x-1/2">
         <Hotbar />
       </div>
+      <VehiclePanel />
 
       {/* controls hint, desktop only */}
       {!('ontouchstart' in window) && (

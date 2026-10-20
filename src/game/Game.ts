@@ -14,7 +14,8 @@ import { HuskManager } from './Husks';
 import type { Husk, SpawnZone } from './Husks';
 import { InteractSystem, buildContainerDefs } from './Interact';
 import { AnimalManager } from './Animals';
-import { floorYAt, type Collider, type FloorRect } from './Colliders';
+import { VehicleManager, type Vehicle } from './Vehicles';
+import { floorYAt, resolveCollisions, type Collider, type FloorRect } from './Colliders';
 import { sfx, ambience } from '../systems/audio';
 import { ENDING_LINES } from '../narrative/dialogue';
 import {
@@ -53,6 +54,9 @@ export class Game {
   private fireZones: { group: THREE.Group; t: number; x: number; z: number }[] = [];
   // hold-to-search state (container / corpse / safe)
   private searching: { id: string; label: string; t: number; dur: number; x: number; z: number; hp: number } | null = null;
+  vehicles!: VehicleManager;
+  driving: Vehicle | null = null;
+  private wasFirstPerson = false;
   private houseColliders: Collider[] = [];
   private houseFloors: FloorRect[] = [];
   private houseRoofs: { bounds: Collider; group: THREE.Group }[] = [];
@@ -128,6 +132,10 @@ export class Game {
 
     this.world = new World(this.scene, opts.seed);
     this.world.build();
+
+    // vehicles: the full roster parked around the island
+    this.vehicles = new VehicleManager();
+    this.vehicles.spawn(this.scene!, this.world.poiPositions, (x, z) => heightAt(x, z));
 
     // register POIs (contract)
     useGameStore.getState().setPoiPositions(this.world.poiPositions);
@@ -534,20 +542,20 @@ export class Game {
     );
     const speedMul = tier === 'ok' ? 1 : tier === 'heavy' ? 0.75 : 0.55;
 
-    player.update(dt, {
-      groundY: (x, z) => this.groundY(x, z),
+    const playerCtx = {
+      groundY: (x: number, z: number) => this.groundY(x, z),
       sprintAllowed: tier === 'ok',
       speedMul,
       husks,
       animals: this.animals!,
-      emitNoise: (x, z, r) => {
+      emitNoise: (x: number, z: number, r: number) => {
         husks.emitNoise(x, z, r);
         this.animals?.emitNoise(x, z, r);
         // the HUD noise meter tracks the loudest sound at the player
         useGameStore.getState().setNoiseLevel(Math.min(100, (r / 80) * 100));
       },
-      onThrow: (itemId) => this.throwGrenade(itemId),
-      onAnimalKill: (kill) => {
+      onThrow: (itemId: string) => this.throwGrenade(itemId),
+      onAnimalKill: (kill: { id: string; kind: string; x: number; z: number; min: number; max: number }) => {
         // gut the kill: raw meat appears where the animal fell
         const qty = kill.min + Math.floor(this.rng() * (kill.max - kill.min + 1));
         this.interact?.registerPickup(
@@ -562,7 +570,12 @@ export class Game {
       },
       camera,
       colliders: this.houseColliders,
-    });
+    };
+    if (this.driving) {
+      this.updateDriving(dt, s, playerCtx);
+    } else {
+      player.update(dt, playerCtx);
+    }
     this.world?.updateShadowTarget(player.pos.x, player.pos.z);
 
     // hide the roof of whatever house the player is inside (see your own rooms)
@@ -664,16 +677,33 @@ export class Game {
     // noise meter decays — silence is the default state
     if (s.noiseLevel > 0) s.setNoiseLevel(s.noiseLevel * Math.pow(0.2, dt));
 
-    // interact prompt (F within 3m)
-    const near = this.interact!.nearest(player.pos.x, player.pos.z, 3);
-    s.setInteractPrompt(near ? `[F] ${near.label}` : null);
-    if (input.interact && near && !this.searching) {
-      const handled = this.beginSearchIfNeeded(near);
-      if (!handled) {
-        near.use();
-        // refresh prompt (e.g. container now looted)
-        const again = this.interact!.nearest(player.pos.x, player.pos.z, 3);
-        s.setInteractPrompt(again ? `[F] ${again.label}` : null);
+    // interact prompt (F within 3m) — a vehicle within reach takes priority
+    const veh = !this.driving && !this.searching
+      ? this.vehicles.nearest(player.pos.x, player.pos.z, 2.9)
+      : null;
+    if (this.driving) {
+      s.setInteractPrompt('[F] Exit vehicle');
+    } else if (veh) {
+      const fuelNote = veh.fuel <= 0.05 ? ' — TANK EMPTY' : veh.fuel < veh.def.fuelMax * 0.35 ? ' · [R] refuel' : '';
+      s.setInteractPrompt(`[F] Drive ${veh.def.name}${fuelNote}`);
+      if (input.interact) {
+        this.enterVehicle(veh);
+        input.interact = false;
+      } else if (input.refuel) {
+        this.refuelVehicle(veh);
+        input.refuel = false;
+      }
+    } else {
+      const near = this.interact!.nearest(player.pos.x, player.pos.z, 3);
+      s.setInteractPrompt(near ? `[F] ${near.label}` : null);
+      if (input.interact && near && !this.searching) {
+        const handled = this.beginSearchIfNeeded(near);
+        if (!handled) {
+          near.use();
+          // refresh prompt (e.g. container now looted)
+          const again = this.interact!.nearest(player.pos.x, player.pos.z, 3);
+          s.setInteractPrompt(again ? `[F] ${again.label}` : null);
+        }
       }
     }
 
@@ -787,6 +817,9 @@ export class Game {
       case 'KeyF':
         input.interact = true;
         break;
+      case 'KeyR':
+        input.refuel = true;
+        break;
       case 'Tab':
       case 'KeyP':
         input.phone = true;
@@ -869,11 +902,107 @@ export class Game {
     return true;
   }
 
+  // ------------------------------------------------------------------
+  // vehicles
+  // ------------------------------------------------------------------
+
+  private updateDriving(dt: number, s: ReturnType<typeof useGameStore.getState>, playerCtx: import('./Player').PlayerCtx): void {
+    const v = this.driving;
+    if (!v) return;
+    const player = this.player!;
+    const husks = this.husks!;
+    this.vehicles.drive(dt, v, input.moveY, input.moveX, {
+      groundY: (x, z) => this.groundY(x, z),
+      colliders: this.houseColliders,
+      ram: (x, z, r, dmg) => {
+        const killed = husks.damageInRadius(x, z, r, dmg);
+        if (killed > 0) {
+          sfx.play('hit', { volume: 0.6 });
+          this.requestHitstop(60);
+        }
+        husks.emitNoise(x, z, 20);
+      },
+      noise: (x, z, r) => {
+        husks.emitNoise(x, z, r);
+        this.animals?.emitNoise(x, z, r);
+        s.setNoiseLevel(Math.min(100, (r / 80) * 100));
+      },
+      time: this.elapsed,
+    });
+    const pos = v.group.position;
+    player.driveUpdate(dt, playerCtx, pos.x, pos.y, pos.z, v.def.length * 0.9 + 4);
+    s.setVehicle({
+      name: v.def.name,
+      speedKmh: Math.round(Math.abs(v.speed) * 3.6),
+      fuelPct: v.fuel / v.def.fuelMax,
+      condPct: v.condition,
+    });
+    if (input.interact) {
+      this.exitVehicle();
+      input.interact = false;
+    }
+  }
+
+  private enterVehicle(v: Vehicle): void {
+    this.driving = v;
+    this.wasFirstPerson = this.player!.firstPerson;
+    if (this.wasFirstPerson) this.player!.forceFirstPerson(false, this.camera!);
+    this.player!.camYaw = v.heading;
+    const s = useGameStore.getState();
+    s.setVehicle({
+      name: v.def.name,
+      speedKmh: 0,
+      fuelPct: v.fuel / v.def.fuelMax,
+      condPct: v.condition,
+    });
+    s.addToast(`Driving the ${v.def.name}. F to get out${v.fuel <= 0.05 ? ' — the tank is dry, find a fuel can.' : ''}`);
+    sfx.play('ui', { volume: 0.5 });
+  }
+
+  private exitVehicle(): void {
+    const v = this.driving;
+    if (!v) return;
+    const player = this.player!;
+    // climb out on the left flank: left vector for heading h is (cos?, -sin?) —
+    // local -X after rotation.y = h maps to (-cos h, 0, +sin h) in world
+    const ex = v.group.position.x - Math.cos(v.heading) * (v.def.width / 2 + 1.1);
+    const ez = v.group.position.z + Math.sin(v.heading) * (v.def.width / 2 + 1.1);
+    player.pos.x = ex;
+    player.pos.z = ez;
+    player.pos.y = this.groundY(ex, ez);
+    resolveCollisions(player.pos, 0.45, this.houseColliders);
+    v.speed = 0;
+    this.driving = null;
+    player.endDrive();
+    if (this.wasFirstPerson) player.forceFirstPerson(true, this.camera!);
+    useGameStore.getState().setVehicle(null);
+    sfx.play('ui', { volume: 0.4 });
+  }
+
+  private refuelVehicle(v: Vehicle): void {
+    const s = useGameStore.getState();
+    const need = v.def.fuelMax - v.fuel;
+    if (need < 1) {
+      s.addToast('The tank is full.');
+      return;
+    }
+    const can = s.inventory.find((it) => it.itemId === 'fuel_can' && it.qty > 0);
+    if (!can) {
+      s.addToast('No fuel can in the pack.');
+      sfx.play('ui', { volume: 0.3 });
+      return;
+    }
+    if (!s.removeItem(can.uid, 1)) return;
+    const add = Math.min(20, need);
+    v.fuel = Math.min(v.def.fuelMax, v.fuel + add);
+    s.addToast(`Poured in ${Math.round(add)}L of fuel.`);
+    sfx.play('pickup', { volume: 0.5 });
+  }
+
   /** Grenade leaves the hand: arc it toward where the player is looking. */
   private throwGrenade(itemId: string): void {
     const player = this.player!;
-    const dir = new THREE.Vector3();
-    this.camera!.getWorldDirection(dir);
+    const dir = new THREE.Vector3();    this.camera!.getWorldDirection(dir);
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(itemId === 'molotov' ? 0.14 : 0.1, 8, 6),
       new THREE.MeshStandardMaterial({
