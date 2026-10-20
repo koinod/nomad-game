@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useGameStore } from '../store/gameStore';
 import { ITEMS } from '../data/items';
 import { QUESTS } from '../data/quests';
@@ -35,6 +36,54 @@ function Clock() {
       <span className="font-mono text-sm text-[#d7dde5]">
         {hh}:{mm}
       </span>
+    </div>
+  );
+}
+
+function Crosshair() {
+  const meleeTarget = useGameStore((s) => s.meleeTarget);
+  const hitmark = useGameStore((s) => s.hitmark);
+  const [, setTick] = useState(0);
+  // fade the hitmarker out after ~180ms
+  useEffect(() => {
+    if (!hitmark) return;
+    const t = setTimeout(() => setTick((n) => n + 1), 190);
+    return () => clearTimeout(t);
+  }, [hitmark]);
+  const showMark = hitmark && Date.now() - hitmark.at < 190;
+  const kill = hitmark?.kind === 'kill';
+  return (
+    <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" aria-hidden>
+      {/* center dot */}
+      <div
+        className={`absolute left-1/2 top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full transition-colors duration-100 ${
+          meleeTarget ? 'bg-[#e8b34b]' : 'bg-[#d7dde5]/80'
+        }`}
+      />
+      {/* brackets: tight when idle, splayed when a husk is in melee reach */}
+      {([-1, -1, 1, 1] as const).map((sx, i) => (
+        <div
+          key={i}
+          className={`absolute h-0.5 w-2 rounded transition-all duration-100 ${
+            meleeTarget ? 'bg-[#e8b34b]' : 'bg-[#d7dde5]/50'
+          }`}
+          style={{
+            left: `calc(50% + ${sx * (meleeTarget ? 10 : 6)}px)`,
+            top: i < 2 ? `calc(50% - ${(meleeTarget ? 10 : 6) + 1}px)` : `calc(50% + ${meleeTarget ? 9 : 5}px)`,
+          }}
+        />
+      ))}
+      {/* hitmarker X flash */}
+      {showMark && (
+        <div
+          className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-xl font-bold ${
+            kill ? 'text-[#d9534f]' : 'text-[#e8b34b]'
+          }`}
+          style={{ textShadow: '0 0 6px rgba(0,0,0,0.8)' }}
+        >
+          ✕
+        </div>
+      )}
     </div>
   );
 }
@@ -154,7 +203,7 @@ export default function HUD() {
       )}
 
       {/* crosshair */}
-      <div className="absolute left-1/2 top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#d7dde5]/80" />
+      <Crosshair />
 
       {/* vitals, top-left */}
       <div className="absolute left-4 top-4 w-56">

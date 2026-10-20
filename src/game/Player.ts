@@ -2,8 +2,9 @@
 
 import * as THREE from 'three';
 import { input, consumeLook } from './input';
-import { tryMelee, tryRanged } from './Combat';
+import { tryMelee, tryRanged, meleeStatsFor, equippedMeleeId } from './Combat';
 import { buildHandMesh, activeHandItemId } from './weaponMeshes';
+import { getGame } from './instance';
 import { sfx } from '../systems/audio';
 import type { HuskManager } from './Husks';
 import { clamp, lerp } from './rng';
@@ -61,6 +62,9 @@ export class Player {
   private handItemId: string | null = null;
   private smoothCamMinY = 0; // smoothed ground clearance — kills the hard-clamp snap
   private blockBlend = 0; // 0..1 block pose blend
+  private swingTrail!: THREE.Mesh; // translucent arc that sells the swing
+  private swingTotal = 0.28; // full swing duration (per weapon)
+  private hitPunch = 0; // camera dolly punch on connect, decays
 
   constructor(scene: THREE.Scene) {
     this.buildMesh();
@@ -103,6 +107,19 @@ export class Player {
     this.handAnchor = new THREE.Group();
     this.handAnchor.position.set(0, -0.7, 0.08);
     this.armR.add(this.handAnchor);
+    // swing trail: a flat arc segment at chest height that flashes during a swing
+    const trailGeo = new THREE.RingGeometry(1.1, 2.7, 24, 1, -0.85, 1.7);
+    const trailMat = new THREE.MeshBasicMaterial({
+      color: 0xffe6b0, transparent: true, opacity: 0,
+      side: THREE.DoubleSide, depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    this.swingTrail = new THREE.Mesh(trailGeo, trailMat);
+    this.swingTrail.rotation.x = -Math.PI / 2;
+    this.swingTrail.position.y = 1.3;
+    this.swingTrail.visible = false;
+    this.swingTrail.renderOrder = 5;
+    this.rig.add(this.swingTrail);
     this.rig.add(torso, head, this.legL, this.legR, this.armL, this.armR);
   }
 
@@ -313,24 +330,28 @@ export class Player {
       this.rig.rotation.y = lerp(this.rig.rotation.y, 0.25, b);
     } else if (this.attackT > 0) {
       this.attackT -= dt;
-      const k = 1 - Math.max(this.attackT, 0) / 0.28; // 0..1 across the swing
+      const k = 1 - Math.max(this.attackT, 0) / this.swingTotal; // 0..1 across the swing
       this.armR.rotation.x = -2.3 + k * 3.1; // raise, then chop down
       this.rig.rotation.y = Math.sin(k * Math.PI) * 0.22;
-    } else if (this.recoilT > 0) {
+      // trail arc: sweep across the swing, fade out
+      this.swingTrail.visible = true;
+      const mat = this.swingTrail.material as THREE.MeshBasicMaterial;
+      mat.opacity = 0.42 * (this.attackT / this.swingTotal);
+    } else {
+      this.rig.rotation.y *= 0.8;
+      this.armR.rotation.y *= 0.9; // release the block pose's cross-body angle
+      if (this.swingTrail.visible && this.attackT <= 0) this.swingTrail.visible = false;
+    }
+    if (this.recoilT > 0) {
       this.recoilT -= dt;
       const k = Math.max(this.recoilT, 0) / 0.16;
       this.armR.rotation.x = -1.2 - k * 0.35; // arm up, kicked back
       this.rig.rotation.y *= 0.8;
-    } else {
-      this.rig.rotation.y *= 0.8;
-      this.armR.rotation.y *= 0.9; // release the block pose's cross-body angle
     }
 
     // --- attacks (blocked while guarding) ---
     if (input.attackMelee && this.meleeCd <= 0 && this.blockBlend < 0.5) {
-      this.meleeCd = 0.45;
-      this.attackT = 0.28; // swing the arm — weapon or bare fist
-      tryMelee({
+      const res = tryMelee({
         husks: ctx.husks,
         emitNoise: ctx.emitNoise,
         playerPos: this.pos,
@@ -340,12 +361,24 @@ export class Player {
         spendStamina: (n) => this.spendStamina(n),
         flashMuzzle: () => undefined,
       });
+      if (res.swung) {
+        this.swingTotal = res.stats.swingTime;
+        this.meleeCd = res.stats.swingTime + 0.16;
+        this.attackT = res.stats.swingTime; // swing the arm — weapon or bare fist
+        if (res.hits > 0) {
+          // impact feel: brief freeze-frame + camera punch + hitmark
+          getGame()?.requestHitstop(res.kills > 0 ? 0.09 : 0.055);
+          this.hitPunch = res.kills > 0 ? 0.34 : 0.22;
+          const st = useGameStore.getState();
+          st.setHitmark(res.kills > 0 ? 'kill' : 'hit');
+        }
+      }
     }
     if (input.attackRanged && this.rangedCd <= 0 && this.blockBlend < 0.5) {
       this.rangedCd = 0.4;
       this.recoilT = 0.16;
       const { eye, dir } = this.aim(ctx.camera);
-      tryRanged({
+      const fired = tryRanged({
         husks: ctx.husks,
         emitNoise: ctx.emitNoise,
         playerPos: this.pos,
@@ -355,6 +388,21 @@ export class Player {
         spendStamina: (n) => this.spendStamina(n),
         flashMuzzle: () => this.flashMuzzle(),
       });
+      if (fired.fired) {
+        if (fired.hit) {
+          useGameStore.getState().setHitmark(fired.killed ? 'kill' : 'hit');
+          this.hitPunch = fired.killed ? 0.3 : 0.18;
+        }
+      }
+    }
+
+    // --- crosshair state: is a husk inside the current weapon's reach? ---
+    {
+      const stats = meleeStatsFor(equippedMeleeId());
+      const inRange =
+        ctx.husks.meleeSweep(this.pos, this.yaw, stats.range + 0.4, stats.halfArcRad, 1).length > 0;
+      const st = useGameStore.getState();
+      if (st.meleeTarget !== inRange) st.setMeleeTarget(inRange);
     }
 
     // --- third-person camera ---
@@ -381,6 +429,12 @@ export class Player {
     if (this.smoothCamMinY === 0) this.smoothCamMinY = targetMinY;
     this.smoothCamMinY = lerp(this.smoothCamMinY, targetMinY, Math.min(1, dt * 6));
     if (camPos.y < this.smoothCamMinY) camPos.y = this.smoothCamMinY;
+    // impact punch: the camera jolts toward the player on every connect
+    this.hitPunch = lerp(this.hitPunch, 0, Math.min(1, dt * 10));
+    if (this.hitPunch > 0.001) {
+      const punchDir = target.clone().sub(camPos).normalize();
+      camPos.addScaledVector(punchDir, this.hitPunch * 1.4);
+    }
     cam.position.lerp(camPos, Math.min(1, dt * 18));
     cam.lookAt(target);
     cam.rotateZ(-leanAmt * 0.28); // roll the view with the lean

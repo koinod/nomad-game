@@ -53,6 +53,7 @@ export class Game {
   private cutscene = false;
   private cutT = 0;
   private cutLine = -1;
+  private hitstopT = 0; // freeze-frame on melee connect, seconds
 
   private onKeyDown = (e: KeyboardEvent) => this.handleKeyDown(e);
   private onKeyUp = (e: KeyboardEvent) => this.handleKeyUp(e);
@@ -178,11 +179,22 @@ export class Game {
     const loop = (t: number) => {
       if (!this.running) return;
       this.raf = requestAnimationFrame(loop);
-      const dt = clamp((t - this.lastT) / 1000, 0, 0.1);
+      const rawDt = clamp((t - this.lastT) / 1000, 0, 0.1);
       this.lastT = t;
+      // hitstop: freeze the sim for a beat on impact (render still draws)
+      let dt = rawDt;
+      if (this.hitstopT > 0) {
+        this.hitstopT -= rawDt;
+        dt = rawDt * 0.06;
+      }
       this.tick(dt);
     };
     this.raf = requestAnimationFrame(loop);
+  }
+
+  /** Freeze-frame for impact feel — called by the player controller on hit. */
+  requestHitstop(seconds: number): void {
+    this.hitstopT = Math.max(this.hitstopT, seconds);
   }
 
   setPaused(p: boolean): void {

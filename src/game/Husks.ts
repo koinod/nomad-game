@@ -53,6 +53,7 @@ export class Husk {
   flashT = 0;
   deathT = 0;
   lostSightT = 0;
+  staggerT = 0; // heavy hits interrupt the attack windup
   knock = new THREE.Vector3();
   removed = false;
   killReported = false;
@@ -137,16 +138,26 @@ export class Husk {
   }
 
   /** Apply damage; returns true if this hit killed it. */
-  damage(amount: number, fromDir: THREE.Vector3): boolean {
+  damage(amount: number, fromDir: THREE.Vector3, knockPower = 2.2, canStagger = false): boolean {
     if (!this.alive) return false;
     this.hp -= amount;
     this.flashT = 0.18;
     this.bodyMat.emissive.setHex(0xff2222);
-    this.knock.addScaledVector(fromDir, 2.2);
+    this.knock.addScaledVector(fromDir, knockPower);
     if (this.hp <= 0) {
       this.state = 'dead';
       this.deathT = 0;
+      // death fling: the killing blow throws the body back
+      this.knock.addScaledVector(fromDir, knockPower * 0.8);
       return true;
+    }
+    // a solid connecting blow breaks the attack windup
+    if (canStagger && knockPower >= 2.4 && this.state === 'attack') {
+      this.state = 'hunt';
+      this.staggerT = 0.55;
+      this.attackCd = Math.max(this.attackCd, 0.9);
+    } else if (canStagger && knockPower >= 3.4) {
+      this.staggerT = Math.max(this.staggerT, 0.35);
     }
     // getting hit draws attention (caller routes investigateAt at the attacker)
     if (this.state === 'idle' || this.state === 'wander' || this.state === 'return') {
@@ -177,6 +188,14 @@ export class Husk {
     if (this.flashT > 0) {
       this.flashT -= dt;
       if (this.flashT <= 0) this.bodyMat.emissive.setHex(0x000000);
+    }
+
+    // stagger: rock back on the heels, attacks can't land mid-stagger
+    if (this.staggerT > 0) {
+      this.staggerT -= dt;
+      const k = Math.min(1, this.staggerT / 0.55);
+      g.rotation.x = Math.sin(k * Math.PI) * 0.4; // jolt back, then recover
+      if (this.staggerT <= 0) g.rotation.x = 0;
     }
 
     const st = KIND_STATS[this.kind];
@@ -374,26 +393,45 @@ export class HuskManager {
     }
   }
 
-  /** Melee arc check. Returns the husk hit (nearest), if any. */
-  meleeHit(origin: THREE.Vector3, facing: number, range: number, halfArcRad: number): Husk | null {
-    let best: Husk | null = null;
-    let bestD = Infinity;
+  /**
+   * Melee sweep: every alive husk inside (range + husk radius) of the player
+   * and within the swing cone, nearest-first up to maxTargets. `centered`
+   * marks hits near the cone's middle so centered swings hit harder.
+   */
+  meleeSweep(
+    origin: THREE.Vector3,
+    facing: number,
+    range: number,
+    halfArcRad: number,
+    maxTargets: number,
+  ): { husk: Husk; centered: boolean }[] {
+    const HUSK_RADIUS = 0.55;
     const fx = Math.sin(facing);
     const fz = Math.cos(facing);
+    const cosArc = Math.cos(halfArcRad);
+    const scored: { husk: Husk; d: number; centered: boolean }[] = [];
     for (const h of this.husks) {
       if (!h.alive) continue;
       const dx = h.group.position.x - origin.x;
       const dz = h.group.position.z - origin.z;
-      const d = Math.hypot(dx, dz);
-      if (d > range || d < 0.001) continue;
-      const dot = (dx * fx + dz * fz) / d;
-      if (dot < Math.cos(halfArcRad)) continue;
-      if (d < bestD) {
-        bestD = d;
-        best = h;
-      }
+      const d = Math.hypot(dx, dz) - HUSK_RADIUS; // capsule: swing can graze
+      if (d > range || d < -HUSK_RADIUS) continue;
+      // vertical window: husk body must overlap the player's reach band
+      const dy = h.group.position.y + 1.0 - (origin.y + 1.2);
+      if (Math.abs(dy) > 2.6) continue;
+      const nd = Math.max(d, 0.001);
+      const dot = (dx * fx + dz * fz) / Math.hypot(dx, dz);
+      if (dot < cosArc) continue;
+      scored.push({ husk: h, d: nd, centered: dot > cosArc * 0.55 + 0.45 });
     }
-    return best;
+    scored.sort((a, b) => a.d - b.d);
+    return scored.slice(0, maxTargets).map(({ husk, centered }) => ({ husk, centered }));
+  }
+
+  /** Legacy single-target check kept for the ranged fallback path. */
+  meleeHit(origin: THREE.Vector3, facing: number, range: number, halfArcRad: number): Husk | null {
+    const r = this.meleeSweep(origin, facing, range, halfArcRad, 1);
+    return r.length ? r[0].husk : null;
   }
 
   /** Hitscan. Returns nearest husk intersecting the ray, with head flag. */

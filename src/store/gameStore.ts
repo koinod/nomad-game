@@ -64,6 +64,12 @@ interface GameState {
   dialogue: DialogueState | null;
   interactPrompt: string | null;
 
+  // crosshair feedback
+  meleeTarget: boolean;
+  hitmark: { kind: 'hit' | 'kill'; at: number } | null;
+  setMeleeTarget: (b: boolean) => void;
+  setHitmark: (kind: 'hit' | 'kill') => void;
+
   // world
   poiPositions: Record<string, [number, number]>; // id -> [x, z]
 
@@ -182,6 +188,9 @@ export const useGameStore = create<GameState>()((set, get) => {
 
     dialogue: null,
     interactPrompt: null,
+
+    meleeTarget: false,
+    hitmark: null,
 
     poiPositions: {},
 
@@ -458,6 +467,10 @@ export const useGameStore = create<GameState>()((set, get) => {
     setInteractPrompt: (label) => {
       if (get().interactPrompt !== label) set({ interactPrompt: label });
     },
+    setMeleeTarget: (b) => {
+      if (get().meleeTarget !== b) set({ meleeTarget: b });
+    },
+    setHitmark: (kind) => set({ hitmark: { kind, at: Date.now() } }),
 
     openPhone: (tab) => {
       const s = get();
