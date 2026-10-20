@@ -7,7 +7,7 @@
 import * as THREE from 'three';
 import { clamp } from './rng';
 import {
-  trailerDef, type ModuleId, type TrailerDef,
+  isDeckKind, trailerDef, type ModuleId, type TrailerDef,
 } from '../data/trailerData';
 import { pointAt, stepTrailer } from './trailerPhysics';
 import {
@@ -29,7 +29,10 @@ export interface Trailer {
   doorOpen: boolean;
   doors: DoorAnim[];
   loadedVehicleUid: string | null;
+  /** Extra deck loads after the first (HET-70's 2nd/3rd bays), load order. */
+  extraLoadedUids: string[];
   rampDown: boolean;
+  rampLen: number;
   beaconMode: BeaconMode;
   cargoCrates: number;
   cargoGroup?: THREE.Group;
@@ -62,7 +65,19 @@ export function tongueDist(t: Trailer): number {
 
 /** Effective axle position (local z, behind center) — the follow pivot. */
 export function axleDist(t: Trailer): number {
-  return t.def.kind === 'utility' ? -0.3 : -t.def.length * 0.22;
+  if (t.def.kind === 'utility') return -0.3;
+  if (t.def.kind === 'lowboy') return -t.def.length * 0.398; // center of the 4-axle bogie
+  return -t.def.length * 0.22;
+}
+
+/** All vehicles locked on a trailer's deck, in load order. */
+export function loadedUids(t: Trailer): string[] {
+  return t.loadedVehicleUid ? [t.loadedVehicleUid, ...t.extraLoadedUids] : [...t.extraLoadedUids];
+}
+
+/** Deck surface height above the trailer group origin, by kind. */
+export function deckTopY(t: Trailer): number {
+  return t.def.kind === 'lowboy' ? 0.55 : 0.97;
 }
 
 export function tongueWorld(t: Trailer): { x: number; z: number } {
@@ -70,11 +85,11 @@ export function tongueWorld(t: Trailer): { x: number; z: number } {
   return pointAt({ x: p.x, z: p.z, heading: t.heading }, tongueDist(t));
 }
 
-/** Everything the tow vehicle feels: chassis + storage + crates + fuel + car. */
+/** Everything the tow vehicle feels: chassis + storage + crates + fuel + cars. */
 export function trailerMassKg(t: Trailer, vehicles: { byId: (id: string) => Vehicle | null }): number {
   let m = t.def.massKg + itemsWeightKg(t.storage) + t.cargoCrates * 90 + t.fuelLiters * 0.85;
-  if (t.loadedVehicleUid) {
-    const lv = vehicles.byId(t.loadedVehicleUid);
+  for (const uid of loadedUids(t)) {
+    const lv = vehicles.byId(uid);
     if (lv) m += 1000 + Math.max(0, lv.def.length - 4) * 320;
   }
   return Math.round(m);
@@ -226,6 +241,92 @@ function buildDeckTrailer(g: THREE.Group, t: Trailer, carrier: boolean): void {
   t.wheelR = 0.42;
   for (const az of [axleDist(t) + 0.62, axleDist(t) - 0.62]) {
     for (const sgn of [1, -1]) twheel(g, 0.42, 0.26, sgn * (W / 2 - 0.02), 0.42, az, t.wheelSpin);
+  }
+}
+
+/**
+ * HET-70 Heavy Gooseneck Lowboy — from Ian's Stitch spec (M1000 HET
+ * inspired): arched gooseneck with hydraulic cylinders, diamond-plate
+ * toolboxes, an ultra-low wide deck you can park three vehicles on,
+ * D-rings + stake pockets, a 4-axle/8-wheel rear bogie, and twin folding
+ * rear ramps. Matte charcoal #171C1F, submerged-teal #203A43 accents,
+ * rusted-orange weathering.
+ */
+function buildLowboy(g: THREE.Group, t: Trailer): void {
+  const { length: L, width: W } = t.def;
+  const charcoal = mat(0x171c1f, 0.8, 0.25);
+  const teal = mat(0x203a43, 0.7, 0.2);
+  const steel = mat(0x3d434b, 0.6, 0.5);
+  const rust = mat(0xb85c38, 0.95, 0);
+  const deckTop = 0.55;
+  // frame rails + low deck plate
+  for (const sgn of [1, -1]) box(g, 0.14, 0.18, L * 0.95, charcoal, sgn * W * 0.3, 0.42, 0);
+  box(g, W, 0.1, L * 0.92, charcoal, 0, deckTop - 0.05, -L * 0.02); // deck
+  for (const sgn of [1, -1]) box(g, 0.09, 0.045, L * 0.92, teal, sgn * (W / 2 - 0.07), deckTop + 0.01, -L * 0.02); // teal deck edges
+  for (let i = 0; i < 9; i++) box(g, W * 0.94, 0.02, 0.12, mat(0x232a2e, 0.85, 0.2), 0, deckTop + 0.005, -L * 0.42 + i * L * 0.1); // tread strips
+  // rust weathering patches on the deck edges
+  for (const [rx, rz] of [[-W * 0.3, L * 0.12], [W * 0.36, -L * 0.2], [-W * 0.42, -L * 0.38]] as [number, number][]) {
+    box(g, 0.5, 0.012, 0.34, rust, rx, deckTop + 0.012, rz);
+  }
+  // D-rings + stake pockets along both rails
+  for (const sgn of [1, -1]) {
+    for (let i = 0; i < 6; i++) {
+      box(g, 0.12, 0.04, 0.12, steel, sgn * (W / 2 - 0.22), deckTop + 0.02, -L * 0.36 + i * L * 0.15);
+      box(g, 0.1, 0.13, 0.2, charcoal, sgn * (W / 2 + 0.02), 0.46, -L * 0.4 + i * L * 0.16);
+    }
+  }
+  // diamond-plate toolboxes on the front deck corners
+  for (const sgn of [1, -1]) {
+    box(g, 1.15, 0.5, 0.62, mat(0x707880, 0.45, 0.6), sgn * (W / 2 - 0.66), deckTop + 0.25, L * 0.31);
+    box(g, 1.15, 0.07, 0.62, teal, sgn * (W / 2 - 0.66), deckTop + 0.53, L * 0.31); // teal lid stripe
+  }
+  // ----- the gooseneck: twin arched beams rising to the coupler -----
+  const riseDy = 0.97;
+  const runDz = L / 2 + 0.3 - L * 0.3;
+  const beamLen = Math.hypot(runDz, riseDy);
+  const beamAng = Math.atan2(riseDy, runDz);
+  for (const sgn of [1, -1]) {
+    const beam = box(g, 0.16, 0.22, beamLen, charcoal, sgn * W * 0.3, deckTop + riseDy / 2, L * 0.3 + runDz / 2);
+    beam.rotation.x = -beamAng; // +Z end rises to the coupler
+    // hydraulic cylinder under the beam
+    const cyl = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 1.7, 8), steel);
+    cyl.position.set(sgn * W * 0.18, deckTop + 0.42, L * 0.3 + 1.1);
+    cyl.rotation.x = -0.62;
+    cyl.castShadow = true;
+    g.add(cyl);
+    // landing jack at the neck (parked stance)
+    box(g, 0.09, 0.6, 0.09, charcoal, sgn * W * 0.32, 0.28, L * 0.3);
+    box(g, 0.3, 0.05, 0.3, charcoal, sgn * W * 0.32, 0.02, L * 0.3);
+  }
+  box(g, W * 0.68, 0.18, 0.24, charcoal, 0, deckTop + riseDy + 0.05, L / 2 + 0.22); // coupler crossbeam
+  box(g, 0.52, 0.09, 0.72, steel, 0, deckTop + riseDy - 0.06, L / 2 + 0.34); // fifth-wheel plate
+  const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.22, 8), steel);
+  pin.position.set(0, deckTop + riseDy - 0.2, L / 2 + 0.34);
+  g.add(pin); // kingpin
+  // rear light bar + mud flaps
+  for (const sgn of [1, -1]) {
+    box(g, 0.3, 0.09, 0.05, tailMat(), sgn * W * 0.38, 0.52, -L / 2 - 0.03);
+    box(g, 0.55, 0.42, 0.04, charcoal, sgn * (W / 2 - 0.3), 0.24, -L / 2 - 0.5);
+  }
+  // bogie fenders (teal) over the 4-axle cluster
+  for (const sgn of [1, -1]) box(g, 0.34, 0.07, 4.3, teal, sgn * (W / 2 - 0.02), 1.0, axleDist(t));
+  // twin folding rear ramps, hinged at the deck's rear edge
+  const pivot = new THREE.Group();
+  pivot.position.set(0, deckTop, -L / 2);
+  g.add(pivot);
+  t.rampLen = 2.8;
+  for (const sgn of [1, -1]) {
+    const panel = box(pivot, W * 0.42, 0.06, t.rampLen, steel, sgn * W * 0.23, 0, -t.rampLen / 2);
+    for (let i = 0; i < 4; i++) {
+      const rib = new THREE.Mesh(new THREE.BoxGeometry(W * 0.4, 0.03, 0.12), darkTrim());
+      rib.position.set(0, 0.05, -0.45 - i * 0.6);
+      panel.add(rib);
+    }
+  }
+  t.doors.push({ obj: pivot, kind: 'ramp', base: 1.35, t: 0, target: 0, travel: -1.55 });
+  t.wheelR = 0.42;
+  for (const off of [-1.44, -0.48, 0.48, 1.44]) {
+    for (const sgn of [1, -1]) twheel(g, 0.42, 0.3, sgn * (W / 2 - 0.04), 0.42, axleDist(t) + off, t.wheelSpin);
   }
 }
 
@@ -415,7 +516,7 @@ export function refreshTrailerCargoVisuals(t: Trailer): void {
   const g = new THREE.Group();
   const wood = mat(0x7a5c38, 0.9, 0);
   const L = t.def.length;
-  const floorY = t.def.kind === 'utility' ? 0.66 : 0.98;
+  const floorY = t.def.kind === 'utility' ? 0.66 : t.def.kind === 'lowboy' ? 0.57 : 0.98;
   for (let i = 0; i < n; i++) {
     const cx = (i % 2 === 0 ? -0.42 : 0.42) * (t.def.width / 2);
     const cz = L * 0.22 - Math.floor(i / 2) * 0.75;
@@ -437,6 +538,8 @@ export const TRAILER_SPAWNS: TrailerSpawn[] = [
   { id: 't_box', poi: 'dune_cache', dx: 46, dz: -6, heading: Math.PI / 2 },
   { id: 't_tanker', poi: 'town', dx: 84, dz: 26, heading: 0 },
   { id: 't_carrier', poi: 'wreck', dx: 16, dz: 10, heading: -Math.PI / 3 },
+  // the HET-70 sits at the logistics warehouse, ready for heavy work
+  { id: 't_lowboy', poi: 'town', dx: 126, dz: 34, heading: Math.PI / 2 },
 ];
 
 function makeTrailer(def: TrailerDef, x: number, z: number, heading: number, groundY: (x: number, z: number) => number): Trailer {
@@ -453,7 +556,9 @@ function makeTrailer(def: TrailerDef, x: number, z: number, heading: number, gro
     doorOpen: false,
     doors: [],
     loadedVehicleUid: null,
+    extraLoadedUids: [],
     rampDown: false,
+    rampLen: 2.3,
     beaconMode: 'off',
     cargoCrates: 0,
     wheelSpin: [],
@@ -464,12 +569,15 @@ function makeTrailer(def: TrailerDef, x: number, z: number, heading: number, gro
     bodyPitch: 0,
     bodyRoll: 0,
   };
-  buildChassis(g, t, def.kind === 'box' ? 0.62 : 0.55);
-  if (def.kind === 'utility') buildUtility(g, t);
-  else if (def.kind === 'flatbed') buildDeckTrailer(g, t, false);
-  else if (def.kind === 'carrier') buildDeckTrailer(g, t, true);
-  else if (def.kind === 'tanker') buildTanker(g, t);
-  else buildBox(g, t);
+  if (def.kind === 'lowboy') buildLowboy(g, t);
+  else {
+    buildChassis(g, t, def.kind === 'box' ? 0.62 : 0.55);
+    if (def.kind === 'utility') buildUtility(g, t);
+    else if (def.kind === 'flatbed') buildDeckTrailer(g, t, false);
+    else if (def.kind === 'carrier') buildDeckTrailer(g, t, true);
+    else if (def.kind === 'tanker') buildTanker(g, t);
+    else buildBox(g, t);
+  }
   g.position.set(x, groundY(x, z), z);
   g.rotation.order = 'YXZ';
   g.rotation.y = heading;
@@ -579,7 +687,7 @@ export class TrailerManager {
 
   /** World-space deck height at (x, z) for drive-on trailers, or -Infinity. */
   deckHeightAt(t: Trailer, x: number, z: number): number {
-    if (t.def.kind !== 'flatbed' && t.def.kind !== 'carrier') return -Infinity;
+    if (!isDeckKind(t.def.kind)) return -Infinity;
     const pos = t.group.position;
     const dx = x - pos.x;
     const dz = z - pos.z;
@@ -588,11 +696,12 @@ export class TrailerManager {
     const lx = dx * fz - dz * fx; // right-vector dot
     const lz = dx * fx + dz * fz; // forward dot
     const { length: L, width: W } = t.def;
-    const deckTop = pos.y + 0.97;
+    const top = deckTopY(t);
+    const deckTop = pos.y + top;
     if (Math.abs(lx) <= W / 2 - 0.05 && lz >= -L / 2 && lz <= L / 2) return deckTop;
-    if (t.rampDown && Math.abs(lx) <= W * 0.44 && lz < -L / 2 && lz >= -L / 2 - 2.3) {
-      const frac = (lz + L / 2 + 2.3) / 2.3; // 0 at the ground end, 1 at the deck
-      return pos.y + 0.97 * frac;
+    if (t.rampDown && Math.abs(lx) <= W * 0.44 && lz < -L / 2 && lz >= -L / 2 - t.rampLen) {
+      const frac = (lz + L / 2 + t.rampLen) / t.rampLen; // 0 at the ground end, 1 at the deck
+      return pos.y + top * frac;
     }
     return -Infinity;
   }

@@ -17,10 +17,10 @@ import { AnimalManager } from './Animals';
 import { VehicleManager, applyUpgradeVisuals, itemsWeightKg, refreshCargoVisuals, type Vehicle } from './Vehicles';
 import {
   TrailerManager, CrateManager, applyModuleVisuals, refreshTrailerCargoVisuals,
-  trailerStorageCapKg, tongueDist, axleDist, tongueWorld, type Trailer,
+  trailerStorageCapKg, tongueDist, axleDist, tongueWorld, loadedUids, deckTopY, type Trailer,
 } from './Trailers';
-import { canHitch } from '../data/trailerData';
-import { stepTrailer, wrapAngle } from './trailerPhysics';
+import { canHitch, isDeckKind, deckBayCount } from '../data/trailerData';
+import { stepTrailer, wrapAngle, packDeckSlots } from './trailerPhysics';
 import { canInstallUpgrade, storageCapKg } from '../data/upgrades';
 import type { InvItem, TrailerSave } from '../store/types';
 import { floorYAt, floorYAtRef, resolveCollisions, type Collider, type FloorRect } from './Colliders';
@@ -208,6 +208,7 @@ export class Game {
         t.doorOpen = !!ts.doorOpen;
         t.beaconMode = ts.beaconMode ?? 'off';
         t.loadedVehicleUid = ts.loadedVehicleDefId ?? null;
+        t.extraLoadedUids = [...(ts.extraLoadedDefIds ?? [])];
         t.cargoCrates = ts.cargoCrates ?? 0;
         t.rampDown = !!ts.rampDown;
         for (const d of t.doors) {
@@ -217,13 +218,20 @@ export class Game {
         }
         if (t.module !== 'none') applyModuleVisuals(t);
         if (t.cargoCrates) refreshTrailerCargoVisuals(t);
-        if (t.loadedVehicleUid) {
-          const lv = this.vehicles.byId(t.loadedVehicleUid);
-          if (lv) {
-            lv.loadedOn = t.uid;
-            this.placeLoadedVehicle(t, lv);
-          } else {
-            t.loadedVehicleUid = null;
+        if (t.loadedVehicleUid || t.extraLoadedUids.length) {
+          const keep: string[] = [];
+          for (const uid of loadedUids(t)) {
+            const lv = this.vehicles.byId(uid);
+            if (lv) {
+              lv.loadedOn = t.uid;
+              keep.push(uid);
+            }
+          }
+          t.loadedVehicleUid = keep[0] ?? null;
+          t.extraLoadedUids = keep.slice(1);
+          for (const uid of keep) {
+            const lv = this.vehicles.byId(uid);
+            if (lv) this.placeLoadedVehicle(t, lv);
           }
         }
       }
@@ -693,7 +701,12 @@ export class Game {
           storageCapKg: trailerStorageCapKg(t),
           fuelLiters: Math.round(t.fuelLiters),
           beaconMode: t.beaconMode,
-          loadedVehicle: t.loadedVehicleUid ? this.vehicles.byId(t.loadedVehicleUid)?.def.name ?? null : null,
+          loadedVehicle: (() => {
+            const uids = loadedUids(t);
+            if (!uids.length) return null;
+            const first = this.vehicles.byId(uids[0])?.def.name ?? null;
+            return uids.length > 1 ? `${first} +${uids.length - 1} more` : first;
+          })(),
         })),
       );
     }
@@ -756,9 +769,10 @@ export class Game {
     }
     // loaded vehicles ride their decks; loaded crates ride their carriers
     for (const t of this.trailers.trailers) {
-      if (!t.loadedVehicleUid) continue;
-      const lv = this.vehicles.byId(t.loadedVehicleUid);
-      if (lv) this.placeLoadedVehicle(t, lv);
+      for (const uid of loadedUids(t)) {
+        const lv = this.vehicles.byId(uid);
+        if (lv) this.placeLoadedVehicle(t, lv);
+      }
     }
     this.followCrates();
     this.resolveInteriors();
@@ -1387,10 +1401,24 @@ export class Game {
     return -Infinity;
   }
 
-  /** Park a loaded vehicle square on its trailer's deck. */
+  /** Pack zone for a deck trailer: vehicles nose up to the front stop. */
+  private deckPackZone(t: Trailer): { frontZ: number; rearZ: number } {
+    const L = t.def.length;
+    return t.def.kind === 'lowboy'
+      ? { frontZ: L * 0.39, rearZ: -L / 2 + 0.7 }
+      : { frontZ: L / 2 - 0.5, rearZ: -L / 2 + 0.6 };
+  }
+
+  /** Park a loaded vehicle in its packed slot on its trailer's deck. */
   private placeLoadedVehicle(t: Trailer, v: Vehicle): void {
-    const w = this.trailers.worldOf(t, 0, 0.2);
-    v.group.position.set(w.x, t.group.position.y + 0.99, w.z);
+    const uids = loadedUids(t);
+    const lengths = uids.map((uid) => this.vehicles.byId(uid)?.def.length ?? 4.8);
+    const { frontZ, rearZ } = this.deckPackZone(t);
+    const slots = packDeckSlots(lengths, frontZ, rearZ);
+    const idx = uids.indexOf(v.uid);
+    const lz = slots && idx >= 0 ? slots[idx] : 0.2;
+    const w = this.trailers.worldOf(t, 0, lz);
+    v.group.position.set(w.x, t.group.position.y + deckTopY(t) + 0.02, w.z);
     v.heading = t.heading;
     v.group.rotation.set(0, t.heading, 0);
     v.speed = 0;
@@ -1403,7 +1431,7 @@ export class Game {
       if (c.loadedInto.kind === 'trailer') {
         const t = this.trailers.byId(c.loadedInto.uid);
         if (!t) { c.loadedInto = null; continue; }
-        const floorY = t.def.kind === 'utility' ? 0.66 : t.def.kind === 'box' ? 1.05 : 0.99;
+        const floorY = t.def.kind === 'utility' ? 0.66 : t.def.kind === 'box' ? 1.05 : t.def.kind === 'lowboy' ? 0.57 : 0.99;
         const lx = (c.slot % 2 === 0 ? -0.42 : 0.42) * (t.def.width / 2);
         const lz = t.def.length * 0.22 - Math.floor(c.slot / 2) * 0.78;
         this.crates.placeOnCarrier(c, t.group.position, t.heading, lx, floorY, lz);
@@ -1493,14 +1521,28 @@ export class Game {
     }
   }
 
+  /** Can this vehicle still be locked onto this deck? (bays + tank rule) */
+  private deckHasRoom(t: Trailer, v: Vehicle): boolean {
+    const uids = loadedUids(t);
+    if (uids.length >= deckBayCount(t.def)) return false;
+    // the HET-70 hauls ONE tank, alone — or up to three lesser vehicles
+    if (v.def.id === 'tank' && uids.length > 0) return false;
+    if (uids.some((uid) => this.vehicles.byId(uid)?.def.id === 'tank')) return false;
+    const lengths = [...uids.map((uid) => this.vehicles.byId(uid)?.def.length ?? 4.8), v.def.length];
+    const { frontZ, rearZ } = this.deckPackZone(t);
+    return packDeckSlots(lengths, frontZ, rearZ) !== null;
+  }
+
   /** The drive-on lock: a car stopped squarely on a ramp-down deck is cargo. */
   private checkDeckLock(s: ReturnType<typeof useGameStore.getState>): void {
     const v = this.driving!;
     for (const t of this.trailers.trailers) {
-      if ((t.def.kind !== 'flatbed' && t.def.kind !== 'carrier') || !t.rampDown || t.loadedVehicleUid) continue;
+      if (!isDeckKind(t.def.kind) || !t.rampDown || !this.deckHasRoom(t, v)) continue;
       const { lx, lz } = this.trailers.localOf(t, v.group.position.x, v.group.position.z);
-      const deckY = t.group.position.y + 0.97;
-      if (Math.abs(lx) < t.def.width / 2 - 0.25 && lz > -t.def.length / 2 + 0.6 && lz < t.def.length / 2 - 0.4
+      const deckY = t.group.position.y + deckTopY(t);
+      const halfClear = Math.max(0.2, (t.def.width - v.def.width) / 2 + 0.25);
+      const frontLim = t.def.kind === 'lowboy' ? t.def.length * 0.42 : t.def.length / 2 - 0.4;
+      if (Math.abs(lx) < halfClear && lz > -t.def.length / 2 + 0.6 && lz < frontLim
         && Math.abs(v.group.position.y - deckY) < 0.5 && Math.abs(v.speed) < 1.0) {
         this.lockVehicleOnDeck(t, v, s);
         return;
@@ -1511,7 +1553,8 @@ export class Game {
   private lockVehicleOnDeck(t: Trailer, v: Vehicle, s: ReturnType<typeof useGameStore.getState>): void {
     const wasDriving = this.driving === v;
     v.loadedOn = t.uid;
-    t.loadedVehicleUid = v.uid;
+    if (!t.loadedVehicleUid) t.loadedVehicleUid = v.uid;
+    else if (!t.extraLoadedUids.includes(v.uid)) t.extraLoadedUids.push(v.uid);
     this.placeLoadedVehicle(t, v);
     if (wasDriving) {
       // the driver climbs down behind the trailer
@@ -1531,8 +1574,11 @@ export class Game {
   }
 
   private unloadVehicle(t: Trailer, s: ReturnType<typeof useGameStore.getState>): void {
-    const lv = t.loadedVehicleUid ? this.vehicles.byId(t.loadedVehicleUid) : null;
-    t.loadedVehicleUid = null;
+    // LIFO: the last vehicle loaded is the one at the ramps
+    const uid = t.extraLoadedUids.length ? t.extraLoadedUids[t.extraLoadedUids.length - 1] : t.loadedVehicleUid;
+    const lv = uid ? this.vehicles.byId(uid) : null;
+    if (t.extraLoadedUids.length) t.extraLoadedUids.pop();
+    else t.loadedVehicleUid = null;
     if (!lv) return;
     if (!t.rampDown) this.toggleRamp(t);
     const w = this.trailers.worldOf(t, 0, -t.def.length / 2 - 3.4);
@@ -1606,14 +1652,15 @@ export class Game {
         };
       }
       if (dRear < 2.5) {
-        if (t.loadedVehicleUid && (t.def.kind === 'flatbed' || t.def.kind === 'carrier')) {
-          const lv = this.vehicles.byId(t.loadedVehicleUid);
+        if (loadedUids(t).length && isDeckKind(t.def.kind)) {
+          const lastUid = t.extraLoadedUids.length ? t.extraLoadedUids[t.extraLoadedUids.length - 1] : t.loadedVehicleUid;
+          const lv = lastUid ? this.vehicles.byId(lastUid) : null;
           return { label: `[F] Unload the ${lv?.def.name ?? 'vehicle'}`, run: () => this.unloadVehicle(t, s) };
         }
         if (t.cargoCrates > 0) {
           return { label: `[F] Unload a crate from the ${t.def.name}`, run: () => this.unloadCrate({ kind: 'trailer', uid: t.uid }, s) };
         }
-        if (t.def.kind === 'flatbed' || t.def.kind === 'carrier') {
+        if (isDeckKind(t.def.kind)) {
           return { label: `[F] ${t.rampDown ? 'Raise' : 'Lower'} the ramp`, run: () => this.toggleRamp(t) };
         }
         if (t.doors.length) {
@@ -1649,8 +1696,8 @@ export class Game {
           run: () => { const msg = this.applyBeaconMode(t.uid, next); if (msg) s.addToast(msg); },
         };
       }
-      // winch a parked car onto an empty, ramp-down deck
-      if ((t.def.kind === 'flatbed' || t.def.kind === 'carrier') && t.rampDown && !t.loadedVehicleUid && dRear < 5) {
+      // winch a parked car onto a ramp-down deck that still has a bay
+      if (isDeckKind(t.def.kind) && t.rampDown && dRear < 5) {
         const lv = this.winchCandidate(t);
         if (lv) return { label: `[F] Winch the ${lv.def.name} aboard`, run: () => this.lockVehicleOnDeck(t, lv, s) };
       }
@@ -1711,7 +1758,8 @@ export class Game {
     let bd = Infinity;
     for (const v of this.vehicles.vehicles) {
       if (v.loadedOn || v === this.driving) continue;
-      if (v.def.kind === 'skiff' || v.def.width > 2.3 || v.def.length > 7.6) continue;
+      if (v.def.kind === 'skiff' || v.def.width > t.def.width - 0.1) continue;
+      if (!this.deckHasRoom(t, v)) continue;
       const { lx, lz } = this.trailers.localOf(t, v.group.position.x, v.group.position.z);
       if (lz > -t.def.length / 2 - 1 || lz < -t.def.length / 2 - 9.5 || Math.abs(lx) > 3.4) continue;
       const d = Math.abs(lz);
@@ -1886,6 +1934,7 @@ export class Game {
       fuelLiters: Math.round(t.fuelLiters),
       doorOpen: t.doorOpen,
       loadedVehicleDefId: t.loadedVehicleUid,
+      extraLoadedDefIds: [...t.extraLoadedUids],
       beaconMode: t.beaconMode,
       cargoCrates: t.cargoCrates,
       rampDown: t.rampDown,

@@ -56,3 +56,26 @@ export function stepTrailer(
 export function articulationOf(trailerHeading: number, towHeading: number): number {
   return wrapAngle(trailerHeading - towHeading);
 }
+
+/**
+ * Pack vehicles nose-forward on a deck, in load order, starting at the
+ * front stop. Returns each vehicle's deck-local center z, or null when
+ * the load doesn't fit the pack zone [rearZ, frontZ].
+ */
+export function packDeckSlots(
+  lengths: readonly number[],
+  frontZ: number,
+  rearZ: number,
+  gap = 0.3,
+  margin = 0.15,
+): number[] | null {
+  const centers: number[] = [];
+  let cursor = frontZ - margin;
+  for (const len of lengths) {
+    const center = cursor - len / 2;
+    if (center - len / 2 < rearZ) return null;
+    centers.push(center);
+    cursor = center - len / 2 - gap;
+  }
+  return centers;
+}

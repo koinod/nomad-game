@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   articulationOf,
+  packDeckSlots,
   pointAt,
   stepTrailer,
   wrapAngle,
@@ -119,5 +120,39 @@ describe('stepTrailer', () => {
         maxArticulation + 1e-9,
       );
     }
+  });
+});
+
+describe('packDeckSlots (HET-70 multi-bay packing)', () => {
+  // lowboy pack zone: L 17.6 → frontZ = L*0.39, rearZ = -L/2 + 0.7
+  const frontZ = 17.6 * 0.39;
+  const rearZ = -17.6 / 2 + 0.7;
+
+  it('packs three sedans nose-forward in load order', () => {
+    const slots = packDeckSlots([4.7, 4.7, 4.7], frontZ, rearZ);
+    expect(slots).not.toBeNull();
+    expect(slots!).toHaveLength(3);
+    expect(slots![0]).toBeGreaterThan(slots![1]);
+    expect(slots![1]).toBeGreaterThan(slots![2]);
+    // rearmost car still clears the rear edge of the pack zone
+    expect(slots![2] - 4.7 / 2).toBeGreaterThanOrEqual(rearZ);
+    // front-most car clears the front stop with the margin
+    expect(slots![0] + 4.7 / 2).toBeLessThanOrEqual(frontZ);
+  });
+
+  it('a tank fits alone', () => {
+    const slots = packDeckSlots([7.4], frontZ, rearZ);
+    expect(slots).not.toBeNull();
+    expect(slots![0] - 7.4 / 2).toBeGreaterThanOrEqual(rearZ);
+  });
+
+  it('returns null when the load overruns the deck', () => {
+    expect(packDeckSlots([7.4, 7.4], frontZ, rearZ)).toBeNull();
+    expect(packDeckSlots([5.3, 5.3, 5.3], frontZ, rearZ)).toBeNull(); // 3 long pickups don't
+    expect(packDeckSlots([20], frontZ, rearZ)).toBeNull();
+  });
+
+  it('empty load packs to an empty slot list', () => {
+    expect(packDeckSlots([], frontZ, rearZ)).toEqual([]);
   });
 });

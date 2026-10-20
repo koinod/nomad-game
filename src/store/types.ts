@@ -204,6 +204,8 @@ export interface TrailerSave {
   fuelLiters: number; // tanker only
   doorOpen: boolean;
   loadedVehicleDefId: string | null;
+  /** Additional deck loads beyond the first (HET-70 multi-bay), load order. */
+  extraLoadedDefIds?: string[];
   beaconMode: 'off' | 'sat' | 'horde';
   cargoCrates?: number;
   rampDown?: boolean;

@@ -1,4 +1,4 @@
-export type TrailerKind = 'utility' | 'flatbed' | 'box' | 'tanker' | 'carrier';
+export type TrailerKind = 'utility' | 'flatbed' | 'box' | 'tanker' | 'carrier' | 'lowboy';
 
 export interface TrailerDef {
   id: string;
@@ -10,6 +10,8 @@ export interface TrailerDef {
   massKg: number;
   storageKg: number;
   fuelMax?: number;
+  /** Gooseneck coupler: needs a fifth-wheel-class tow vehicle, not a bumper hitch. */
+  gooseneck?: boolean;
 }
 
 export const TRAILER_DEFS: TrailerDef[] = [
@@ -64,6 +66,20 @@ export const TRAILER_DEFS: TrailerDef[] = [
     massKg: 1650,
     storageKg: 80,
   },
+  {
+    // HET-70: Oshkosh/M1000-style heavy equipment transporter from Ian's
+    // Stitch spec — gooseneck coupler, ultra-low wide deck, 4-axle bogie.
+    // Carries 1 tank OR up to 3 vehicles (enforced in Game's deck lock).
+    id: 't_lowboy',
+    name: 'HET-70 Heavy Lowboy',
+    kind: 'lowboy',
+    towClass: 3,
+    gooseneck: true,
+    length: 17.6,
+    width: 3.4,
+    massKg: 3400,
+    storageKg: 500,
+  },
 ];
 
 export const TOW_RATING: Record<string, number> = {
@@ -85,6 +101,9 @@ export const TOW_RATING: Record<string, number> = {
   tank: 3,
 };
 
+/** Vehicles with a fifth-wheel / gooseneck coupler (rating 3 AND the gear). */
+export const GOOSENECK_TOWERS: readonly string[] = ['semi', 'semi_day', 'goliath', 'tank'];
+
 export function trailerDef(id: string): TrailerDef | undefined {
   return TRAILER_DEFS.find((def) => def.id === id);
 }
@@ -93,7 +112,20 @@ export function canHitch(vehicleDefId: string, trailerDefId: string): boolean {
   const def = trailerDef(trailerDefId);
   if (!def) return false;
   const rating = TOW_RATING[vehicleDefId] ?? 0;
-  return rating >= def.towClass;
+  if (rating < def.towClass) return false;
+  // a gooseneck trailer only couples to a fifth-wheel-class rig
+  if (def.gooseneck && !GOOSENECK_TOWERS.includes(vehicleDefId)) return false;
+  return true;
+}
+
+/** Deck trailers take drive-on vehicle loads; the rest take crates/storage. */
+export function isDeckKind(kind: TrailerKind): boolean {
+  return kind === 'flatbed' || kind === 'carrier' || kind === 'lowboy';
+}
+
+/** Vehicle bays on a deck trailer (the HET-70 packs three; others one). */
+export function deckBayCount(def: TrailerDef): number {
+  return def.kind === 'lowboy' ? 3 : isDeckKind(def.kind) ? 1 : 0;
 }
 
 export type ModuleId = 'cargo' | 'hab' | 'beacon';

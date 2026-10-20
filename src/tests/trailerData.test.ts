@@ -3,6 +3,8 @@ import {
   MODULE_DEFS,
   TRAILER_DEFS,
   canHitch,
+  deckBayCount,
+  isDeckKind,
   trailerDef,
 } from '../data/trailerData';
 
@@ -47,10 +49,10 @@ describe('canHitch', () => {
 });
 
 describe('TRAILER_DEFS', () => {
-  it('has 5 unique ids', () => {
-    expect(TRAILER_DEFS).toHaveLength(5);
+  it('has 6 unique ids', () => {
+    expect(TRAILER_DEFS).toHaveLength(6);
     const ids = TRAILER_DEFS.map((def) => def.id);
-    expect(new Set(ids).size).toBe(5);
+    expect(new Set(ids).size).toBe(6);
   });
 
   it('tanker fuelMax is 2000', () => {
@@ -66,6 +68,38 @@ describe('TRAILER_DEFS', () => {
     expect(box).toBeDefined();
     expect(utility!.towClass).toBeLessThan(flatbed!.towClass);
     expect(flatbed!.towClass).toBeLessThan(box!.towClass);
+  });
+});
+
+describe('HET-70 lowboy (gooseneck)', () => {
+  it('is a gooseneck class-3 deck trailer with 3 bays', () => {
+    const lowboy = trailerDef('t_lowboy');
+    expect(lowboy).toBeDefined();
+    expect(lowboy!.kind).toBe('lowboy');
+    expect(lowboy!.gooseneck).toBe(true);
+    expect(lowboy!.towClass).toBe(3);
+    expect(isDeckKind(lowboy!.kind)).toBe(true);
+    expect(deckBayCount(lowboy!)).toBe(3);
+    // wider than the tank it hauls (tank def width 3.3)
+    expect(lowboy!.width).toBeGreaterThan(3.3);
+  });
+
+  it('only fifth-wheel-class rigs can hitch it', () => {
+    for (const v of ['semi', 'semi_day', 'goliath', 'tank']) {
+      expect(canHitch(v, 't_lowboy')).toBe(true);
+    }
+    // rating alone is not enough, and lesser trucks are out entirely
+    for (const v of ['f250', 'pickup', 'van', 'bronco', 'sedan']) {
+      expect(canHitch(v, 't_lowboy')).toBe(false);
+    }
+  });
+
+  it('other deck trailers keep 1 bay; non-decks have none', () => {
+    expect(deckBayCount(trailerDef('t_carrier')!)).toBe(1);
+    expect(deckBayCount(trailerDef('t_flatbed')!)).toBe(1);
+    expect(deckBayCount(trailerDef('t_box')!)).toBe(0);
+    expect(isDeckKind('box')).toBe(false);
+    expect(isDeckKind('tanker')).toBe(false);
   });
 });
 
