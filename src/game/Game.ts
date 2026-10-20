@@ -1295,7 +1295,8 @@ export class Game {
   private enterVehicle(v: Vehicle): void {
     this.driving = v;
     this.wasFirstPerson = this.player!.firstPerson;
-    if (this.wasFirstPerson) this.player!.forceFirstPerson(false, this.camera!);
+    // first person stays first person: driveUpdate renders the
+    // driver's-eye view (V toggles back to chase in the seat)
     this.player!.camYaw = v.heading;
     const s = useGameStore.getState();
     s.setVehicle({
@@ -1333,7 +1334,7 @@ export class Game {
     v.speed = 0;
     this.driving = null;
     player.endDrive();
-    if (this.wasFirstPerson) player.forceFirstPerson(true, this.camera!);
+    player.forceFirstPerson(this.wasFirstPerson, this.camera!); // restore the pre-drive view mode
     useGameStore.getState().setVehicle(null);
     sfx.play('ui', { volume: 0.4 });
   }
@@ -1613,7 +1614,7 @@ export class Game {
       const w = this.trailers.worldOf(t, 0, -t.def.length / 2 - 2.6);
       this.driving = null;
       player.endDrive();
-      if (this.wasFirstPerson) player.forceFirstPerson(true, this.camera!);
+      player.forceFirstPerson(this.wasFirstPerson, this.camera!); // restore the pre-drive view mode
       player.pos.x = w.x;
       player.pos.z = w.z;
       player.pos.y = this.groundY(w.x, w.z);

@@ -11,6 +11,9 @@ import { DIFFICULTIES } from '../store/types';
 import { sfx } from '../systems/audio';
 import type { HuskManager } from './Husks';
 import { clamp, lerp } from './rng';
+import {
+  accelRate, expDamp, sprintFovKick, wadeBlocksJump, wadeBlocksSprint, wadeFactor,
+} from './moveMath';
 import { useGameStore } from '../store/gameStore';
 import { ITEMS } from '../data/items';
 import { magSizeOf } from '../data/mods';
@@ -33,8 +36,6 @@ const SPRINT_SPEED = 10.4;
 const CROUCH_SPEED = 2.6;
 const JUMP_VEL = 5.6;
 const GRAVITY = 20;
-const ACCEL_GROUND = 11;
-const ACCEL_AIR = 3.2;
 
 export class Player {
   readonly group = new THREE.Group();
@@ -292,12 +293,15 @@ export class Player {
     const mz = clamp(input.moveY, -1, 1);
     const wishInput = Math.abs(mx) > 0.05 || Math.abs(mz) > 0.05;
     this.crouching = input.crouch && this.grounded;
+    // wading: shoreline ground below y=0 drags the stride (moveMath)
+    const groundHere = ctx.groundY(this.pos.x, this.pos.z);
+    const wade = wadeFactor(groundHere);
     const wantSprint = input.sprint && ctx.sprintAllowed && this.stamina > 1 && mz > 0.1 && !this.crouching;
-    const sprinting = wantSprint && wishInput;
+    const sprinting = wantSprint && wishInput && !wadeBlocksSprint(groundHere);
 
-    let speed = WALK_SPEED * ctx.speedMul;
-    if (sprinting) speed = SPRINT_SPEED * ctx.speedMul;
-    else if (this.crouching) speed = CROUCH_SPEED * ctx.speedMul;
+    let speed = WALK_SPEED * ctx.speedMul * wade;
+    if (sprinting) speed = SPRINT_SPEED * ctx.speedMul * wade;
+    else if (this.crouching) speed = CROUCH_SPEED * ctx.speedMul * wade;
 
     // camera-relative wish direction: forward = (sin yaw, cos yaw),
     // right = (-cos yaw, sin yaw). (Both axes were negated before — W walked backward.)
@@ -319,9 +323,11 @@ export class Player {
       this.yaw += d * Math.min(1, dt * 10);
       this.group.rotation.y = this.yaw;
     }
-    // smooth accel toward wish velocity: snappy on ground, drifty in air
-    const accel = this.grounded ? ACCEL_GROUND : ACCEL_AIR;
-    const vk = Math.min(1, dt * accel);
+    // smooth accel toward wish velocity: eager launch, firmer stop,
+    // firmest direction reversal; drifty in the air. Exp-damped, so
+    // the feel is identical at any frame rate.
+    const opposing = wishInput && (this.vel.x * wishX + this.vel.z * wishZ) < 0;
+    const vk = expDamp(accelRate(this.grounded, wishInput, opposing), dt);
     this.vel.x = lerp(this.vel.x, wishX, vk);
     this.vel.z = lerp(this.vel.z, wishZ, vk);
     this.pos.x += this.vel.x * dt;
@@ -331,7 +337,7 @@ export class Player {
     const moving = this.vel.length() > 0.6;
 
     // jump (edge) + gravity; the heightmap is the ground
-    if (input.jump && this.grounded && !this.crouching) {
+    if (input.jump && this.grounded && !this.crouching && !wadeBlocksJump(groundHere)) {
       this.vy = JUMP_VEL;
       this.grounded = false;
       sfx.play('step', { volume: 0.4 });
@@ -374,12 +380,12 @@ export class Player {
       this.armR.rotation.x = sw * amp * 0.75;
       // body bob on the rig, forward lean when sprinting, roll into strafes,
       // and ride low when crouching
-      const crouchDrop = lerp(this.rig.userData.crouchDrop ?? 0, this.crouching ? 0.42 : 0, Math.min(1, dt * 10));
+      const crouchDrop = lerp(this.rig.userData.crouchDrop ?? 0, this.crouching ? 0.42 : 0, expDamp(11, dt));
       this.rig.userData.crouchDrop = crouchDrop;
       this.rig.position.y = Math.abs(Math.cos(this.walkPhase)) * (sprinting ? 0.085 : 0.05) - crouchDrop;
       this.headRef.position.y = 1.78 + Math.abs(Math.cos(this.walkPhase)) * 0.028;
-      this.leanF = lerp(this.leanF, sprinting ? 0.17 : this.crouching ? 0.22 : 0.05, Math.min(1, dt * 6));
-      this.leanS = lerp(this.leanS, -mx * 0.07, Math.min(1, dt * 6));
+      this.leanF = lerp(this.leanF, sprinting ? 0.17 : this.crouching ? 0.22 : 0.05, expDamp(7, dt));
+      this.leanS = lerp(this.leanS, -mx * 0.07, expDamp(7, dt));
       this.rig.rotation.x = this.leanF;
       this.rig.rotation.z = this.leanS;
 
@@ -401,12 +407,12 @@ export class Player {
     } else {
       // idle: settle the limbs, breathe (stay low if crouching)
       this.idleT += dt;
-      const crouchDrop = lerp(this.rig.userData.crouchDrop ?? 0, this.crouching ? 0.42 : 0, Math.min(1, dt * 10));
+      const crouchDrop = lerp(this.rig.userData.crouchDrop ?? 0, this.crouching ? 0.42 : 0, expDamp(11, dt));
       this.rig.userData.crouchDrop = crouchDrop;
       this.rig.position.y = Math.sin(this.idleT * 2.1) * 0.015 - crouchDrop;
       this.headRef.position.y = 1.78 + Math.sin(this.idleT * 2.1) * 0.008;
-      this.leanF = lerp(this.leanF, this.crouching ? 0.22 : 0, Math.min(1, dt * 6));
-      this.leanS = lerp(this.leanS, 0, Math.min(1, dt * 6));
+      this.leanF = lerp(this.leanF, this.crouching ? 0.22 : 0, expDamp(7, dt));
+      this.leanS = lerp(this.leanS, 0, expDamp(7, dt));
       this.rig.rotation.x = this.leanF;
       this.rig.rotation.z = this.leanS;
       this.legL.rotation.x *= 0.9;
@@ -695,8 +701,10 @@ export class Player {
       cam.rotateZ(-leanAmt * 0.32); // roll the view with the lean
     }
 
-    // sight picture: field of view narrows as you go down the sights
-    const wantFov = this.aimLevel === 2 ? 38 : this.aimLevel === 1 ? 52 : 60;
+    // sight picture: field of view narrows as you go down the sights;
+    // a full sprint kicks it wider — speed you can feel
+    const speedNorm = clamp(Math.hypot(this.vel.x, this.vel.z) / SPRINT_SPEED, 0, 1);
+    const wantFov = this.aimLevel === 2 ? 38 : this.aimLevel === 1 ? 52 : 60 + (sprinting ? sprintFovKick(speedNorm) : 0);
     if (Math.abs(cam.fov - wantFov) > 0.05) {
       cam.fov = lerp(cam.fov, wantFov, Math.min(1, dt * 10));
       cam.updateProjectionMatrix();
@@ -716,6 +724,11 @@ export class Player {
     camDist: number,
     seat?: { kind: string; id: string; length: number; width: number; heading: number },
   ): void {
+    // V in the driver's seat: chase cam <-> driver's-eye first person
+    if (input.fpToggle) {
+      this.setFirstPerson(!this.firstPerson, ctx.camera);
+      input.fpToggle = false;
+    }
     if (this.viewModel.parent === ctx.camera) ctx.camera.remove(this.viewModel);
     this.viewModel.visible = false;
     this.swingTrail.visible = false;
@@ -723,9 +736,13 @@ export class Player {
     this.pos.z = tz;
     this.pos.y = ty;
     // the driver is IN the vehicle: visible and seated in third person,
-    // hidden in first person (you ARE the driver)
-    if (seat && !this.firstPerson) {
-      this.group.visible = true;
+    // hidden in first person (you ARE the driver). Seat locals are
+    // computed either way — the first-person camera sits at the head.
+    let eyeX = 0;
+    let eyeY = 0;
+    let eyeZ = 0;
+    if (seat) {
+      this.group.visible = !this.firstPerson;
       const W = seat.width;
       const L = seat.length;
       let lx = 0;
@@ -767,6 +784,10 @@ export class Player {
       const s = Math.sin(seat.heading);
       this.group.position.set(tx + lx * c + lz * s, ty + gy, tz - lx * s + lz * c);
       this.group.rotation.y = seat.heading;
+      // driver's eye: head position, a touch forward of the seat point
+      eyeX = tx + lx * c + (lz + 0.12) * s;
+      eyeY = ty + gy + 1.84;
+      eyeZ = tz - lx * s + (lz + 0.12) * c;
       // seated pose: thighs forward, hands to the wheel/bars
       this.legL.rotation.x = -1.25;
       this.legR.rotation.x = -1.25;
@@ -786,6 +807,22 @@ export class Player {
     this.camPitch = clamp(this.camPitch - ldy * 0.0022, -0.9, 0.4);
     const cam = ctx.camera;
     const cp = Math.cos(this.camPitch);
+    if (this.firstPerson && seat) {
+      // DRIVER'S EYE: the camera is your head — over the dash, wheel in
+      // view, free look on the mouse. FOV opens up a touch for the cab.
+      cam.position.set(eyeX, eyeY, eyeZ);
+      const fwd = new THREE.Vector3(
+        Math.sin(this.camYaw) * cp,
+        Math.sin(this.camPitch),
+        Math.cos(this.camYaw) * cp,
+      );
+      cam.lookAt(eyeX + fwd.x * 3, eyeY + fwd.y * 3, eyeZ + fwd.z * 3);
+      if (Math.abs(cam.fov - 66) > 0.05) {
+        cam.fov = lerp(cam.fov, 66, Math.min(1, dt * 8));
+        cam.updateProjectionMatrix();
+      }
+      return;
+    }
     const target = new THREE.Vector3(tx, ty + 1.9, tz);
     if (!this.smoothInit) {
       this.smoothTarget.copy(target);
