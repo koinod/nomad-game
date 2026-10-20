@@ -55,7 +55,9 @@ export interface ItemDef {
   carryBonus?: number; // packs: extra kg
   packSlots?: number; // packs: extra slots
   armor?: number; // fraction of damage mitigated while carried (vests, plates)
-  thrown?: { aoe: number; dmg: number; fuse: number; fire?: boolean; blind?: boolean }; // grenades
+  thrown?: { aoe: number; dmg: number; fuse: number; fire?: boolean; blind?: number; smoke?: boolean; lure?: number; decoySec?: number }; // grenades
+  cooldown?: number; // ranged: seconds between shots
+  noiseRadius?: number; // ranged: gunshot noise in meters (default 80)
 }
 
 export interface InvItem {

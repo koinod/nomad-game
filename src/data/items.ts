@@ -165,13 +165,82 @@ export const ITEMS: Record<string, ItemDef> = {
     id: 'frag', name: 'Frag grenade', category: 'weapon-melee', weight: 0.4, slots: 1, stack: 3,
     desc: 'Pull, throw, duck. Equip and left-click to throw.', damage: 0, thrown: { aoe: 5.5, dmg: 70, fuse: 1.6 },
   },
+  crowbar: {
+    id: 'crowbar', name: 'Crowbar', category: 'weapon-melee', weight: 1.4, slots: 2, stack: 1,
+    desc: 'Opens doors, skulls, and everything in between.', damage: 17,
+  },
+  fire_axe: {
+    id: 'fire_axe', name: 'Fire axe', category: 'weapon-melee', weight: 2.6, slots: 3, stack: 1,
+    desc: 'Slow, heavy, and final.', damage: 34,
+  },
+  spear: {
+    id: 'spear', name: 'Boar spear', category: 'weapon-melee', weight: 1.6, slots: 2, stack: 1,
+    desc: 'Keeps them at arm\u2019s length. And then some.', damage: 20,
+  },
+  riot_baton: {
+    id: 'riot_baton', name: 'Riot baton', category: 'weapon-melee', weight: 0.9, slots: 1, stack: 1,
+    desc: 'Fast hands. Low damage, high dissuasion.', damage: 12,
+  },
+  flare_gun: {
+    id: 'flare_gun', name: 'Flare gun', category: 'weapon-ranged', weight: 0.7, slots: 2, stack: 1,
+    desc: 'Burns bright. So does everything it hits.', damage: 30, range: 35, ammoId: 'flare',
+    spread: 0.03, cooldown: 1.2, noiseRadius: 45,
+  },
+  revolver: {
+    id: 'revolver', name: 'Revolver', category: 'weapon-ranged', weight: 1.0, slots: 2, stack: 1,
+    desc: 'Six chambers of argument.', damage: 42, range: 40, ammoId: 'ammo_9mm',
+    spread: 0.05, cooldown: 0.65, noiseRadius: 80,
+  },
+  crossbow: {
+    id: 'crossbow', name: 'Crossbow', category: 'weapon-ranged', weight: 2.4, slots: 3, stack: 1,
+    desc: 'Whispers. Reloads like it means it.', damage: 60, range: 55, ammoId: 'bolts',
+    spread: 0.015, cooldown: 1.6, noiseRadius: 12,
+  },
+  smg: {
+    id: 'smg', name: 'SMG', category: 'weapon-ranged', weight: 2.0, slots: 3, stack: 1,
+    desc: 'Eats 9mm for breakfast.', damage: 16, range: 38, ammoId: 'ammo_9mm',
+    spread: 0.09, cooldown: 0.22, noiseRadius: 80,
+  },
+  carbine: {
+    id: 'carbine', name: 'Carbine', category: 'weapon-ranged', weight: 2.6, slots: 3, stack: 1,
+    desc: 'The middle of every argument.', damage: 34, range: 70, ammoId: 'ammo_556',
+    spread: 0.04, cooldown: 0.35, noiseRadius: 80,
+  },
+  dmr: {
+    id: 'dmr', name: 'DMR', category: 'weapon-ranged', weight: 4.2, slots: 4, stack: 1,
+    desc: 'Reaches out and reminds them.', damage: 75, range: 110, ammoId: 'ammo_556',
+    spread: 0.02, cooldown: 1.1, noiseRadius: 80,
+  },
+  ammo_556: {
+    id: 'ammo_556', name: '5.56 rounds', category: 'ammo', weight: 0.02, slots: 1, stack: 60,
+    desc: 'Rifle cartridges. The good kind of argument.',
+  },
+  bolts: {
+    id: 'bolts', name: 'Bolts', category: 'ammo', weight: 0.03, slots: 1, stack: 40,
+    desc: 'Short, heavy, silent.',
+  },
+  smoke: {
+    id: 'smoke', name: 'Smoke grenade', category: 'weapon-melee', weight: 0.4, slots: 1, stack: 3,
+    desc: 'Equip and throw: a gray curtain that blinds what\u2019s inside.', damage: 0,
+    thrown: { aoe: 7, dmg: 0, fuse: 0.4, blind: 4, smoke: true },
+  },
+  rock: {
+    id: 'rock', name: 'Rock', category: 'weapon-melee', weight: 0.3, slots: 1, stack: 5,
+    desc: 'Equip and throw: lands with a clatter that pulls attention.', damage: 2,
+    thrown: { aoe: 0, dmg: 0, fuse: 0.05, lure: 14 },
+  },
+  boombox: {
+    id: 'boombox', name: 'Boombox', category: 'weapon-melee', weight: 3.5, slots: 3, stack: 1,
+    desc: 'Equip and throw: plays for 20 seconds. Everything hears it.', damage: 0,
+    thrown: { aoe: 0, dmg: 0, fuse: 0.1, decoySec: 20 },
+  },
   molotov: {
     id: 'molotov', name: 'Molotov', category: 'weapon-melee', weight: 0.5, slots: 1, stack: 3,
     desc: 'A bottle of bad decisions. Equip and left-click to throw.', damage: 0, thrown: { aoe: 4, dmg: 25, fuse: 0, fire: true },
   },
   flashbang: {
     id: 'flashbang', name: 'Flashbang', category: 'weapon-melee', weight: 0.3, slots: 1, stack: 3,
-    desc: 'Light and noise. Husks lose you for a while. Equip and left-click to throw.', damage: 0, thrown: { aoe: 12, dmg: 0, fuse: 0.8, blind: true },
+    desc: 'Light and noise. Husks lose you for a while. Equip and left-click to throw.', damage: 0, thrown: { aoe: 12, dmg: 0, fuse: 0.8, blind: 6 },
   },
   armored_vest: {
     id: 'armored_vest', name: 'Armored vest', category: 'material', weight: 2.4, slots: 2, stack: 1,
@@ -199,6 +268,7 @@ export const HUSK_LOOT: Record<string, HuskLootEntry[]> = {
     { id: 'canned_food', min: 1, max: 2, chance: 0.3 },
     { id: 'flare', min: 1, max: 1, chance: 0.15 },
     { id: 'scrap', min: 1, max: 2, chance: 0.2 },
+    { id: 'rock', min: 1, max: 2, chance: 0.25 },
   ],
   town: [
     { id: 'canned_food', min: 1, max: 2, chance: 0.35 },

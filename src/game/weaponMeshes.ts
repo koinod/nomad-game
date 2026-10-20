@@ -137,7 +137,20 @@ export function buildGroundMesh(itemId: string, qty = 1): THREE.Group {
     case 'hunting_rifle':
     case 'frag':
     case 'molotov':
-    case 'flashbang': {
+    case 'flashbang':
+    case 'crowbar':
+    case 'fire_axe':
+    case 'spear':
+    case 'riot_baton':
+    case 'flare_gun':
+    case 'revolver':
+    case 'crossbow':
+    case 'smg':
+    case 'carbine':
+    case 'dmr':
+    case 'smoke':
+    case 'rock':
+    case 'boombox': {
       const m = buildHandMesh(itemId);
       m.position.y = 0.06;
       g.add(m);
@@ -210,6 +223,108 @@ export function buildGroundMesh(itemId: string, qty = 1): THREE.Group {
     case 'flashbang': {
       const body = add(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.18, 10), MAT.steel()));
       body.rotation.x = Math.PI / 2; body.position.z = 0.12;
+      break;
+    }
+    case 'crowbar': {
+      const bar = add(new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.6), MAT.steel()));
+      bar.position.z = 0.3;
+      const claw = add(new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.14, 0.06), MAT.steel()));
+      claw.position.set(0, 0.05, 0.6);
+      break;
+    }
+    case 'fire_axe': {
+      const handle = add(new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.035, 0.8, 8), MAT.wood()));
+      handle.rotation.x = Math.PI / 2; handle.position.z = 0.3;
+      const head = add(new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.16, 0.3), new THREE.MeshStandardMaterial({ color: 0xb03a2e, roughness: 0.6, metalness: 0.3 })));
+      head.position.set(0, -0.02, 0.6);
+      break;
+    }
+    case 'spear': {
+      const shaft = add(new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 1.6, 8), MAT.wood()));
+      shaft.rotation.x = Math.PI / 2; shaft.position.z = 0.6;
+      const tip = add(new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.28, 8), MAT.steel()));
+      tip.rotation.x = Math.PI / 2; tip.position.z = 1.5;
+      break;
+    }
+    case 'riot_baton': {
+      const body = add(new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.55, 10), MAT.black()));
+      body.rotation.x = Math.PI / 2; body.position.z = 0.28;
+      const grip = add(new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.16, 8), MAT.black()));
+      grip.rotation.z = Math.PI / 2; grip.position.set(0.1, -0.02, 0.05);
+      break;
+    }
+    case 'flare_gun': {
+      const frame = add(new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.1, 0.3), new THREE.MeshStandardMaterial({ color: 0xe07820, roughness: 0.5 })));
+      frame.position.z = 0.14;
+      const grip = add(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.16, 0.08), MAT.black()));
+      grip.position.set(0, -0.12, -0.04); grip.rotation.x = 0.4;
+      break;
+    }
+    case 'revolver': {
+      const frame = add(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.09, 0.34), MAT.darkSteel()));
+      frame.position.z = 0.18;
+      const cyl = add(new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.09, 10), MAT.steel()));
+      cyl.rotation.z = Math.PI / 2; cyl.position.z = 0.12;
+      const grip = add(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.15, 0.09), MAT.wood()));
+      grip.position.set(0, -0.11, -0.05); grip.rotation.x = 0.5;
+      break;
+    }
+    case 'crossbow': {
+      const stock = add(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.12, 0.6), MAT.wood()));
+      stock.position.z = 0.22;
+      const bow = add(new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.05, 0.09), MAT.darkSteel()));
+      bow.position.z = 0.48;
+      const bolt = add(new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.4, 6), MAT.wood()));
+      bolt.rotation.x = Math.PI / 2; bolt.position.z = 0.32;
+      break;
+    }
+    case 'smg': {
+      const bodyM = add(new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.14, 0.5), MAT.black()));
+      bodyM.position.z = 0.22;
+      const mag = add(new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.2, 0.09), MAT.steel()));
+      mag.position.set(0, -0.16, 0.18); mag.rotation.x = 0.15;
+      const stock = add(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.08, 0.18), MAT.black()));
+      stock.position.z = -0.08;
+      break;
+    }
+    case 'carbine': {
+      const bodyM = add(new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.13, 0.78), MAT.darkSteel()));
+      bodyM.position.z = 0.3;
+      const mag = add(new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.16, 0.1), MAT.steel()));
+      mag.position.set(0, -0.14, 0.2); mag.rotation.x = 0.25;
+      const guard = add(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.08, 0.26), MAT.black()));
+      guard.position.z = 0.55;
+      break;
+    }
+    case 'dmr': {
+      const bodyM = add(new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.13, 1.0), MAT.darkSteel()));
+      bodyM.position.z = 0.4;
+      const mag = add(new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.14, 0.09), MAT.steel()));
+      mag.position.set(0, -0.13, 0.28);
+      const scope = add(new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.2, 8), MAT.black()));
+      scope.rotation.x = Math.PI / 2; scope.position.set(0, 0.11, 0.32);
+      break;
+    }
+    case 'smoke': {
+      const body = add(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.16, 10), new THREE.MeshStandardMaterial({ color: 0x6a7078, roughness: 0.6 })));
+      body.rotation.x = Math.PI / 2; body.position.z = 0.12;
+      const band = add(new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.052, 0.05, 10), new THREE.MeshStandardMaterial({ color: 0xd8d8d0, roughness: 0.5 })));
+      band.rotation.x = Math.PI / 2; band.position.z = 0.12;
+      break;
+    }
+    case 'rock': {
+      const r = add(new THREE.Mesh(new THREE.DodecahedronGeometry(0.09), new THREE.MeshStandardMaterial({ color: 0x7a7a72, roughness: 1 })));
+      r.position.z = 0.1;
+      break;
+    }
+    case 'boombox': {
+      const bodyM = add(new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.28, 0.18), MAT.black()));
+      bodyM.position.z = 0.2;
+      const spk = add(new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.03, 12), MAT.steel()));
+      spk.rotation.x = Math.PI / 2; spk.position.set(-0.11, -0.02, 0.3);
+      const spk2 = spk.clone();
+      spk2.position.x = 0.11;
+      g.add(spk2);
       break;
     }
     default: {

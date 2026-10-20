@@ -288,6 +288,22 @@ export class InteractSystem {
     pickup('pk_helmet', 'riot_helmet', 1, 'relay_station', 2, -4);
     pickup('pk_lockpick', 'lockpick', 2, 'town', 10, -8);
     pickup('pk_toolkit', 'tool_kit', 1, 'town', -14, 6);
+    // full roster spawns: every weapon findable on the beta island
+    pickup('pk_crowbar', 'crowbar', 1, 'town', 100, 50);
+    pickup('pk_fireaxe', 'fire_axe', 1, 'town', 72, 26);
+    pickup('pk_spear', 'spear', 1, 'forest_cache', 3, -2);
+    pickup('pk_baton', 'riot_baton', 1, 'relay_station', -3, 3);
+    pickup('pk_flaregun', 'flare_gun', 1, 'lighthouse_base', -4, -3);
+    pickup('pk_revolver', 'revolver', 1, 'town', 52, -26);
+    pickup('pk_crossbow', 'crossbow', 1, 'jonah_camp', -13, -7);
+    pickup('pk_bolts', 'bolts', 12, 'forest_cache', -2, 3);
+    pickup('pk_smg', 'smg', 1, 'relay_station', 6, -2);
+    pickup('pk_carbine', 'carbine', 1, 'wreck', 3, 2);
+    pickup('pk_556', 'ammo_556', 40, 'wreck', -3, -2);
+    pickup('pk_dmr', 'dmr', 1, 'lighthouse_base', 5, -4);
+    pickup('pk_smoke', 'smoke', 2, 'relay_station', -6, -3);
+    pickup('pk_boombox', 'boombox', 1, 'town', 48, -24);
+    pickup('pk_rocks', 'rock', 3, 'shore_camp', 3, 5);
     pickup('pk_shells', 'shells', 6, 'town', 4, 1.5);
     pickup('pk_rifle', 'hunting_rifle', 1, 'jonah_camp', -3.5, 3.5);
     pickup('pk_rifle_ammo', 'ammo_rifle', 8, 'relay_station', 3.5, -3);

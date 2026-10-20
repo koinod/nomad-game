@@ -513,6 +513,7 @@ export class Player {
         eyePos: new THREE.Vector3(),
         spendStamina: (n) => this.spendStamina(n),
         flashMuzzle: () => undefined,
+        aimLevel: this.aimLevel,
         onThrow: ctx.onThrow,
       });
       if (res.swung) {
@@ -542,7 +543,8 @@ export class Player {
       }
     }
     if (input.attackRanged && this.rangedCd <= 0 && this.blockBlend < 0.5) {
-      this.rangedCd = 0.4;
+      const rdef = equippedRangedDef();
+      this.rangedCd = rdef?.cooldown ?? 0.4;
       this.recoilT = 0.16;
       const { eye, dir } = this.aim(ctx.camera);
       const fired = tryRanged({
@@ -554,6 +556,7 @@ export class Player {
         eyePos: eye,
         spendStamina: (n) => this.spendStamina(n),
         flashMuzzle: () => this.flashMuzzle(),
+        aimLevel: this.aimLevel,
       });
       if (fired.fired) {
         if (fired.hit) {

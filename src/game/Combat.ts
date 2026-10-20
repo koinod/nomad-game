@@ -15,6 +15,7 @@ export interface CombatHooks {
   eyePos: THREE.Vector3; // muzzle origin
   spendStamina: (n: number) => boolean;
   flashMuzzle: () => void;
+  aimLevel: number; // 0 = hip, 1 = shoulder, 2 = down sights — drives the accuracy cone
   onThrow?: (itemId: string) => void; // grenades: hand off to Game's projectile sim
 }
 
@@ -38,6 +39,10 @@ const MELEE_STATS: Record<string, MeleeStats> = {
   sledgehammer: { damage: 30, range: 2.9, halfArcRad: 0.6, swingTime: 0.55, knockback: 5.5, stamina: 22, cleave: 2 },
   torch:   { damage: 6,  range: 2.7, halfArcRad: 0.6,  swingTime: 0.34, knockback: 2.0, stamina: 12, cleave: 2 },
   flare:   { damage: 4,  range: 2.5, halfArcRad: 0.55, swingTime: 0.3,  knockback: 1.6, stamina: 10, cleave: 1 },
+  crowbar:     { damage: 17, range: 2.9, halfArcRad: 0.6,  swingTime: 0.33, knockback: 3.4, stamina: 14, cleave: 2 },
+  fire_axe:    { damage: 34, range: 3.0, halfArcRad: 0.55, swingTime: 0.52, knockback: 6.0, stamina: 24, cleave: 2 },
+  spear:       { damage: 20, range: 3.6, halfArcRad: 0.3,  swingTime: 0.4,  knockback: 2.8, stamina: 15, cleave: 1 },
+  riot_baton:  { damage: 12, range: 2.7, halfArcRad: 0.6,  swingTime: 0.2,  knockback: 2.2, stamina: 7,  cleave: 2 },
 };
 const FIST_STATS: MeleeStats = {
   damage: 8, range: 2.3, halfArcRad: 0.5, swingTime: 0.26, knockback: 1.8, stamina: 10, cleave: 1,
@@ -141,11 +146,14 @@ export function tryRanged(h: CombatHooks): RangedResult {
 
   sfx.play('shot', { volume: 1 });
   h.flashMuzzle();
-  h.emitNoise(h.playerPos.x, h.playerPos.z, 80); // a gunshot carries (design: 80m)
+  h.emitNoise(h.playerPos.x, h.playerPos.z, def.noiseRadius ?? 80); // per-weapon: the crossbow whispers, rifles carry
 
   const range = def.range ?? 45;
   const pellets = def.pellets ?? 1;
-  const spread = def.spread ?? 0;
+  // accuracy is calculated from stance: hip fire sprays, shoulder aim settles,
+  // down-sights is nearly true. Weapon base spread scales the cone.
+  const aimMult = h.aimLevel === 2 ? 0.18 : h.aimLevel === 1 ? 0.8 : 2.4;
+  const spread = (def.spread ?? 0.045) * aimMult + (h.aimLevel === 2 ? 0.002 : 0.006);
   let hit = false;
   let killed = false;
   for (let p = 0; p < pellets; p++) {

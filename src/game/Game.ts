@@ -52,6 +52,7 @@ export class Game {
     itemId: string;
   }[] = [];
   private fireZones: { group: THREE.Group; t: number; x: number; z: number }[] = [];
+  private decoys: { group: THREE.Group; t: number; tick: number; x: number; z: number }[] = [];
   // hold-to-search state (container / corpse / safe)
   private searching: { id: string; label: string; t: number; dur: number; x: number; z: number; hp: number } | null = null;
   vehicles!: VehicleManager;
@@ -646,6 +647,22 @@ export class Game {
       f.group.scale.setScalar(0.75 + (f.t / 6) * 0.35); // burns down
     }
 
+    // boombox decoys: keep singing until the tape runs out
+    for (let i = this.decoys.length - 1; i >= 0; i--) {
+      const d = this.decoys[i];
+      d.t -= dt;
+      d.tick += dt;
+      if (d.t <= 0) {
+        this.scene!.remove(d.group);
+        this.decoys.splice(i, 1);
+        continue;
+      }
+      if (d.tick >= 1.5) {
+        d.tick = 0;
+        this.noiseAt(d.x, d.z, 35);
+      }
+    }
+
     // hold-to-search: the timer runs while the player stays close and unhurt
     if (this.searching) {
       const q = this.searching;
@@ -1031,6 +1048,53 @@ export class Game {
     const th = def.thrown!;
     const p = g.mesh.position;
     this.scene!.remove(g.mesh);
+    if (th.lure) {
+      // a rock clattering down: pure attention, no damage
+      this.noiseAt(p.x, p.z, th.lure);
+      sfx.play('ui', { volume: 0.5 });
+      return;
+    }
+    if (th.decoySec) {
+      const group = new THREE.Group();
+      const boxM = new THREE.Mesh(
+        new THREE.BoxGeometry(0.55, 0.35, 0.25),
+        new THREE.MeshStandardMaterial({ color: 0x2e2e32, roughness: 0.7 }),
+      );
+      boxM.castShadow = true;
+      const dish = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.13, 0.13, 0.04, 12),
+        new THREE.MeshStandardMaterial({ color: 0x8a929a, roughness: 0.4, metalness: 0.6 }),
+      );
+      dish.position.set(-0.12, 0.2, 0);
+      const dish2 = dish.clone();
+      dish2.position.x = 0.14;
+      group.add(boxM, dish, dish2);
+      group.position.set(p.x, this.groundY(p.x, p.z) + 0.18, p.z);
+      this.scene!.add(group);
+      this.decoys.push({ group, t: th.decoySec, tick: 0, x: p.x, z: p.z });
+      this.noiseAt(p.x, p.z, 35);
+      s.addToast('The boombox starts playing. Loudly.');
+      return;
+    }
+    if (th.smoke) {
+      const puff = new THREE.Mesh(
+        new THREE.SphereGeometry(th.aoe * 0.7, 12, 10),
+        new THREE.MeshBasicMaterial({ color: 0x9aa0a8, transparent: true, opacity: 0.5, depthWrite: false }),
+      );
+      puff.position.set(p.x, p.y + 1, p.z);
+      this.scene!.add(puff);
+      const grow = () => {
+        puff.scale.multiplyScalar(1.03);
+        (puff.material as THREE.MeshBasicMaterial).opacity *= 0.965;
+        if ((puff.material as THREE.MeshBasicMaterial).opacity > 0.03) requestAnimationFrame(grow);
+        else this.scene!.remove(puff);
+      };
+      grow();
+      husks.stunInRadius(p.x, p.z, th.aoe, th.blind ?? 4);
+      this.noiseAt(p.x, p.z, 10);
+      s.addToast('Smoke out — move while they\u2019re blind.');
+      return;
+    }
     if (th.fire) {
       const group = new THREE.Group();
       const flames = new THREE.Mesh(
@@ -1047,8 +1111,8 @@ export class Game {
       this.noiseAt(p.x, p.z, 14);
       return;
     }
-    if (th.blind) {
-      husks.stunInRadius(p.x, p.z, th.aoe, 6);
+    if (th.blind && !th.smoke) {
+      husks.stunInRadius(p.x, p.z, th.aoe, th.blind);
       const flash = new THREE.PointLight(0xffffff, 60, 24);
       flash.position.set(p.x, p.y + 1, p.z);
       this.scene!.add(flash);
