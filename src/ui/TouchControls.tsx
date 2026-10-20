@@ -267,6 +267,12 @@ export default function TouchControls() {
           <ControlButton label="JUMP" ariaLabel="Jump" onPress={() => { input.jump = true; }} />
           <ControlButton label="VIEW" ariaLabel="Toggle first person" onPress={() => { input.fpToggle = true; }} />
           <ControlButton
+            small
+            label="AIM"
+            ariaLabel="Cycle aim: hip, shoulder, sights"
+            onPress={() => { input.aimTap = true; }}
+          />
+          <ControlButton
             label="CRCH"
             ariaLabel="Toggle crouch"
             className={crouchOn ? 'border-[#e8b34b] text-[#e8b34b]' : undefined}

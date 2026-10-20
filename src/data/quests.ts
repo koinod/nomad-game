@@ -38,7 +38,7 @@ export const QUESTS: QuestDef[] = [
     giver: 'Jonah Reyes',
     brief: 'Jonah saw a handset go down with the wreck. A working phone changes everything.',
     steps: [
-      { id: 's1', objective: 'Recover the AppBoy from the wreck', type: 'collect', target: 'phone', count: 1 },
+      { id: 's1', objective: 'Recover the sat phone from the wreck', type: 'collect', target: 'phone', count: 1 },
     ],
     rewards: {
       flags: ['phone_unlocked'],

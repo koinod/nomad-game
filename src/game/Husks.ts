@@ -56,6 +56,7 @@ export class Husk {
   deathT = 0;
   lostSightT = 0;
   staggerT = 0; // heavy hits interrupt the attack windup
+  limpT = 0; // walk-cycle clock for the shuffle animation
   knock = new THREE.Vector3();
   removed = false;
   killReported = false;
@@ -76,38 +77,62 @@ export class Husk {
   }
 
   private buildMesh(color: number, height: number): void {
-    // clothing variation: every husk dressed from a palette, some with a
-    // hat, some still clutching a tool — Skyrim-style corpse readability
+    // Husks as infected people, not robots: slumped torso, head tilted and
+    // lolling, arms hanging forward like a sleepwalker's, torn clothes in
+    // zone palettes, glowing eyes for night readability.
     const vrnd = hashId(this.id);
     const pick = (arr: number[]): number => arr[Math.floor(vrnd() * arr.length)];
     const jacketMat = new THREE.MeshStandardMaterial({ color: pick(JACKETS), roughness: 1 });
     const pantsMat = new THREE.MeshStandardMaterial({ color: pick(PANTS), roughness: 1 });
-    this.bodyMat = jacketMat;
-    this.mats.push(jacketMat, pantsMat);
+    const skinMat = new THREE.MeshStandardMaterial({ color: 0x8a7a68, roughness: 1 });
     const darkMat = new THREE.MeshStandardMaterial({ color: 0x2c2c30, roughness: 1 });
-    this.mats.push(darkMat);
+    this.bodyMat = jacketMat;
+    this.mats.push(jacketMat, pantsMat, skinMat, darkMat);
     void color;
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.72, height * 0.62, 0.42), jacketMat);
-    body.position.y = height * 0.52;
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.27, 8, 6), darkMat);
-    head.position.y = height * 0.94;
+    // torso slumps forward
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.68, height * 0.58, 0.4), jacketMat);
+    body.position.y = height * 0.55;
+    body.rotation.x = 0.14;
+    // head lolls to the side, jaw dropped
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 10, 8), skinMat);
+    head.position.set(0.05, height * 0.95, 0.05);
+    head.rotation.z = 0.18;
     head.name = 'head';
-    const armL = new THREE.Mesh(new THREE.BoxGeometry(0.2, height * 0.5, 0.2), jacketMat);
-    armL.position.set(-0.5, height * 0.55, 0.12);
-    armL.rotation.x = -0.9;
-    const armR = armL.clone();
-    armR.position.x = 0.5;
-    const legL = new THREE.Mesh(new THREE.BoxGeometry(0.24, height * 0.42, 0.24), pantsMat);
-    legL.position.set(-0.18, height * 0.21, 0);
+    const jaw = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.08, 0.14), darkMat);
+    jaw.position.set(0.05, height * 0.95 - 0.24, 0.12);
+    jaw.rotation.x = 0.35;
+    // glowing eyes — two small emissive pits
+    const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffd76a });
+    for (const sx of [-0.09, 0.09]) {
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.028, 6, 6), eyeMat);
+      eye.position.set(0.05 + sx, height * 0.95 + 0.03, 0.2);
+      this.group.add(eye);
+    }
+    // arms hang forward, slightly uneven, claws out
+    const armL = new THREE.Mesh(new THREE.BoxGeometry(0.19, height * 0.52, 0.19), jacketMat);
+    armL.position.set(-0.46, height * 0.52, 0.2);
+    armL.rotation.x = -0.5;
+    const armR = new THREE.Mesh(new THREE.BoxGeometry(0.19, height * 0.52, 0.19), jacketMat);
+    armR.position.set(0.46, height * 0.5, 0.16);
+    armR.rotation.x = -0.35;
+    const clawL = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.1, 0.16), skinMat);
+    clawL.position.set(-0.46, height * 0.52 - height * 0.27, 0.33);
+    const clawR = clawL.clone();
+    clawR.position.x = 0.46;
+    clawR.position.z = 0.29;
+    const legL = new THREE.Mesh(new THREE.BoxGeometry(0.23, height * 0.44, 0.23), pantsMat);
+    legL.position.set(-0.18, height * 0.22, 0);
     const legR = legL.clone();
     legR.position.x = 0.18;
-    this.group.add(body, head, armL, armR, legL, legR);
+    this.group.add(body, head, jaw, armL, armR, clawL, clawR, legL, legR);
+    this.group.userData.limpPhase = vrnd() * Math.PI * 2; // asymmetric walk limp
     if (vrnd() < 0.35) {
       const hat = new THREE.Mesh(
-        new THREE.BoxGeometry(0.36, 0.12, 0.34),
+        new THREE.BoxGeometry(0.34, 0.11, 0.32),
         new THREE.MeshStandardMaterial({ color: pick(HATS), roughness: 1 }),
       );
-      hat.position.y = height * 0.94 + 0.3;
+      hat.position.set(0.05, height * 0.95 + 0.24, 0.05);
+      hat.rotation.z = 0.2;
       this.group.add(hat);
       this.mats.push(hat.material as THREE.MeshStandardMaterial);
     }
@@ -116,7 +141,7 @@ export class Husk {
         new THREE.BoxGeometry(0.09, 0.55, 0.09),
         new THREE.MeshStandardMaterial({ color: 0x6e6a63, roughness: 1 }),
       );
-      tool.position.set(0.5, height * 0.32, 0.32);
+      tool.position.set(0.46, height * 0.32, 0.34);
       tool.rotation.x = 0.5;
       this.group.add(tool);
       this.mats.push(tool.material as THREE.MeshStandardMaterial);
@@ -124,7 +149,7 @@ export class Husk {
     this.group.traverse((o) => {
       if (o instanceof THREE.Mesh) o.castShadow = true;
     });
-    this.group.userData.headY = height * 0.94;
+    this.group.userData.headY = height * 0.95;
   }
 
   get alive(): boolean {
@@ -324,6 +349,22 @@ export class Husk {
     // husks respect walls too — they come through the door, not the drywall
     resolveCollisions(g.position, 0.5, ctx.colliders);
     groundClamp();
+
+    // the shuffle: asymmetric limp walk — bob, roll, and a yaw wobble driven
+    // by each husk's own phase. Faster when hunting, heavier in attack.
+    const limp = (g.userData.limpPhase as number) ?? 0;
+    const moving =
+      this.state === 'hunt' || this.state === 'wander' || this.state === 'investigate' || this.state === 'return';
+    const rate = this.state === 'hunt' ? 7.5 : 5;
+    if (moving) {
+      const amp = this.state === 'hunt' ? 1 : 0.55;
+      this.limpT += dt * rate;
+      g.position.y += Math.abs(Math.sin(this.limpT + limp)) * 0.06 * amp;
+      g.rotation.z = Math.sin(this.limpT + limp) * 0.05 * amp;
+      g.rotation.y += Math.sin(this.limpT * 0.5 + limp) * 0.03 * amp; // wobble, not drift
+    } else {
+      g.rotation.z *= 0.9;
+    }
   }
 }
 

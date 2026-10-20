@@ -1,10 +1,10 @@
 // Backpack.tsx — standalone inventory overlay (Tarkov/Unturned-style).
-// Independent of the AppBoy phone: works with a dead battery, before the
+// Independent of the sat phone: works with a dead battery, before the
 // phone is unlocked, anywhere. I toggles, world pauses while open.
 
 import { useState } from 'react';
 import { useGameStore } from '../store/gameStore';
-import { ITEMS, FIELD_RECIPES } from '../data/items';
+import { ITEMS, FIELD_RECIPES, STATION_RECIPES, STATION_LABEL } from '../data/items';
 import { carryLimitKg, encumbranceTier, totalWeightKg } from '../store/inventoryUtils';
 import { sfx } from '../systems/audio';
 
@@ -70,6 +70,7 @@ export default function Backpack() {
   const assignHotbar = useGameStore((s) => s.assignHotbar);
   const sortInventory = useGameStore((s) => s.sortInventory);
   const craftRecipe = useGameStore((s) => s.craftRecipe);
+  const nearStation = useGameStore((s) => s.nearStation);
   const countItem = useGameStore((s) => s.countItem);
   const [selected, setSelected] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -297,12 +298,13 @@ export default function Backpack() {
               )}
             </div>
 
-            {/* field crafting — live-phone perk, hidden in the limited field pack */}
+            {/* crafting: field recipes from the sat phone; station recipes when
+                standing at the matching workstation (nearStation from the game) */}
             {!limited && (
             <div className="rounded border border-[#232b36] bg-[#12161c] p-2.5">
-              <div className="mb-1.5 text-xs text-[#8a94a3]">Field craft</div>
+              <div className="mb-1.5 text-xs text-[#8a94a3]">Field craft — sat phone</div>
               <div className="flex flex-col gap-1.5">
-                {Object.values(FIELD_RECIPES).map((r) => {
+                {Object.values(FIELD_RECIPES).filter((r) => !r.station).map((r) => {
                   const can = r.components.every((c) => countItem(c.itemId) >= c.qty);
                   return (
                     <div key={r.id} className="flex items-center justify-between gap-2 text-sm">
@@ -331,6 +333,49 @@ export default function Backpack() {
                   );
                 })}
               </div>
+              {(['workbench', 'chemistry', 'industrial'] as const).map((st) => (
+                <div key={st} className="mt-3">
+                  <div className="mb-1.5 text-xs text-[#8a94a3]">
+                    {STATION_LABEL[st]}
+                    {nearStation === st && <span className="ml-1 text-[#e8b34b]">— in range</span>}
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    {Object.values(STATION_RECIPES)
+                      .filter((r) => r.station === st)
+                      .map((r) => {
+                        const inRange = nearStation === st;
+                        const can = inRange && r.components.every((c) => countItem(c.itemId) >= c.qty);
+                        return (
+                          <div key={r.id} className={`flex items-center justify-between gap-2 text-sm ${inRange ? '' : 'opacity-50'}`}>
+                            <div className="min-w-0">
+                              <div className="text-[#d7dde5]">{r.name}</div>
+                              <div className="truncate text-[11px] text-[#8a94a3]">
+                                {inRange
+                                  ? r.components
+                                      .map((c) => {
+                                        const have = countItem(c.itemId);
+                                        return `${have}/${c.qty} ${ITEMS[c.itemId]?.name ?? c.itemId}`;
+                                      })
+                                      .join(' · ')
+                                  : `Needs a ${STATION_LABEL[st]} — ${st === 'industrial' ? 'build one in a claimed base' : st === 'chemistry' ? 'one at the relay station' : 'at Jonah\u2019s camp or in town'}`}
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => {
+                                sfx.play('ui');
+                                craftRecipe(r.id);
+                              }}
+                              disabled={!can}
+                              className="shrink-0 rounded border border-[#232b36] px-2.5 py-1 text-xs text-[#d7dde5] transition-colors hover:border-[#e8b34b] disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              Craft
+                            </button>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+              ))}
             </div>
             )}
           </div>

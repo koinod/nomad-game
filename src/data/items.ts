@@ -58,7 +58,7 @@ export const ITEMS: Record<string, ItemDef> = {
     desc: 'Torn fabric. Bandages, filters, patches.',
   },
   phone: {
-    id: 'phone', name: 'AppBoy phone', category: 'key', weight: 0.2, slots: 1, stack: 1,
+    id: 'phone', name: 'Sat Phone', category: 'key', weight: 0.2, slots: 1, stack: 1,
     desc: 'A ruggedized handset. The screen flickers awake when you hold it.',
   },
   relay_part: {
@@ -80,6 +80,54 @@ export const ITEMS: Record<string, ItemDef> = {
   flare: {
     id: 'flare', name: 'Road flare', category: 'tool', weight: 0.3, slots: 1, stack: 4,
     desc: 'Burns bright and hisses. Husks turn toward the noise.',
+  },
+  baseball_bat: {
+    id: 'baseball_bat', name: 'Baseball bat', category: 'weapon-melee', weight: 1.0, slots: 2, stack: 1,
+    desc: 'Ash bat. Wide swing, sends things flying.', damage: 16,
+  },
+  combat_knife: {
+    id: 'combat_knife', name: 'Combat knife', category: 'weapon-melee', weight: 0.4, slots: 1, stack: 1,
+    desc: 'Short, silent, personal. Very fast.', damage: 15,
+  },
+  sledgehammer: {
+    id: 'sledgehammer', name: 'Sledgehammer', category: 'weapon-melee', weight: 2.6, slots: 3, stack: 1,
+    desc: 'Eight pounds of verdict. Slow — but nothing argues back.', damage: 30,
+  },
+  shotgun: {
+    id: 'shotgun', name: 'Pump shotgun', category: 'weapon-ranged', weight: 3.2, slots: 3, stack: 1,
+    desc: 'Six pellets of room-clearing certainty. Devastating up close.', damage: 11, range: 24, ammoId: 'shells', pellets: 6, spread: 0.055,
+  },
+  hunting_rifle: {
+    id: 'hunting_rifle', name: 'Hunting rifle', category: 'weapon-ranged', weight: 3.6, slots: 3, stack: 1,
+    desc: 'Bolt-action, scoped. One careful shot ends most problems.', damage: 58, range: 95, ammoId: 'ammo_rifle',
+  },
+  shells: {
+    id: 'shells', name: 'Shotgun shells', category: 'ammo', weight: 0.05, slots: 1, stack: 24,
+    desc: '12-gauge shells.',
+  },
+  ammo_rifle: {
+    id: 'ammo_rifle', name: 'Rifle rounds', category: 'ammo', weight: 0.04, slots: 1, stack: 30,
+    desc: 'High-velocity rifle cartridges.',
+  },
+  chemicals: {
+    id: 'chemicals', name: 'Chemicals', category: 'material', weight: 0.4, slots: 1, stack: 6,
+    desc: 'Solvents and reagents. Handle like they bite.',
+  },
+  fuel_can: {
+    id: 'fuel_can', name: 'Fuel can', category: 'material', weight: 4.0, slots: 2, stack: 1,
+    desc: 'Five gallons of go. Vehicles drink this.',
+  },
+  tire: {
+    id: 'tire', name: 'Tire', category: 'material', weight: 6.0, slots: 2, stack: 2,
+    desc: 'Vehicle tire, decent tread. Machine Shop work.',
+  },
+  engine_part: {
+    id: 'engine_part', name: 'Engine part', category: 'material', weight: 3.0, slots: 2, stack: 2,
+    desc: 'Machined engine component. Machine Shop work.',
+  },
+  car_battery: {
+    id: 'car_battery', name: 'Car battery', category: 'material', weight: 7.0, slots: 2, stack: 1,
+    desc: 'Holds a charge. Vehicles and bases both want these.',
   },
   torch: {
     id: 'torch', name: 'Torch', category: 'tool', weight: 0.4, slots: 1, stack: 2,
@@ -120,6 +168,7 @@ export const HUSK_LOOT: Record<string, HuskLootEntry[]> = {
     { id: 'scrap', min: 1, max: 2, chance: 0.35 },
     { id: 'flare', min: 1, max: 1, chance: 0.2 },
     { id: 'cloth', min: 1, max: 1, chance: 0.15 },
+    { id: 'chemicals', min: 1, max: 1, chance: 0.2 },
   ],
   dunes: [
     { id: 'water_bottle', min: 1, max: 2, chance: 0.35 },
@@ -133,13 +182,24 @@ export const HUSK_LOOT: Record<string, HuskLootEntry[]> = {
   ],
 };
 
-// Field crafting — no workbench needed, done from the backpack.
+// Crafting — everything starts in the sat phone (field recipes). Serious
+// work — weapons, chemicals, vehicle/industrial parts — needs the matching
+// workstation, Fallout-style (Weapons Bench / Chemistry Station / Machine Shop).
+export type StationId = 'workbench' | 'chemistry' | 'industrial';
+
+export const STATION_LABEL: Record<StationId, string> = {
+  workbench: 'Weapons Bench',
+  chemistry: 'Chemistry Station',
+  industrial: 'Machine Shop',
+};
+
 export interface FieldRecipe {
   id: string;
   name: string;
   components: { itemId: string; qty: number }[];
   resultId: string;
   resultQty: number;
+  station?: StationId; // undefined = craftable anywhere from the phone
 }
 
 export const FIELD_RECIPES: Record<string, FieldRecipe> = {
@@ -167,6 +227,58 @@ export const FIELD_RECIPES: Record<string, FieldRecipe> = {
     id: 'r_cooked_meat', name: 'Cooked meat',
     components: [{ itemId: 'raw_meat', qty: 1 }],
     resultId: 'cooked_meat', resultQty: 1,
+  },
+};
+
+// Workstation recipes — need the matching station and must be close to it.
+export const STATION_RECIPES: Record<string, FieldRecipe> = {
+  // --- Weapons Bench ---
+  r_reload_9mm: {
+    id: 'r_reload_9mm', name: 'Reload 9mm', station: 'workbench',
+    components: [{ itemId: 'scrap', qty: 2 }, { itemId: 'wire', qty: 1 }],
+    resultId: 'ammo_9mm', resultQty: 6,
+  },
+  r_bat: {
+    id: 'r_bat', name: 'Baseball bat', station: 'workbench',
+    components: [{ itemId: 'scrap', qty: 1 }, { itemId: 'cloth', qty: 1 }],
+    resultId: 'baseball_bat', resultQty: 1,
+  },
+  r_combat_knife: {
+    id: 'r_combat_knife', name: 'Combat knife', station: 'workbench',
+    components: [{ itemId: 'scrap', qty: 2 }],
+    resultId: 'combat_knife', resultQty: 1,
+  },
+  r_reload_shells: {
+    id: 'r_reload_shells', name: 'Reload shells', station: 'workbench',
+    components: [{ itemId: 'scrap', qty: 2 }],
+    resultId: 'shells', resultQty: 4,
+  },
+  // --- Chemistry Station ---
+  r_medkit: {
+    id: 'r_medkit', name: 'Medkit', station: 'chemistry',
+    components: [{ itemId: 'bandage', qty: 2 }, { itemId: 'chemicals', qty: 1 }],
+    resultId: 'medkit', resultQty: 1,
+  },
+  r_fuel_can: {
+    id: 'r_fuel_can', name: 'Fuel can', station: 'chemistry',
+    components: [{ itemId: 'chemicals', qty: 2 }],
+    resultId: 'fuel_can', resultQty: 1,
+  },
+  // --- Machine Shop ---
+  r_tire: {
+    id: 'r_tire', name: 'Tire', station: 'industrial',
+    components: [{ itemId: 'scrap', qty: 3 }, { itemId: 'cloth', qty: 1 }],
+    resultId: 'tire', resultQty: 1,
+  },
+  r_engine_part: {
+    id: 'r_engine_part', name: 'Engine part', station: 'industrial',
+    components: [{ itemId: 'scrap', qty: 4 }, { itemId: 'wire', qty: 2 }],
+    resultId: 'engine_part', resultQty: 1,
+  },
+  r_car_battery: {
+    id: 'r_car_battery', name: 'Car battery', station: 'industrial',
+    components: [{ itemId: 'scrap', qty: 2 }, { itemId: 'wire', qty: 1 }, { itemId: 'chemicals', qty: 1 }],
+    resultId: 'car_battery', resultQty: 1,
   },
 };
 

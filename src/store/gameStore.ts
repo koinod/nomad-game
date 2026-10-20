@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { ITEMS, FIELD_RECIPES } from '../data/items';
+import { ITEMS, FIELD_RECIPES, STATION_RECIPES, STATION_LABEL } from '../data/items';
 import { QUESTS } from '../data/quests';
 import { DIFFICULTIES } from './types';
 import type {
@@ -25,6 +25,8 @@ export interface DialogueState {
 interface GameState {
   screen: Screen;
   difficulty: DifficultyId;
+  bodyType: 'male' | 'female'; // avatar variant, chosen on the run setup screen
+  setBodyType: (b: 'male' | 'female') => void;
   seed: number;
   paused: boolean;
 
@@ -69,6 +71,10 @@ interface GameState {
   hitmark: { kind: 'hit' | 'kill'; at: number } | null;
   setMeleeTarget: (b: boolean) => void;
   setHitmark: (kind: 'hit' | 'kill') => void;
+
+  // crafting stations: which workstation the player is standing at (if any)
+  nearStation: import('../data/items').StationId | null;
+  setNearStation: (s: import('../data/items').StationId | null) => void;
 
   // world
   poiPositions: Record<string, [number, number]>; // id -> [x, z]
@@ -158,6 +164,13 @@ export const useGameStore = create<GameState>()((set, get) => {
   const api: GameState = {
     screen: 'title',
     difficulty: 'survivor',
+    bodyType: (typeof localStorage !== 'undefined' && localStorage.getItem('nomad-body') === 'female'
+      ? 'female'
+      : 'male') as 'male' | 'female',
+    setBodyType: (b) => {
+      set({ bodyType: b });
+      try { localStorage.setItem('nomad-body', b); } catch { /* private mode */ }
+    },
     seed: 1337,
     paused: false,
 
@@ -191,6 +204,7 @@ export const useGameStore = create<GameState>()((set, get) => {
 
     meleeTarget: false,
     hitmark: null,
+    nearStation: null,
 
     poiPositions: {},
 
@@ -291,7 +305,7 @@ export const useGameStore = create<GameState>()((set, get) => {
       const added = qty - remaining;
       if (added <= 0) return false;
       const patch: { inventory: InvItem[]; phoneUnlocked?: boolean } = { inventory: inv };
-      // picking up the AppBoy actually unlocks the phone (Tab/P)
+      // picking up the sat phone actually unlocks it (Tab/P)
       if (itemId === 'phone' && !s.phoneUnlocked) {
         patch.phoneUnlocked = true;
       }
@@ -471,6 +485,9 @@ export const useGameStore = create<GameState>()((set, get) => {
       if (get().meleeTarget !== b) set({ meleeTarget: b });
     },
     setHitmark: (kind) => set({ hitmark: { kind, at: Date.now() } }),
+    setNearStation: (s) => {
+      if (get().nearStation !== s) set({ nearStation: s });
+    },
 
     openPhone: (tab) => {
       const s = get();
@@ -512,9 +529,14 @@ export const useGameStore = create<GameState>()((set, get) => {
     },
 
     craftRecipe: (recipeId) => {
-      const recipe = FIELD_RECIPES[recipeId];
+      const recipe = FIELD_RECIPES[recipeId] ?? STATION_RECIPES[recipeId];
       if (!recipe) return;
       const s = get();
+      // workstation gate: the recipe's station must be within reach
+      if (recipe.station && s.nearStation !== recipe.station) {
+        s.addToast(`Needs a ${STATION_LABEL[recipe.station]}.`);
+        return;
+      }
       for (const c of recipe.components) {
         if (s.countItem(c.itemId) < c.qty) {
           s.addToast(`Missing ${c.qty}× ${ITEMS[c.itemId]?.name ?? c.itemId}.`);

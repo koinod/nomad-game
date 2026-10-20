@@ -6,6 +6,8 @@ import * as THREE from 'three';
 import { makeFbm, makeNoise2D, mulberry32, clamp, lerp, smoothstep } from './rng';
 import { buildHouses, type HouseResult } from './Houses';
 import type { BiomeId } from './Game';
+import type { StationId } from '../data/items';
+import type { Collider } from './Colliders';
 
 export const WORLD = {
   xMin: -700, xMax: 700,
@@ -139,6 +141,9 @@ export class World {
   readonly rng: () => number;
   poiPositions: Record<string, [number, number]> = {};
   houses!: HouseResult;
+  // physical crafting stations: { station, x, z } + their colliders
+  stations: { station: StationId; x: number; z: number }[] = [];
+  stationColliders: Collider[] = [];
 
   private sun!: THREE.DirectionalLight;
   private hemi!: THREE.HemisphereLight;
@@ -168,6 +173,7 @@ export class World {
     this.buildScatter();
     // enterable houses with loot, collision, and floor rects
     this.houses = buildHouses(this.scene, this.seed, this.poiPositions, (x, z) => heightAt(x, z));
+    this.buildStations();
     this.buildCampfires();
     this.buildWreck();
     this.buildLighthouse();
@@ -318,7 +324,7 @@ export class World {
     interface TreeSpot { x: number; z: number; kind: 'pine' | 'leaf' | 'snag'; s: number }
     const treeSpots: TreeSpot[] = [];
     let guard = 0;
-    while (treeSpots.length < 200 && guard++ < 6000) {
+    while (treeSpots.length < 380 && guard++ < 12000) {
       const x = -440 + this.rng() * 880;
       const z = -150 + this.rng() * 300;
       if (biomeAt(x, z) !== 'forest') continue;
@@ -390,7 +396,7 @@ export class World {
     // Rocks: scattered, more on beach/dune.
     const rockGeo = new THREE.IcosahedronGeometry(0.8, 0);
     const rockMat = new THREE.MeshStandardMaterial({ color: 0x6e6a63, roughness: 1 });
-    const rockCount = 70;
+    const rockCount = 140;
     const rocks = new THREE.InstancedMesh(rockGeo, rockMat, rockCount);
     for (let i = 0; i < rockCount; i++) {
       const x = -680 + this.rng() * 1360;
@@ -416,13 +422,69 @@ export class World {
     this.scene.add(rocks);
 
     this.buildGrass();
+    this.buildUnderbrush();
+  }
+
+  /** Underbrush: bushes in the forest band + fallen logs — one cheap instanced
+   *  pass each, so the woods read dense without tanking the frame budget. */
+  private buildUnderbrush(): void {
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    const sc = new THREE.Vector3();
+    // bushes: dark foliage blobs
+    const bushGeo = new THREE.IcosahedronGeometry(0.7, 1);
+    const bushMat = new THREE.MeshStandardMaterial({ color: 0x2a4a2c, roughness: 1 });
+    const bushCount = 160;
+    const bushes = new THREE.InstancedMesh(bushGeo, bushMat, bushCount);
+    let placed = 0;
+    let guard = 0;
+    while (placed < bushCount && guard++ < 8000) {
+      const x = -440 + this.rng() * 880;
+      const z = -150 + this.rng() * 300;
+      if (biomeAt(x, z) !== 'forest') continue;
+      const s = 0.7 + this.rng() * 1.1;
+      e.set(0, this.rng() * 3, 0);
+      q.setFromEuler(e);
+      m.compose(new THREE.Vector3(x, this.groundY(x, z) + 0.3 * s, z), q, sc.set(s, s * 0.7, s));
+      bushes.setMatrixAt(placed, m);
+      placed++;
+    }
+    bushes.count = placed;
+    bushes.instanceMatrix.needsUpdate = true;
+    bushes.castShadow = true;
+    this.scene.add(bushes);
+    // fallen logs: horizontal cylinders, slight tilt
+    const logGeo = new THREE.CylinderGeometry(0.22, 0.28, 3.2, 7);
+    const logMat = new THREE.MeshStandardMaterial({ color: 0x4a3826, roughness: 1 });
+    const logCount = 36;
+    const logs = new THREE.InstancedMesh(logGeo, logMat, logCount);
+    placed = 0;
+    guard = 0;
+    while (placed < logCount && guard++ < 4000) {
+      const x = -440 + this.rng() * 880;
+      const z = -150 + this.rng() * 300;
+      const b = biomeAt(x, z);
+      if (b !== 'forest' && b !== 'marsh') continue;
+      e.set(Math.PI / 2, 0, (this.rng() - 0.5) * 0.3 + this.rng() * 3);
+      q.setFromEuler(e);
+      const s = 0.8 + this.rng() * 0.8;
+      m.compose(new THREE.Vector3(x, this.groundY(x, z) + 0.22 * s, z), q, sc.set(s, s, s));
+      logs.setMatrixAt(placed, m);
+      placed++;
+    }
+    logs.count = placed;
+    logs.instanceMatrix.needsUpdate = true;
+    logs.castShadow = true;
+    logs.receiveShadow = true;
+    this.scene.add(logs);
   }
 
   /** Dune-grass tufts: one cheap instanced mesh, big readability payoff. */
   private buildGrass(): void {
     const spots: [number, number][] = [];
     let guard = 0;
-    while (spots.length < 600 && guard++ < 9000) {
+    while (spots.length < 1500 && guard++ < 22000) {
       const x = -680 + this.rng() * 1360;
       const z = -300 + this.rng() * 600;
       const b = biomeAt(x, z);
@@ -488,6 +550,66 @@ export class World {
       g.name = `campfire:${id}`;
       this.scene.add(g);
     }
+  }
+
+  /** Physical crafting stations: a Weapons Bench at Jonah's camp and in town,
+   *  a Chemistry Station at the relay. Machine Shops come with claimed bases. */
+  private buildStations(): void {
+    const mk = (w: number, h: number, d: number, c: number) => {
+      const m = new THREE.Mesh(
+        new THREE.BoxGeometry(w, h, d),
+        new THREE.MeshStandardMaterial({ color: c, roughness: 0.85 }),
+      );
+      m.castShadow = true;
+      return m;
+    };
+    const place = (station: StationId, x: number, z: number, kind: 'bench' | 'chem') => {
+      const y = this.groundY(x, z);
+      const g = new THREE.Group();
+      if (kind === 'bench') {
+        const top = mk(1.9, 0.09, 0.95, 0x6b4a2f); top.position.y = 0.92;
+        const board = mk(1.9, 0.8, 0.06, 0x4a3826); board.position.set(0, 1.45, -0.42); board.rotation.x = -0.08;
+        g.add(top, board);
+        for (const [lx, lz] of [[-0.85, -0.4], [0.85, -0.4], [-0.85, 0.4], [0.85, 0.4]] as [number, number][]) {
+          const leg = mk(0.08, 0.92, 0.08, 0x4a3320); leg.position.set(lx, 0.46, lz); g.add(leg);
+        }
+        const vise = mk(0.22, 0.18, 0.2, 0x3a3e44); vise.position.set(-0.6, 1.05, 0.1); g.add(vise);
+        const gun = mk(0.7, 0.07, 0.09, 0x2e2e2e); gun.position.set(0.25, 1.0, 0.05); gun.rotation.y = 0.4; g.add(gun);
+        const tools = mk(0.4, 0.05, 0.25, 0x7a4a2a); tools.position.set(0.55, 0.99, -0.15); g.add(tools);
+      } else {
+        const top = mk(1.7, 0.08, 0.85, 0x8a929a); top.position.y = 0.9;
+        g.add(top);
+        for (const [lx, lz] of [[-0.75, -0.35], [0.75, -0.35], [-0.75, 0.35], [0.75, 0.35]] as [number, number][]) {
+          const leg = mk(0.07, 0.9, 0.07, 0x5a5e63); leg.position.set(lx, 0.45, lz); g.add(leg);
+        }
+        const bottleCols = [0x3f7a3a, 0x2a5a8a, 0xb87333];
+        bottleCols.forEach((c, i) => {
+          const b = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.05, 0.05, 0.24, 10),
+            new THREE.MeshStandardMaterial({ color: c, roughness: 0.3 }),
+          );
+          b.position.set(-0.5 + i * 0.22, 1.06, -0.15);
+          b.castShadow = true;
+          g.add(b);
+        });
+        const jar = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.11, 0.11, 0.3, 12),
+          new THREE.MeshStandardMaterial({ color: 0xc9a44a, roughness: 0.35 }),
+        );
+        jar.position.set(0.45, 1.09, 0.1); jar.castShadow = true; g.add(jar);
+        const burner = mk(0.3, 0.12, 0.3, 0x2e2e2e); burner.position.set(0.1, 1.0, 0.2); g.add(burner);
+      }
+      g.position.set(x, y, z);
+      this.scene.add(g);
+      this.stations.push({ station, x, z });
+      this.stationColliders.push({ x0: x - 0.95, z0: z - 0.5, x1: x + 0.95, z1: z + 0.5 });
+    };
+    const [jx, jz] = this.poi('jonah_camp');
+    place('workbench', jx + 4, jz + 3, 'bench');
+    const [tx, tz] = this.poi('town');
+    place('workbench', tx - 15, tz + 2, 'bench');
+    const [rx, rz] = this.poi('relay_station');
+    place('chemistry', rx + 5, rz + 6, 'chem');
   }
 
   private buildWreck(): void {
@@ -573,14 +695,22 @@ export class World {
     const g = new THREE.Group();
     const conc = new THREE.MeshStandardMaterial({ color: 0x77716a, roughness: 1 });
     const rust = new THREE.MeshStandardMaterial({ color: 0x6b4a34, roughness: 1 });
-    // broken building shells
+    // destroyed building footprints: foundation pads with rebar stubs —
+    // honest rubble, not fake buildings. (Enterable ruins live in Houses.ts.)
     for (let i = 0; i < 3; i++) {
       const bx = (this.rng() - 0.5) * 26;
       const bz = (this.rng() - 0.5) * 20;
-      const wall = new THREE.Mesh(new THREE.BoxGeometry(6 + this.rng() * 4, 2 + this.rng() * 2.5, 5), conc);
-      wall.position.set(bx, 1.2, bz);
-      wall.rotation.y = this.rng() * Math.PI;
-      g.add(wall);
+      const pad = new THREE.Mesh(new THREE.BoxGeometry(6 + this.rng() * 3, 0.55, 5), conc);
+      pad.position.set(bx, 0.28, bz);
+      pad.rotation.y = this.rng() * Math.PI;
+      pad.castShadow = true;
+      g.add(pad);
+      for (let r = 0; r < 4; r++) {
+        const rebar = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.9 + this.rng() * 0.7, 6), rust);
+        rebar.position.set(bx + (this.rng() - 0.5) * 5, 0.8, bz + (this.rng() - 0.5) * 4);
+        rebar.rotation.z = (this.rng() - 0.5) * 0.25;
+        g.add(rebar);
+      }
     }
     // antenna mast with crossbars
     const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.4, 22, 8), rust);

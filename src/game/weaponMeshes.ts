@@ -100,6 +100,46 @@ export function buildGroundMesh(itemId: string, qty = 1): THREE.Group {
       }
       break;
     }
+    case 'shells': {
+      add(new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.07, 0.16), MAT.redPlastic()));
+      for (let i = 0; i < 3; i++) {
+        const shell = add(new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.06, 8), MAT.brass()));
+        shell.position.set(-0.06 + i * 0.06, 0.06, 0);
+      }
+      break;
+    }
+    case 'ammo_rifle': {
+      add(new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.08, 0.13), MAT.darkWood()));
+      for (let i = 0; i < 3; i++) {
+        const round = add(new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.013, 0.07, 6), MAT.steel()));
+        round.position.set(-0.07 + i * 0.07, 0.07, 0);
+      }
+      break;
+    }
+    case 'chemicals': {
+      const jug = add(new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 0.24, 10), MAT.redPlastic()));
+      jug.position.y = 0.12;
+      const lid = add(new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.05, 8), MAT.black()));
+      lid.position.y = 0.26;
+      break;
+    }
+    case 'fuel_can': {
+      add(new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.3, 0.16), MAT.redPlastic()));
+      const spout = add(new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.1, 8), MAT.black()));
+      spout.position.set(0.06, 0.19, 0);
+      break;
+    }
+    // new weapons lying flat: hand-space +Z is already horizontal — drop it in
+    case 'baseball_bat':
+    case 'combat_knife':
+    case 'sledgehammer':
+    case 'shotgun':
+    case 'hunting_rifle': {
+      const m = buildHandMesh(itemId);
+      m.position.y = 0.06;
+      g.add(m);
+      break;
+    }
     case 'canned_food': {
       add(new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.12, 14), MAT.tin()));
       const label = add(new THREE.Mesh(new THREE.CylinderGeometry(0.072, 0.072, 0.07, 14), MAT.redPlastic()));
@@ -202,6 +242,58 @@ export function buildHandMesh(itemId: string): THREE.Group {
     case 'flare': {
       const body = add(new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.34, 10), MAT.redPlastic()));
       body.rotation.x = Math.PI / 2; body.position.z = 0.14;
+      break;
+    }
+    case 'baseball_bat': {
+      // tapered wooden bat: barrel forward, handle at the fist
+      const barrel = add(new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.032, 0.62, 10), MAT.wood()));
+      barrel.rotation.x = Math.PI / 2; barrel.position.z = 0.36;
+      const grip = add(new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.026, 0.22, 8), MAT.darkWood()));
+      grip.rotation.x = Math.PI / 2; grip.position.z = -0.04;
+      const knob = add(new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.03, 10), MAT.darkWood()));
+      knob.rotation.x = Math.PI / 2; knob.position.z = -0.16;
+      break;
+    }
+    case 'combat_knife': {
+      const blade = add(new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.05, 0.26), MAT.steel()));
+      blade.position.z = 0.2;
+      const tip = add(new THREE.Mesh(new THREE.ConeGeometry(0.025, 0.08, 4), MAT.steel()));
+      tip.rotation.x = Math.PI / 2; tip.position.z = 0.37;
+      const grip = add(new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.12, 8), MAT.black()));
+      grip.rotation.x = Math.PI / 2; grip.position.z = 0.0;
+      break;
+    }
+    case 'sledgehammer': {
+      const handle = add(new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.032, 0.85, 8), MAT.wood()));
+      handle.rotation.x = Math.PI / 2; handle.position.z = 0.3;
+      const head = add(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.11, 0.24), MAT.darkSteel()));
+      head.position.z = 0.68;
+      break;
+    }
+    case 'shotgun': {
+      const barrelTube = add(new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.62, 10), MAT.darkSteel()));
+      barrelTube.rotation.x = Math.PI / 2; barrelTube.position.set(0, 0.05, 0.32);
+      const mag = add(new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.5, 8), MAT.steel()));
+      mag.rotation.x = Math.PI / 2; mag.position.set(0, 0.0, 0.26);
+      const receiver = add(new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.09, 0.24), MAT.black()));
+      receiver.position.set(0, 0.02, -0.05);
+      const pump = add(new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.14, 10), MAT.wood()));
+      pump.rotation.x = Math.PI / 2; pump.position.set(0, -0.01, 0.18);
+      const stock = add(new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.11, 0.3), MAT.wood()));
+      stock.position.set(0, -0.04, -0.3); stock.rotation.x = 0.18;
+      break;
+    }
+    case 'hunting_rifle': {
+      const barrelTube = add(new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.78, 10), MAT.darkSteel()));
+      barrelTube.rotation.x = Math.PI / 2; barrelTube.position.set(0, 0.06, 0.42);
+      const body = add(new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.09, 0.4), MAT.wood()));
+      body.position.set(0, 0.01, 0.0);
+      const scope = add(new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.18, 8), MAT.black()));
+      scope.rotation.x = Math.PI / 2; scope.position.set(0, 0.1, 0.05);
+      const stock = add(new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.12, 0.32), MAT.darkWood()));
+      stock.position.set(0, -0.04, -0.32); stock.rotation.x = 0.15;
+      const bolt = add(new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 6), MAT.steel()));
+      bolt.position.set(0.05, 0.04, -0.08);
       break;
     }
     case 'torch': {

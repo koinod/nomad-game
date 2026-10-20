@@ -252,6 +252,13 @@ export class InteractSystem {
     pickup('pk_pistol', 'pistol', 1, 'town', 9, -5);
     pickup('pk_flare', 'flare', 2, 'relay_station', 2.5, -2);
     pickup('pk_bandage', 'bandage', 2, 'shore_camp', -2.5, 3);
+    pickup('pk_bat', 'baseball_bat', 1, 'town', -6, 4);
+    pickup('pk_knife', 'combat_knife', 1, 'wreck', 1.5, -1);
+    pickup('pk_sledge', 'sledgehammer', 1, 'relay_station', -3, 2.5);
+    pickup('pk_shotgun', 'shotgun', 1, 'lighthouse_base', 2.5, 3.5);
+    pickup('pk_shells', 'shells', 6, 'town', 4, 1.5);
+    pickup('pk_rifle', 'hunting_rifle', 1, 'jonah_camp', -3.5, 3.5);
+    pickup('pk_rifle_ammo', 'ammo_rifle', 8, 'relay_station', 3.5, -3);
   }
 
   /** Mark a container fully looted: hide the mesh (crates only — furniture

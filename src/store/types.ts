@@ -50,6 +50,8 @@ export interface ItemDef {
   range?: number; // ranged weapons (m)
   heal?: number; // food / medical
   ammoId?: string; // ranged weapons
+  pellets?: number; // >1 = spread weapon (shotgun)
+  spread?: number; // radians of pellet jitter
   carryBonus?: number; // packs: extra kg
   packSlots?: number; // packs: extra slots
 }

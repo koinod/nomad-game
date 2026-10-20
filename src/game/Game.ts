@@ -7,6 +7,7 @@ import type { DifficultyId, SaveSnapshot, WorldDiff } from '../store/types';
 import { DIFFICULTIES } from '../store/types';
 import { QUESTS } from '../data/quests';
 import { input, resetEdgeTriggers } from './input';
+import { ITEMS } from '../data/items';
 import { World, heightAt, biomeAt, initTerrainField } from './World';
 import { Player } from './Player';
 import { HuskManager } from './Husks';
@@ -122,7 +123,7 @@ export class Game {
     useGameStore.getState().setPoiPositions(this.world.poiPositions);
 
     // houses: colliders, floor rects, roofs, furniture containers
-    this.houseColliders = this.world.houses.colliders;
+    this.houseColliders = [...this.world.houses.colliders, ...this.world.stationColliders];
     this.houseFloors = this.world.houses.floors;
     this.houseRoofs = this.world.houses.roofs;
 
@@ -405,11 +406,20 @@ export class Game {
       sfx.play('ui', { volume: 0.4 });
     }
     if (input.phone && s.screen === 'game' && !s.dead && !s.dialogue && !this.cutscene) {
+      // Tab/P: the phone when it's live; the field pack when the phone is
+      // dead or not recovered yet — same fallback G uses
+      const phoneLive = s.phoneUnlocked && s.battery > 0;
       if (s.phoneOpen) s.closePhone();
-      else {
+      else if (s.backpackOpen) s.closeBackpack();
+      else if (phoneLive) {
         s.openPhone();
         // opening the phone without freeing the mouse left the UI unclickable
         if (useGameStore.getState().phoneOpen && document.pointerLockElement) {
+          document.exitPointerLock();
+        }
+      } else {
+        s.openBackpack();
+        if (useGameStore.getState().backpackOpen && document.pointerLockElement) {
           document.exitPointerLock();
         }
       }
@@ -488,6 +498,20 @@ export class Game {
       s.advanceTime(this.timeT);
       this.timeT = 0;
     }
+
+    // crafting-station proximity: stand within 4.5m of a station to use it
+    let foundStation: import('../data/items').StationId | null = null;
+    const px = player.pos.x;
+    const pz = player.pos.z;
+    for (const st of this.world!.stations) {
+      const dx = st.x - px;
+      const dz = st.z - pz;
+      if (dx * dx + dz * dz <= 20.25) {
+        foundStation = st.station;
+        break;
+      }
+    }
+    s.setNearStation(foundStation);
 
     // encumbrance gates sprint + slows movement
     const tier = encumbranceTier(
@@ -737,12 +761,23 @@ export class Game {
     const s = useGameStore.getState();
     if (s.screen !== 'game' || s.paused || s.dialogue != null || this.cutscene) return;
     if (document.pointerLockElement !== this.canvas) return;
-    if (e.button === 0) input.attackMelee = true;
-    else if (e.button === 2) {
-      // right click: block with a melee weapon, fire with a ranged one
-      const hasMelee = s.equipped.melee != null;
-      if (hasMelee) input.blocking = true;
-      else input.attackRanged = true;
+    if (e.button === 0) {
+      // left click: fire when holding a loaded gun, bash/swing when not
+      const rangedIt = s.equipped.ranged
+        ? s.inventory.find((i) => i.uid === s.equipped.ranged)
+        : undefined;
+      if (rangedIt) {
+        const def = ITEMS[rangedIt.itemId];
+        const hasAmmo = def?.ammoId != null && s.inventory.some((i) => i.itemId === def.ammoId);
+        if (hasAmmo) input.attackRanged = true;
+        else input.attackMelee = true; // dry gun: bash with it
+      } else {
+        input.attackMelee = true;
+      }
+    } else if (e.button === 2) {
+      // right click: gun up -> aim cycle (hip/shoulder/ADS); melee -> block
+      if (s.equipped.ranged != null) input.aimTap = true;
+      else input.blocking = true;
     }
   }
 

@@ -16,6 +16,7 @@ export interface InputState {
   fpToggle: boolean; // edge-triggered: V toggles first/third person
   zoomIn: boolean; // held: mobile zoom-in button
   zoomOut: boolean; // held: mobile zoom-out button
+  aimTap: boolean; // edge-triggered: RMB with a gun cycles hip → shoulder → ADS
   interact: boolean; // edge-triggered
   phone: boolean; // edge-triggered
   backpack: boolean; // edge-triggered
@@ -37,6 +38,7 @@ export const input: InputState = {
   leanLeft: false,
   leanRight: false,
   fpToggle: false,
+  aimTap: false,
   zoomIn: false,
   zoomOut: false,
   interact: false,
@@ -63,5 +65,6 @@ export function resetEdgeTriggers(): void {
   input.backpack = false;
   input.pause = false;
   input.fpToggle = false;
+  input.aimTap = false;
   input.hotbar = 0;
 }

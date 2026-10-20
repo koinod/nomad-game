@@ -420,7 +420,7 @@ export default function Phone() {
       <aside className="absolute right-0 top-0 flex h-full w-[380px] max-w-[92vw] flex-col border-l border-[#232b36] bg-[#12161c]">
         <header className="flex items-center justify-between border-b border-[#232b36] px-4 py-3">
           <div>
-            <div className="text-sm font-semibold text-[#d7dde5]">AppBoy</div>
+            <div className="text-sm font-semibold text-[#d7dde5]">SAT PHONE</div>
             <div className="text-[11px] text-[#8a94a3]">Field terminal</div>
           </div>
           <button

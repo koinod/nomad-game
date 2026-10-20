@@ -73,11 +73,13 @@ export class Player {
   firstPerson = false; // V toggles; body hides, camera rides at eye level
   private viewModel!: THREE.Group; // FP arm + weapon, parented to the camera
   private vmAnchor!: THREE.Group; // weapon mount inside the view model
+  private headRef!: THREE.Mesh; // head, for walk bob
   private smoothTarget = new THREE.Vector3(); // damped look target (TP)
   private smoothInit = false; // snap the camera once on teleport/respawn
   private fpEyeYSmooth = 0; // damped eye height (FP)
   leanAmt = 0; // current lean (-1 left .. +1 right), drives camera + shot origin
   zoomDist = 6.4; // third-person orbit distance (mouse wheel / mobile buttons)
+  aimLevel = 0; // 0 hip, 1 shoulder-aim, 2 down-the-sights
 
   constructor(scene: THREE.Scene) {
     this.buildMesh();
@@ -88,17 +90,37 @@ export class Player {
   }
 
   private buildMesh(): void {
+    const female = useGameStore.getState().bodyType === 'female';
     const skin = new THREE.MeshStandardMaterial({ color: 0xc9a180, roughness: 0.9 });
-    const jacket = new THREE.MeshStandardMaterial({ color: 0x2e4a4e, roughness: 1 });
+    const jacket = new THREE.MeshStandardMaterial({
+      color: female ? 0x5a3a4e : 0x2e4a4e,
+      roughness: 1,
+    });
     const pants = new THREE.MeshStandardMaterial({ color: 0x3a3630, roughness: 1 });
     this.rig = new THREE.Group();
     this.group.add(this.rig);
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.78, 0.34), jacket);
+    // female: slimmer shoulders/torso, fractionally shorter frame
+    const torsoW = female ? 0.52 : 0.62;
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(torsoW, 0.78, 0.32), jacket);
     torso.position.y = 1.18;
     torso.castShadow = true;
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.36, 0.32), skin);
-    head.position.y = 1.78;
-    head.castShadow = true;
+    this.headRef = new THREE.Mesh(
+      new THREE.BoxGeometry(female ? 0.3 : 0.34, 0.36, female ? 0.3 : 0.32),
+      skin,
+    );
+    this.headRef.position.y = 1.78;
+    this.headRef.castShadow = true;
+    if (female) {
+      // hair: fall behind the head + shoulder-length sides
+      const hairMat = new THREE.MeshStandardMaterial({ color: 0x2a1e16, roughness: 1 });
+      const back = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.52, 0.1), hairMat);
+      back.position.set(0, 1.7, -0.17);
+      const top = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.1, 0.34), hairMat);
+      top.position.set(0, 1.98, -0.01);
+      back.castShadow = true;
+      this.rig.add(back, top);
+    }
+    const head = this.headRef;
     // Pivot limbs at the joint: translate geometry so rotation swings from hip/shoulder.
     const legGeo = new THREE.BoxGeometry(0.22, 0.8, 0.24);
     legGeo.translate(0, -0.4, 0);
@@ -110,15 +132,20 @@ export class Player {
     this.legR.castShadow = true;
     const armGeo = new THREE.BoxGeometry(0.18, 0.72, 0.2);
     armGeo.translate(0, -0.36, 0);
+    const shoulderW = female ? 0.36 : 0.42;
     this.armL = new THREE.Mesh(armGeo, jacket);
-    this.armL.position.set(-0.42, 1.52, 0);
+    this.armL.position.set(-shoulderW, 1.52, 0);
     this.armL.castShadow = true;
     this.armR = new THREE.Mesh(armGeo, jacket);
-    this.armR.position.set(0.42, 1.52, 0);
+    this.armR.position.set(shoulderW, 1.52, 0);
     this.armR.castShadow = true;
-    // weapon mount at the fist (arm geometry is translated -0.36, so hand ≈ -0.72)
+    if (female) this.rig.scale.setScalar(0.96);
+    // Rotated +90° about X so the weapon's forward (+Z in mesh space) aligns
+    // with the ARM's direction: blade/gun point where the arm points — down at
+    // rest, forward when raised to aim, sweeping with the arm on a swing.
     this.handAnchor = new THREE.Group();
     this.handAnchor.position.set(0, -0.7, 0.08);
+    this.handAnchor.rotation.x = Math.PI / 2;
     this.armR.add(this.handAnchor);
     // swing trail: the equipped weapon's real hit zone, drawn at chest height —
     // inner 0.9m, outer = weapon range, arc = full swing wedge, centered on facing
@@ -143,6 +170,9 @@ export class Player {
     forearm.position.set(0, -0.08, -0.18);
     this.vmAnchor = new THREE.Group();
     this.vmAnchor.position.set(0, 0.02, -0.42);
+    // hand meshes point +Z; the camera looks down -Z, so flip the mount or
+    // the barrel points back at the player's face
+    this.vmAnchor.rotation.y = Math.PI;
     this.viewModel.add(forearm, this.vmAnchor);
     this.viewModel.position.set(0.32, -0.3, -0.55);
     this.viewModel.visible = false;
@@ -343,6 +373,7 @@ export class Player {
       const crouchDrop = lerp(this.rig.userData.crouchDrop ?? 0, this.crouching ? 0.42 : 0, Math.min(1, dt * 10));
       this.rig.userData.crouchDrop = crouchDrop;
       this.rig.position.y = Math.abs(Math.cos(this.walkPhase)) * (sprinting ? 0.085 : 0.05) - crouchDrop;
+      this.headRef.position.y = 1.78 + Math.abs(Math.cos(this.walkPhase)) * 0.028;
       this.leanF = lerp(this.leanF, sprinting ? 0.17 : this.crouching ? 0.22 : 0.05, Math.min(1, dt * 6));
       this.leanS = lerp(this.leanS, -mx * 0.07, Math.min(1, dt * 6));
       this.rig.rotation.x = this.leanF;
@@ -369,6 +400,7 @@ export class Player {
       const crouchDrop = lerp(this.rig.userData.crouchDrop ?? 0, this.crouching ? 0.42 : 0, Math.min(1, dt * 10));
       this.rig.userData.crouchDrop = crouchDrop;
       this.rig.position.y = Math.sin(this.idleT * 2.1) * 0.015 - crouchDrop;
+      this.headRef.position.y = 1.78 + Math.sin(this.idleT * 2.1) * 0.008;
       this.leanF = lerp(this.leanF, this.crouching ? 0.22 : 0, Math.min(1, dt * 6));
       this.leanS = lerp(this.leanS, 0, Math.min(1, dt * 6));
       this.rig.rotation.x = this.leanF;
@@ -395,8 +427,21 @@ export class Player {
       if (Math.abs(this.leanAmt) < 0.001 && leanDir === 0) this.leanAmt = 0;
     }
 
-    // in first person the body follows the camera — swings go where you look
+    // in first person the body follows the camera — swings go where you look.
+    // Aiming in third person does the same: you point where you look.
     if (this.firstPerson) {
+      this.yaw = this.camYaw;
+      this.group.rotation.y = this.camYaw;
+    }
+    // right click with a gun cycles hip -> shoulder aim -> sights
+    const hasRangedNow = useGameStore.getState().equipped.ranged != null;
+    if (input.aimTap && hasRangedNow) {
+      this.aimLevel = (this.aimLevel + 1) % 3;
+      if (this.aimLevel === 1) useGameStore.getState().addToast('Aiming — right-click again for sights.');
+      sfx.play('ui', { volume: 0.3 });
+    }
+    if (!hasRangedNow) this.aimLevel = 0;
+    if (this.aimLevel > 0) {
       this.yaw = this.camYaw;
       this.group.rotation.y = this.camYaw;
     }
@@ -429,6 +474,28 @@ export class Player {
       const k = Math.max(this.recoilT, 0) / 0.16;
       this.armR.rotation.x = -1.2 - k * 0.35; // arm up, kicked back
       this.rig.rotation.y *= 0.8;
+    }
+
+    // gun carry/aim pose: shoulder the ranged weapon with both hands — off-hand
+    // supports the grip, barrel follows the arm now that the mount is fixed.
+    // Lowered to a low ready while sprinting; shouldered while aiming.
+    {
+      const rangedNow = useGameStore.getState().equipped.ranged != null;
+      const posing = rangedNow && this.attackT <= 0 && this.blockBlend < 0.5 && this.recoilT <= 0;
+      if (posing && (!sprinting || this.aimLevel > 0)) {
+        const aimX = this.aimLevel > 0 ? -1.52 : -1.2;
+        this.armR.rotation.x = lerp(this.armR.rotation.x, aimX, Math.min(1, dt * 10));
+        this.armL.rotation.x = lerp(this.armL.rotation.x, -1.1, Math.min(1, dt * 8));
+        this.armL.rotation.y = lerp(this.armL.rotation.y, 0.5, Math.min(1, dt * 8));
+      } else {
+        this.armL.rotation.y = lerp(this.armL.rotation.y, 0, Math.min(1, dt * 8));
+      }
+    }
+
+    // torso counter-twist: shoulders roll against the gait while walking —
+    // classic procedural touch that sells weight better than limbs alone
+    if (moving && this.attackT <= 0 && this.blockBlend < 0.5) {
+      this.rig.rotation.y = Math.sin(this.walkPhase) * 0.09;
     }
 
     // --- attacks (blocked while guarding) ---
@@ -515,8 +582,14 @@ export class Player {
     const cp = Math.cos(this.camPitch);
     const leanAmt = this.leanAmt;
 
-    if (this.firstPerson) {
-      // eye-level lens; x/z stay glued to the body, only height is damped
+    if (this.firstPerson || this.aimLevel === 2) {
+      // eye-level lens; x/z stay glued to the body, only height is damped.
+      // Down-the-sights from third person borrows the same rig.
+      if (this.aimLevel === 2 && !this.firstPerson) {
+        if (this.viewModel.parent !== ctx.camera) ctx.camera.add(this.viewModel);
+        this.viewModel.visible = true;
+        this.rig.visible = false;
+      }
       this.updateViewModel(dt, leanAmt);
       const eyeH = (this.crouching ? 1.2 : 1.82) - this.landDip;
       if (this.fpEyeYSmooth === 0) this.fpEyeYSmooth = this.pos.y + eyeH;
@@ -535,11 +608,17 @@ export class Player {
       cam.lookAt(eye.clone().addScaledVector(fwd, 3));
       cam.rotateZ(-leanAmt * 0.28);
     } else {
+      // back in third person: detach the sights rig
+      if (this.viewModel.parent === ctx.camera) ctx.camera.remove(this.viewModel);
+      this.viewModel.visible = false;
+      this.rig.visible = true;
       const camH = (this.crouching ? 1.35 : 1.9) - this.landDip;
       const target = new THREE.Vector3(this.pos.x, this.pos.y + camH, this.pos.z);
       // shift the target sideways along the camera's right vector so the lean peeks around cover
       const right = new THREE.Vector3(Math.cos(this.camYaw), 0, -Math.sin(this.camYaw));
-      target.addScaledVector(right, leanAmt * 1.05);
+      // shoulder aim: pull over the right shoulder, tighten the camera in
+      const shoulderAim = this.aimLevel === 1;
+      target.addScaledVector(right, leanAmt * 1.05 + (shoulderAim ? 0.5 : 0));
       // damped look target: collision push-outs and terrain jitter must not
       // snap the view — aim rides on the smoothed point, not the raw position
       if (!this.smoothInit) {
@@ -547,11 +626,12 @@ export class Player {
         this.smoothInit = true;
       }
       this.smoothTarget.lerp(target, Math.min(1, dt * 22));
+      const dist = shoulderAim ? Math.min(this.zoomDist, 2.4) : this.zoomDist;
       const off = new THREE.Vector3(
         -Math.sin(this.camYaw) * cp,
         -Math.sin(this.camPitch),
         -Math.cos(this.camYaw) * cp,
-      ).multiplyScalar(this.zoomDist);
+      ).multiplyScalar(dist);
       const camPos = this.smoothTarget.clone().add(off);
       // smoothed ground clearance: the hard clamp snapped when the camera
       // swung over a hill or rock edge — ride over it instead
@@ -569,12 +649,30 @@ export class Player {
       cam.lookAt(this.smoothTarget);
       cam.rotateZ(-leanAmt * 0.32); // roll the view with the lean
     }
+
+    // sight picture: field of view narrows as you go down the sights
+    const wantFov = this.aimLevel === 2 ? 38 : this.aimLevel === 1 ? 52 : 60;
+    if (Math.abs(cam.fov - wantFov) > 0.05) {
+      cam.fov = lerp(cam.fov, wantFov, Math.min(1, dt * 10));
+      cam.updateProjectionMatrix();
+    }
   }
 
   /** First-person arm: bob, swing thrust, and block guard. */
   private updateViewModel(dt: number, leanAmt: number): void {
     const vm = this.viewModel;
     const bob = Math.abs(Math.cos(this.walkPhase)) * 0.018;
+    if (this.aimLevel === 2) {
+      // down the sights: gun centered, steady, no bob or swing theatrics
+      vm.position.set(
+        lerp(vm.position.x, -0.02, Math.min(1, dt * 14)),
+        lerp(vm.position.y, -0.185, Math.min(1, dt * 14)),
+        lerp(vm.position.z, -0.5, Math.min(1, dt * 14)),
+      );
+      vm.rotation.x = lerp(vm.rotation.x, 0, Math.min(1, dt * 14));
+      vm.rotation.z = lerp(vm.rotation.z, 0, Math.min(1, dt * 14));
+      return;
+    }
     if (this.attackT > 0) {
       const k = 1 - Math.max(this.attackT, 0) / this.swingTotal;
       vm.rotation.x = -0.55 + k * 1.15;
