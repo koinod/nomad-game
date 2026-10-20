@@ -6,7 +6,10 @@ import * as THREE from 'three';
 import { clamp } from './rng';
 import { resolveCollisions, type Collider } from './Colliders';
 import { CARRIER_DECK_Y } from './Airbase';
-import { approach, hoverDamping, landingSeverity, liftAuthority, tiltForVelocity } from './heliMath';
+import {
+  approach, climbRates, heliImpactDamageMult, heliTopSpeedFactor, hoverDamping,
+  landingSeverity, liftAuthority, spoolSeconds, tiltForVelocity,
+} from './heliMath';
 import { wrapAngle } from './trailerPhysics';
 import { ITEMS } from '../data/items';
 import type { InvItem } from '../store/types';
@@ -152,6 +155,8 @@ export interface Vehicle {
   /** Set by a hard touchdown; Game reads + clears it for the toast. */
   hardLanding?: 'hard' | 'crash';
   upgradeGroup?: THREE.Group; // armor / racks / bullbar meshes
+  /** Wave 4: the heli_light upgrade's real spotlight (rides upgradeGroup). */
+  searchLight?: THREE.SpotLight;
   cargoGroup?: THREE.Group; // loaded-crate meshes
   /** Steering wheel spinner (modelKit.buildInterior) — drive() turns it. */
   steerWheel?: THREE.Object3D;
@@ -1167,12 +1172,13 @@ export class VehicleManager {
     const H = (v.heliState ??= { vy: 0, vx: 0, vz: 0, rotor: 0 });
     const rest = VehicleManager.HELI_REST[def.id] ?? 0;
     const live = v.fuel > 0.05 && v.condition > 0.03;
-    H.rotor = clamp(H.rotor + (live ? dt / 2.2 : -dt / 3), 0, 1);
+    // wave 4: the aviation tune spins the rotor up a third faster
+    H.rotor = clamp(H.rotor + (live ? dt / spoolSeconds(v.upgrades) : -dt / 3), 0, 1);
     const auth = liftAuthority(H.rotor);
     const sin = Math.sin(v.heading);
     const cos = Math.cos(v.heading);
     // cyclic: desired velocity in the heading frame
-    const sp = def.topSpeed * (0.55 + 0.45 * v.condition) * auth;
+    const sp = def.topSpeed * heliTopSpeedFactor(v.upgrades) * (0.55 + 0.45 * v.condition) * auth;
     const desF = clamp(throttle, -1, 1) * sp;
     const desS = clamp(steer, -1, 1) * sp * 0.6;
     const desX = sin * desF + cos * desS;
@@ -1188,9 +1194,10 @@ export class VehicleManager {
     // yaw (Q/E), gated by spool
     const yawIn = env.yawIn ?? 0;
     if (yawIn !== 0) v.heading = wrapAngle(v.heading + yawIn * 1.25 * dt * (0.25 + 0.75 * auth));
-    // collective + the sink of an unspooled rotor
+    // collective + the sink of an unspooled rotor (the tune climbs harder)
     const lift = clamp(env.lift ?? 0, -1, 1);
-    let targetVy = lift * (lift > 0 ? 5.4 : 4.4) * auth;
+    const rates = climbRates(v.upgrades);
+    let targetVy = lift * (lift > 0 ? rates.up : rates.down) * auth;
     if (H.rotor < 0.62) targetVy -= (0.62 - H.rotor) * 13;
     H.vy = approach(H.vy, targetVy, 7.5 * dt);
     pos.x += H.vx * dt;
@@ -1205,7 +1212,10 @@ export class VehicleManager {
       if (H.vy < -1.4) {
         const sev = landingSeverity(H.vy);
         if (sev.damage > 0) {
-          v.condition = clamp(v.condition - sev.damage, sev.grade === 'crash' ? 0.02 : 0.05, 1);
+          // airframe armor spreads the hit — the grade the pilot FEELS
+          // (toast + write-off floor) uses the plated damage figure
+          const felt = sev.damage * heliImpactDamageMult(v.upgrades);
+          v.condition = clamp(v.condition - felt, sev.grade === 'crash' ? 0.02 : 0.05, 1);
           if (sev.grade === 'hard' || sev.grade === 'crash') v.hardLanding = sev.grade;
         }
       }
@@ -1226,7 +1236,9 @@ export class VehicleManager {
       resolveCollisions(pos, 1.35, env.colliders);
       if (pos.x !== bx || pos.z !== bz) {
         const impact = Math.hypot(H.vx, H.vz);
-        if (impact > 9) v.condition = clamp(v.condition - 0.07, 0.03, 1);
+        if (impact > 9) {
+          v.condition = clamp(v.condition - 0.07 * heliImpactDamageMult(v.upgrades), 0.03, 1);
+        }
         H.vx *= 0.35;
         H.vz *= 0.35;
       }
@@ -1241,6 +1253,9 @@ export class VehicleManager {
     v.group.rotation.set(v.bodyPitch, v.heading, v.bodyRoll);
     v.speed = vf;
     this.spinRotors(v, dt);
+    // the searchlight burns whenever the rotor is turning — a lit ship on
+    // a dark pad is a beacon, which is exactly the trade the pilot made
+    if (v.searchLight) v.searchLight.visible = H.rotor > 0.25;
     stepDoors(v.doors, dt);
     // fuel, wear, and the loudest noise on the island
     if (H.rotor > 0.04 && live) {
@@ -1300,6 +1315,7 @@ export function applyUpgradeVisuals(v: Vehicle): void {
   if (v.upgradeGroup) {
     v.group.remove(v.upgradeGroup);
     v.upgradeGroup = undefined;
+    v.searchLight = undefined; // the light rode the old group, if there was one
   }
   if (v.turret) {
     const old = v.turret.getObjectByName('weaponMount');
@@ -1317,13 +1333,83 @@ export function applyUpgradeVisuals(v: Vehicle): void {
     v.upgradeGroup = g;
     return;
   }
-  if (v.upgrades.includes('armor')) {
-    // welded plate over doors, hood, and quarters
-    for (const sgn of [1, -1]) {
-      box(g, 0.06, 0.62, L * 0.52, steel, sgn * (W / 2 + 0.02), 0.95, L * 0.02);
-      box(g, 0.06, 0.5, L * 0.3, steel, sgn * (W / 2 + 0.02), 0.8, -L * 0.33);
+  if (v.def.kind === 'heli') {
+    // WAVE 4 heli visuals — plate, racks, and a working searchlight,
+    // hung on the airframe at its own proportions (length-scaled heights)
+    if (v.upgrades.includes('heli_armor')) {
+      const plateY = L * 0.115;
+      for (const sgn of [1, -1]) {
+        box(g, 0.07, L * 0.055, L * 0.42, steel, sgn * (W / 2 + 0.02), plateY, L * 0.04); // cabin doors
+        box(g, 0.07, L * 0.04, L * 0.3, steel, sgn * (W / 2 + 0.02), plateY - L * 0.03, -L * 0.28); // tail boom root
+      }
+      box(g, W * 0.7, 0.07, L * 0.3, steel, 0, L * 0.185, -L * 0.05); // engine deck
+      const guard = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.38, 0.14, 12), steel);
+      guard.position.set(0, L * 0.205, -L * 0.02); // rotor head guard ring base
+      guard.castShadow = true;
+      g.add(guard);
     }
-    box(g, W * 0.8, 0.06, L * 0.3, steel, 0, 1.22, L * 0.32);
+    if (v.upgrades.includes('heli_racks')) {
+      const woodM = mat(0x6b5636, 0.9, 0);
+      for (const sgn of [1, -1]) {
+        box(g, 0.55, 0.42, L * 0.16, woodM, sgn * (W / 2 + 0.3), L * 0.045, L * 0.02); // skid cargo boxes
+        box(g, 0.08, 0.3, L * 0.16, dark, sgn * (W / 2 + 0.06), L * 0.05, L * 0.02); // struts
+      }
+      box(g, W * 0.5, 0.1, L * 0.24, dark, 0, L * 0.028, -L * 0.05); // belly sling frame
+    }
+    if (v.upgrades.includes('heli_light')) {
+      // chin housing + lens, and a REAL spotlight thrown forward-down;
+      // driveHeli switches it with the rotor
+      const housing = box(g, 0.34, 0.22, 0.3, dark, 0, L * 0.075, L * 0.3);
+      housing.rotation.x = 0.35;
+      const lens = new THREE.Mesh(
+        new THREE.CircleGeometry(0.11, 14),
+        new THREE.MeshBasicMaterial({ color: 0xfff3cf }),
+      );
+      lens.position.set(0, L * 0.075 - 0.05, L * 0.3 + 0.16);
+      lens.rotation.x = 0.35;
+      g.add(lens);
+      const spot = new THREE.SpotLight(0xffeec4, 850, 110, 0.46, 0.55, 1.4);
+      spot.position.set(0, L * 0.075, L * 0.3);
+      spot.target.position.set(0, -6, L * 0.3 + 26);
+      spot.visible = false;
+      g.add(spot, spot.target);
+      v.searchLight = spot;
+    }
+    v.group.add(g);
+    v.upgradeGroup = g;
+    return;
+  }
+  if (v.upgrades.includes('armor')) {
+    // welded plate over doors, hood, and quarters — FITTED per body since
+    // the craft wave: plate heights follow each lofted shell, with rivet
+    // rows so it reads as plate someone welded, not a decal
+    const FIT: Record<string, { doorY: number; doorH: number; hoodY: number; rearY: number }> = {
+      pickup: { doorY: 0.98, doorH: 0.68, hoodY: 1.18, rearY: 0.88 },
+      f250: { doorY: 1.04, doorH: 0.74, hoodY: 1.26, rearY: 0.94 },
+      bronco: { doorY: 0.95, doorH: 0.66, hoodY: 1.08, rearY: 0.85 },
+      sedan: { doorY: 0.8, doorH: 0.55, hoodY: 0.95, rearY: 0.7 },
+      van: { doorY: 1.05, doorH: 0.85, hoodY: 1.02, rearY: 0.95 },
+      sprinter: { doorY: 1.1, doorH: 0.9, hoodY: 1.05, rearY: 1.0 },
+      v03_hauler: { doorY: 1.05, doorH: 0.8, hoodY: 1.15, rearY: 0.95 },
+      marsh_buggy: { doorY: 0.8, doorH: 0.5, hoodY: 0.9, rearY: 0.7 },
+      boxtruck: { doorY: 1.1, doorH: 0.85, hoodY: 1.15, rearY: 1.0 },
+    };
+    const f = FIT[v.def.id] ?? { doorY: 0.95, doorH: 0.62, hoodY: 1.22, rearY: 0.8 };
+    for (const sgn of [1, -1]) {
+      box(g, 0.06, f.doorH, L * 0.52, steel, sgn * (W / 2 + 0.03), f.doorY, L * 0.02);
+      box(g, 0.06, f.doorH * 0.8, L * 0.3, steel, sgn * (W / 2 + 0.03), f.rearY, -L * 0.33);
+      // rivet row along the door plate's top edge
+      for (let i = 0; i < 4; i++) {
+        const rivet = new THREE.Mesh(new THREE.CylinderGeometry(0.021, 0.021, 0.035, 6), dark);
+        rivet.rotation.z = Math.PI / 2;
+        rivet.position.set(sgn * (W / 2 + 0.06), f.doorY + f.doorH / 2 - 0.07, L * 0.02 + (i - 1.5) * L * 0.13);
+        g.add(rivet);
+      }
+      // weld bead: a dark strip where plate meets body, top and bottom
+      box(g, 0.045, 0.035, L * 0.52, dark, sgn * (W / 2 + 0.045), f.doorY + f.doorH / 2 + 0.01, L * 0.02);
+      box(g, 0.045, 0.035, L * 0.52, dark, sgn * (W / 2 + 0.045), f.doorY - f.doorH / 2 - 0.01, L * 0.02);
+    }
+    box(g, W * 0.8, 0.06, L * 0.3, steel, 0, f.hoodY, L * 0.32);
   }
   if (v.upgrades.includes('cargo_racks') && v.def.kind === 'car') {
     if (v.def.id === 'pickup' || v.def.id === 'f250') {
