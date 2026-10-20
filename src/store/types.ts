@@ -1,3 +1,4 @@
+import type { SurvivorDef } from '../data/survivors';
 // Shared types for the zustand store, game data modules, and save system.
 // Data modules (src/data/*) implement the *Def interfaces declared here.
 
@@ -154,8 +155,9 @@ export interface VehicleSave {
   condition: number;
 }
 
+
 export interface SaveSnapshot {
-  version: 1;
+  version: 2;
   savedAt: number;
   difficulty: DifficultyId;
   seed: number;
@@ -172,6 +174,14 @@ export interface SaveSnapshot {
   battery: number;
   phoneUnlocked: boolean;
   world: WorldDiff;
+  // v2: the run's long tail — days, build-out, crew, and every vehicle
+  daysElapsed: number;
+  skills: Record<string, { level: number; xp: number }>;
+  perkPoints: number;
+  perks: string[];
+  survivors: SurvivorDef[];
+  base: { poiId: string; facilities: string[] } | null;
+  vehicles: VehicleSave[];
 }
 
 export interface SaveMeta {

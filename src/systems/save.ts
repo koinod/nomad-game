@@ -3,7 +3,7 @@ import type { DifficultyId, SaveMeta, SaveSnapshot } from '../store/types';
 
 const DB_NAME = 'nomad';
 const STORE = 'saves';
-const CURRENT_VERSION = 1;
+const CURRENT_VERSION = 2;
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
@@ -44,29 +44,36 @@ export type RawSaveRecord = Omit<Partial<SaveSnapshot>, 'version'> & {
 export function migrate(record: RawSaveRecord): SaveSnapshot {
   const s: Record<string, unknown> = { ...record };
 
-  switch (s.version) {
-    case 0: {
-      // v0 -> v1: phone state, battery, hotbar, equipped, and seed were added.
-      if (s.battery === undefined) s.battery = 100;
-      if (s.phoneUnlocked === undefined) s.phoneUnlocked = false;
-      if (s.hotbar === undefined) s.hotbar = [null, null, null];
-      if (s.equipped === undefined)
-        s.equipped = { melee: null, ranged: null, pack: null };
-      if (s.seed === undefined) s.seed = 0;
-      s.version = 1;
-      break;
+  if (s.version === 0) {
+    // v0 -> v1: phone state, battery, hotbar, equipped, and seed were added.
+    if (s.battery === undefined) s.battery = 100;
+    if (s.phoneUnlocked === undefined) s.phoneUnlocked = false;
+    if (s.hotbar === undefined) s.hotbar = [null, null, null];
+    if (s.equipped === undefined)
+      s.equipped = { melee: null, ranged: null, pack: null };
+    if (s.seed === undefined) s.seed = 0;
+    s.version = 1;
+  }
+
+  if (s.version === 1) {
+    // v1 -> v2: run-length state was added (days, skills/perks, crew,
+    // base, vehicles). Old saves start those fresh — nothing else moves.
+    const blankSkills: Record<string, { level: number; xp: number }> = {};
+    for (const id of ['combat', 'mechanics', 'medicine', 'stealth', 'driver', 'scavenging', 'leadership']) {
+      blankSkills[id] = { level: 0, xp: 0 };
     }
-    case 1:
-      // Current — nothing to do.
-      break;
-    default:
-      throw new Error(`save.ts: cannot migrate unknown save version ${String(s.version)}`);
+    if (s.daysElapsed === undefined) s.daysElapsed = 0;
+    if (s.skills === undefined) s.skills = blankSkills;
+    if (s.perkPoints === undefined) s.perkPoints = 0;
+    if (s.perks === undefined) s.perks = [];
+    if (s.survivors === undefined) s.survivors = [];
+    if (s.base === undefined) s.base = null;
+    if (s.vehicles === undefined) s.vehicles = [];
+    s.version = 2;
   }
 
   if (s.version !== CURRENT_VERSION) {
-    throw new Error(
-      `save.ts: migration incomplete, still at version ${String(s.version)}`,
-    );
+    throw new Error(`save.ts: cannot migrate unknown save version ${String(s.version)}`);
   }
 
   // Strip the object-store key field before handing it to the store.

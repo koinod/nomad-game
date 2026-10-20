@@ -22,9 +22,9 @@ function v0Snapshot(): RawSaveRecord {
   };
 }
 
-function fullV1Snapshot(): SaveSnapshot {
+function fullV2Snapshot(): SaveSnapshot {
   return {
-    version: 1,
+    version: 2,
     savedAt: 1729000100000,
     difficulty: 'story',
     seed: 42,
@@ -41,13 +41,30 @@ function fullV1Snapshot(): SaveSnapshot {
     battery: 75,
     phoneUnlocked: true,
     world: { looted: [], deadHusks: ['h1'], cleared: [] },
+    daysElapsed: 3,
+    skills: {
+      combat: { level: 2, xp: 40 },
+      mechanics: { level: 0, xp: 0 },
+      medicine: { level: 0, xp: 0 },
+      stealth: { level: 0, xp: 0 },
+      driver: { level: 1, xp: 5 },
+      scavenging: { level: 0, xp: 0 },
+      leadership: { level: 0, xp: 0 },
+    },
+    perkPoints: 1,
+    perks: ['br_heavy'],
+    survivors: [],
+    base: { poiId: 'shore_camp', facilities: ['command_post'] },
+    vehicles: [
+      { defId: 'pickup', x: -550, y: 3, z: 20, heading: 1.2, fuel: 22, condition: 0.5 },
+    ],
   };
 }
 
 describe('migrate()', () => {
-  it('migrates a v0 snapshot to v1 with sane defaults', () => {
+  it('migrates a v0 snapshot to v2 with sane defaults', () => {
     const out = migrate(v0Snapshot());
-    expect(out.version).toBe(1);
+    expect(out.version).toBe(2);
     expect(out.battery).toBe(100);
     expect(out.phoneUnlocked).toBe(false);
     expect(out.hotbar).toEqual([null, null, null]);
@@ -69,12 +86,32 @@ describe('migrate()', () => {
     expect(out.world).toEqual(v0.world);
   });
 
-  it('passes a current v1 snapshot through unchanged', () => {
-    const v1 = fullV1Snapshot();
-    const out = migrate({ ...v1, slot: '2' });
-    expect(out).toEqual(v1);
+  it('passes a current v2 snapshot through unchanged', () => {
+    const v2 = fullV2Snapshot();
+    const out = migrate({ ...v2, slot: '2' });
+    expect(out).toEqual(v2);
     expect(out.battery).toBe(75);
     expect(out.hotbar).toEqual(['b2', null, null]);
+    expect(out.vehicles[0].defId).toBe('pickup');
+  });
+
+  it('migrates a v1 snapshot to v2 with fresh run-length state', () => {
+    const v2 = fullV2Snapshot();
+    const { daysElapsed: _d, skills: _s, perkPoints: _pp, perks: _p, survivors: _sv, base: _b, vehicles: _v, ...rest } = v2;
+    const v1: RawSaveRecord = { ...rest, version: 1, slot: '3' };
+    const out = migrate(v1);
+    expect(out.version).toBe(2);
+    expect(out.daysElapsed).toBe(0);
+    expect(out.skills.combat).toEqual({ level: 0, xp: 0 });
+    expect(out.skills.leadership).toEqual({ level: 0, xp: 0 });
+    expect(out.perkPoints).toBe(0);
+    expect(out.perks).toEqual([]);
+    expect(out.survivors).toEqual([]);
+    expect(out.base).toBeNull();
+    expect(out.vehicles).toEqual([]);
+    // everything the v1 save actually held survives
+    expect(out.battery).toBe(75);
+    expect(out.player).toEqual(v2.player);
   });
 
   it('strips the slot key field from the migrated snapshot', () => {
@@ -82,7 +119,7 @@ describe('migrate()', () => {
     expect('slot' in out).toBe(false);
   });
 
-  it('round-trips: v0 -> v1 -> migrate again is stable', () => {
+  it('round-trips: v0 -> v2 -> migrate again is stable', () => {
     const once = migrate(v0Snapshot());
     const twice = migrate({ ...once, slot: '1' });
     expect(twice).toEqual(once);

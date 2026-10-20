@@ -286,6 +286,19 @@ export const useGameStore = create<GameState>()((set, get) => {
         poiPositions: {},
         dead: false, deathCause: null, endingChoice: null, cutsceneLine: 0,
         pendingSnapshot: null,
+        skills: {
+          combat: { level: 0, xp: 0 },
+          mechanics: { level: 0, xp: 0 },
+          medicine: { level: 0, xp: 0 },
+          stealth: { level: 0, xp: 0 },
+          driver: { level: 0, xp: 0 },
+          scavenging: { level: 0, xp: 0 },
+          leadership: { level: 0, xp: 0 },
+        },
+        perkPoints: 0,
+        perks: [],
+        survivors: [],
+        base: null,
       });
     },
 
@@ -943,7 +956,7 @@ export const useGameStore = create<GameState>()((set, get) => {
       const s = get();
       const eng = getGame();
       const snapshot: SaveSnapshot = {
-        version: 1,
+        version: 2,
         savedAt: Date.now(),
         difficulty: s.difficulty,
         seed: s.seed,
@@ -960,6 +973,13 @@ export const useGameStore = create<GameState>()((set, get) => {
         battery: s.battery,
         phoneUnlocked: s.phoneUnlocked,
         world: eng ? eng.getWorldDiff() : { looted: [], deadHusks: [], cleared: [] },
+        daysElapsed: s.daysElapsed,
+        skills: s.skills,
+        perkPoints: s.perkPoints,
+        perks: s.perks,
+        survivors: s.survivors,
+        base: s.base,
+        vehicles: eng ? eng.getVehicleStates() : [],
       };
       try {
         await saveGameToSlot(slot, snapshot);
@@ -976,7 +996,7 @@ export const useGameStore = create<GameState>()((set, get) => {
       const snap = await loadGameFromSlot(slot);
       const s = get();
       if (!snap) { s.addToast('No save in that slot.'); return false; }
-      if (snap.version > 1) { s.addToast('Save is from a newer version.'); return false; }
+      if (snap.version > 2) { s.addToast('Save is from a newer version.'); return false; }
       set({
         screen: 'game',
         difficulty: snap.difficulty,
@@ -996,6 +1016,12 @@ export const useGameStore = create<GameState>()((set, get) => {
         phoneOpen: false, phoneTab: 'loadout', phoneUnlocked: snap.phoneUnlocked, battery: snap.battery,
         dialogue: null, interactPrompt: null,
         dead: false, deathCause: null, endingChoice: null, cutsceneLine: 0,
+        daysElapsed: snap.daysElapsed,
+        skills: snap.skills as GameState['skills'],
+        perkPoints: snap.perkPoints,
+        perks: snap.perks,
+        survivors: snap.survivors,
+        base: snap.base,
         pendingSnapshot: snap,
       });
       return true;

@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { useGameStore } from '../store/gameStore';
-import type { DifficultyId, SaveSnapshot, WorldDiff } from '../store/types';
+import type { DifficultyId, SaveSnapshot, VehicleSave, WorldDiff } from '../store/types';
 import { DIFFICULTIES } from '../store/types';
 import { QUESTS } from '../data/quests';
 import { input, resetEdgeTriggers } from './input';
@@ -157,6 +157,18 @@ export class Game {
       for (const id of snap.world.looted) this.looted.add(id);
       for (const id of snap.world.deadHusks) this.deadHusks.add(id);
       for (const id of snap.world.cleared) this.cleared.add(id);
+      // vehicles back where the run left them (fuel + condition included);
+      // v1 saves migrate with an empty list and keep their fresh spawns
+      for (const vs of snap.vehicles ?? []) {
+        const v = this.vehicles.vehicles.find((x) => x.def.id === vs.defId);
+        if (!v) continue;
+        v.group.position.set(vs.x, vs.y, vs.z);
+        v.group.rotation.y = vs.heading;
+        v.heading = vs.heading;
+        v.fuel = vs.fuel;
+        v.condition = vs.condition;
+        v.speed = 0;
+      }
     }
 
     // player
@@ -300,6 +312,20 @@ export class Game {
       deadHusks: [...this.deadHusks],
       cleared: [...this.cleared],
     };
+  }
+
+  /** Every vehicle's live state, for the save snapshot (v2). */
+  getVehicleStates(): VehicleSave[] {
+    if (!this.vehicles) return [];
+    return this.vehicles.vehicles.map((v) => ({
+      defId: v.def.id,
+      x: v.group.position.x,
+      y: v.group.position.y,
+      z: v.group.position.z,
+      heading: v.heading,
+      fuel: v.fuel,
+      condition: v.condition,
+    }));
   }
 
   getHeightAt(x: number, z: number): number {
