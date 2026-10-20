@@ -759,6 +759,42 @@ export class Kit {
     this.roofGroupAdd(roofGroup);
   }
 
+  /** Pyramid cap (the lighthouse lamp room): four triangle panels from
+   *  the top plate's eaves to a central apex. */
+  roofPyramid(rise: number, color: number): void {
+    this.roofKind = 'pyramid';
+    const hw = this.w / 2;
+    const hd = this.d / 2;
+    const top = this.stories * KIT.WALL_H;
+    const roofGroup = new THREE.Group();
+    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.9, side: THREE.DoubleSide });
+    const corners: [number, number][] = [
+      [-hw - 0.3, -hd - 0.3], [hw + 0.3, -hd - 0.3],
+      [hw + 0.3, hd + 0.3], [-hw - 0.3, hd + 0.3],
+    ];
+    for (let i = 0; i < 4; i++) {
+      const [ax, az] = corners[i];
+      const [bx, bz] = corners[(i + 1) % 4];
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
+        ax, top, az,
+        bx, top, bz,
+        0, top + rise, 0,
+      ]), 3));
+      geo.computeVertexNormals();
+      const m = new THREE.Mesh(geo, mat);
+      m.castShadow = true;
+      roofGroup.add(m);
+      this.record('roof',
+        Math.min(0, ax, bx), top - 0.05, Math.min(0, az, bz),
+        Math.max(0, ax, bx), top + rise, Math.max(0, az, bz));
+    }
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6), this.mat(0x2e2e2e));
+    cap.position.set(0, top + rise + 0.05, 0);
+    roofGroup.add(cap);
+    this.roofGroupAdd(roofGroup);
+  }
+
   /** Shed roof: single slope, high at the back (-Z), closed by a filler
    *  band + trapezoid end caps. */
   roofShed(rise: number, color: number, wallColor: number): void {

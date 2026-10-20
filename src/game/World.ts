@@ -6,6 +6,8 @@ import * as THREE from 'three';
 import { makeFbm, makeNoise2D, mulberry32, clamp, lerp, smoothstep } from './rng';
 import { buildHouses, houseFootprints, type HouseResult } from './HousesV4';
 import { buildPoiBuildings, poiFootprints, type PoiBuildResult } from './PoiBuildingsV4';
+import { buildLighthouse } from './Lighthouse';
+import type { KitBuilding, KitResult } from './kit';
 import { airbaseFootprints, buildAirbase, buildCarrier, CARRIER_DECK_Y } from './Airbase';
 import type { BiomeId } from './Game';
 import type { StationId } from '../data/items';
@@ -139,6 +141,16 @@ export interface PoiDef {
   zGuess: number;
 }
 
+/**
+ * Campfire offsets from their POI points, shared by the World (fire
+ * meshes), Interact (rest interactables), and Game (fast travel). The
+ * lighthouse fire moved out of the tower's footprint when the tower
+ * became a real building with walls.
+ */
+export const CAMPFIRE_SPOTS: Record<string, [number, number]> = {
+  lighthouse_base: [8, 5],
+};
+
 /** Suggested x per INTERFACES.md; z resolved against real terrain. */
 export const POI_DEFS: PoiDef[] = [
   { id: 'shore_camp', x: -560, zGuess: 250 },
@@ -191,6 +203,12 @@ export class World {
   poiPositions: Record<string, [number, number]> = {};
   houses!: HouseResult;
   poiBuildings!: PoiBuildResult;
+  /** The rebuilt lighthouse (kit): colliders/floors/containers/roofs for
+   *  Game to merge, the gate-audited building record, and the lamp room
+   *  floor height the beacon/reach gates read. */
+  lighthouseKit!: KitResult;
+  lighthouseBuilding?: KitBuilding;
+  lampRoomY = 0;
   // physical crafting stations: { station, x, z } + their colliders
   stations: { station: StationId; x: number; z: number }[] = [];
   stationColliders: Collider[] = [];
@@ -616,7 +634,10 @@ export class World {
 
   private buildCampfires(): void {
     for (const id of ['shore_camp', 'jonah_camp', 'lighthouse_base']) {
-      const [x, z] = this.poi(id);
+      const [bx, bz] = this.poi(id);
+      const [ox, oz] = CAMPFIRE_SPOTS[id] ?? [0, 0];
+      const x = bx + ox;
+      const z = bz + oz;
       const y = this.groundY(x, z);
       const g = new THREE.Group();
       const stoneMat = new THREE.MeshStandardMaterial({ color: 0x55504a, roughness: 1 });
@@ -756,41 +777,16 @@ export class World {
 
   private buildLighthouse(): void {
     const [x, z] = this.poi('lighthouse_base');
-    const y = this.groundY(x, z);
-    const g = new THREE.Group();
-    const white = new THREE.MeshStandardMaterial({ color: 0xd8d4c8, roughness: 0.9 });
-    const red = new THREE.MeshStandardMaterial({ color: 0x8e2f28, roughness: 0.9 });
-    // striped tower: stacked cylinders
-    const segs = 6;
-    for (let i = 0; i < segs; i++) {
-      const r0 = 3.4 - i * 0.32;
-      const r1 = 3.4 - (i + 1) * 0.32;
-      const seg = new THREE.Mesh(
-        new THREE.CylinderGeometry(r1, r0, 4, 12),
-        i % 2 === 0 ? white : red,
-      );
-      seg.position.y = 2 + i * 4;
-      g.add(seg);
-    }
-    // lamp room
-    const lampBase = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.6, 1.2, 12), white);
-    lampBase.position.y = 2 + segs * 4 + 0.6;
-    g.add(lampBase);
-    const glass = new THREE.Mesh(
-      new THREE.CylinderGeometry(2.2, 2.2, 2.6, 12, 1, true),
-      new THREE.MeshStandardMaterial({
-        color: 0xbfe3ff, transparent: true, opacity: 0.35,
-        side: THREE.DoubleSide, roughness: 0.2,
-      }),
-    );
-    glass.position.y = 2 + segs * 4 + 2.5;
-    g.add(glass);
-    const cap = new THREE.Mesh(new THREE.ConeGeometry(2.8, 1.8, 12), red);
-    cap.position.y = 2 + segs * 4 + 4.6;
-    g.add(cap);
-    // rotating beam
+    // the V4 tower: a real kit building (Lighthouse.ts) — connected
+    // shaft, interior switchback stairs, solid colliders, the Keeper's
+    // conversation in a finished watch room, lamp room at the top
+    const built = buildLighthouse(x, z, (px, pz) => this.groundY(px, pz));
+    this.lighthouseKit = built.result;
+    this.lighthouseBuilding = built.result.building;
+    this.lampRoomY = built.lampRoomFloorY;
+    // rotating beam + lamp light, re-anchored to the real lamp room
     this.beamPivot = new THREE.Group();
-    this.beamPivot.position.y = 2 + segs * 4 + 2.5;
+    this.beamPivot.position.set(x, built.lampAnchorY, z);
     const beamGeo = new THREE.ConeGeometry(3.2, 60, 12, 1, true);
     beamGeo.translate(0, -30, 0);
     beamGeo.rotateX(-Math.PI / 2);
@@ -803,13 +799,11 @@ export class World {
     );
     this.beam.name = 'beam';
     this.beamPivot.add(this.beam);
-    g.add(this.beamPivot);
+    built.result.group.add(this.beamPivot);
     this.lampLight = new THREE.PointLight(0xffe9a8, 60, 90, 1.8);
-    this.lampLight.position.y = 2 + segs * 4 + 2.5;
-    g.add(this.lampLight);
-    g.position.set(x, y, z);
-    g.name = 'lighthouse';
-    this.scene.add(g);
+    this.lampLight.position.set(x, built.lampAnchorY, z);
+    built.result.group.add(this.lampLight);
+    this.scene.add(built.result.group);
   }
 
   private buildRelayRuin(): void {

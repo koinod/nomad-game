@@ -9,6 +9,7 @@ import { CLAIMABLE } from '../data/base';
 import { buildGroundMesh } from './weaponMeshes';
 import { buildFurnitureMesh, FURNITURE_LABEL, type FurnitureKind } from './furnitureMeshes';
 import { sfx } from '../systems/audio';
+import { CAMPFIRE_SPOTS } from './World';
 
 export interface LootEntry {
   id: string;
@@ -47,6 +48,8 @@ export interface InteractHooks {
   setLastSafe: (x: number, z: number) => void;
   setCamp?: (poiId: string) => void; // which campfire opened the sleep dialog
   hostilesNear?: (x: number, z: number, r: number) => number; // base-claim gate
+  /** World Y of the lighthouse lamp room floor — the beacon lives there now. */
+  lampRoomY?: number;
 }
 
 export interface Interactable {
@@ -207,7 +210,10 @@ export class InteractSystem {
 
     // ---- campfires (safe points + rest) ----
     for (const pid of ['shore_camp', 'jonah_camp', 'lighthouse_base']) {
-      const [x, z] = at(pid);
+      const [bx, bz] = at(pid);
+      const [ox, oz] = CAMPFIRE_SPOTS[pid] ?? [0, 0];
+      const x = bx + ox;
+      const z = bz + oz;
       const pos = new THREE.Vector3(x, hooks.groundY(x, z), z);
       this.interactables.push({
         id: `campfire:${pid}`,
@@ -256,7 +262,7 @@ export class InteractSystem {
       lockedLine?: string; // spoken while the gate is unmet
     }
     const recruitDefs: RecruitDef[] = [
-      { key: 'elena', poiId: 'lighthouse_base', dx: -3, dz: 4, jacket: 0xd8d8d0, line: 'Elena: "I ran an ER before the silence. Patch me a place to work and I\u2019m yours."' },
+      { key: 'elena', poiId: 'lighthouse_base', dx: -5.5, dz: 5.5, jacket: 0xd8d8d0, line: 'Elena: "I ran an ER before the silence. Patch me a place to work and I\u2019m yours."' },
       { key: 'mateo', poiId: 'relay_station', dx: -14, dz: 8, jacket: 0x7a4a2a, line: 'Mateo: "Truck died two miles back. Nobody\u2019s coming. Say the word and I\u2019ll walk with you."' },
       { key: 'lina', poiId: 'dune_cache', dx: 2, dz: -3, jacket: 0x4a5a3a, line: 'Lina: "I\u2019ve been watching the road from the dunes. You walk loud — I can fix that. Take me with you."' },
       {
@@ -364,15 +370,19 @@ export class InteractSystem {
     }
 
     // ---- NPCs ----
-    const npcDefs: { id: string; poiId: string; label: string; jacket: number }[] = [
+    const npcDefs: { id: string; poiId: string; label: string; jacket: number; dx?: number; dz?: number }[] = [
       { id: 'npc:jonah', poiId: 'jonah_camp', label: 'Talk to Jonah', jacket: 0x5a4632 },
-      { id: 'npc:kowalski', poiId: 'lighthouse_base', label: 'Talk to Kowalski', jacket: 0x3c5a6e },
+      // Kowalski stands in the lighthouse watch room now (finished,
+      // door-reachable — the kit building's npcPoint matches this spot)
+      { id: 'npc:kowalski', poiId: 'lighthouse_base', label: 'Talk to Kowalski', jacket: 0x3c5a6e, dx: -1.8, dz: 1.0 },
     ];
     for (const n of npcDefs) {
       const [x, z] = at(n.poiId);
-      const y = hooks.groundY(x, z);
+      const mx = x + (n.dx ?? 2.2);
+      const mz = z + (n.dz ?? 1.5);
+      const y = hooks.groundY(mx, mz);
       const mesh = personMesh(n.jacket, 0xc9a180);
-      mesh.position.set(x + 2.2, y, z + 1.5);
+      mesh.position.set(mx, y, mz);
       mesh.rotation.y = Math.PI * 0.75;
       hooks.scene.add(mesh);
       const pos = mesh.position.clone();
@@ -393,7 +403,7 @@ export class InteractSystem {
     // ---- beacon (lighthouse top choice) ----
     {
       const [x, z] = at('lighthouse_base');
-      const pos = new THREE.Vector3(x, hooks.groundY(x, z), z);
+      const pos = new THREE.Vector3(x, hooks.lampRoomY ?? hooks.groundY(x, z), z);
       this.interactables.push({
         id: 'beacon',
         kind: 'beacon',
@@ -401,6 +411,14 @@ export class InteractSystem {
         label: 'Climb to the lamp room',
         use: () => {
           const st = useGameStore.getState();
+          // the beacon is up the tower now — using it from the ground
+          // just tells you where it lives; the rep gate below is the
+          // original one, unchanged
+          if (hooks.lampRoomY !== undefined && st.pos[1] < hooks.lampRoomY - 1.5) {
+            st.addToast('The beacon waits in the lamp room — six flights up the tower stair.');
+            sfx.play('ui', { volume: 0.5 });
+            return;
+          }
           const rep = st.rep['lighthouse'] ?? 0;
           if (rep >= 50) {
             st.openDialogue('npc:kowalski', 'beacon_choice');
@@ -425,11 +443,11 @@ export class InteractSystem {
     pickup('pk_bat', 'baseball_bat', 1, 'town', -6, 4);
     pickup('pk_knife', 'combat_knife', 1, 'wreck', 1.5, -1);
     pickup('pk_sledge', 'sledgehammer', 1, 'relay_station', -3, 2.5);
-    pickup('pk_shotgun', 'shotgun', 1, 'lighthouse_base', 2.5, 3.5);
+    pickup('pk_shotgun', 'shotgun', 1, 'lighthouse_base', 5.5, 3.0);
     pickup('pk_frag', 'frag', 2, 'relay_station', -4, 4);
     pickup('pk_molotov', 'molotov', 2, 'jonah_camp', 4, -3);
     pickup('pk_flashbang', 'flashbang', 2, 'relay_station', 5, 2);
-    pickup('pk_vest', 'armored_vest', 1, 'lighthouse_base', -2.5, 2.5);
+    pickup('pk_vest', 'armored_vest', 1, 'lighthouse_base', -5.5, 2.0);
     pickup('pk_helmet', 'riot_helmet', 1, 'relay_station', 2, -4);
     pickup('pk_lockpick', 'lockpick', 2, 'town', 10, -8);
     pickup('pk_toolkit', 'tool_kit', 1, 'town', -14, 6);
@@ -438,7 +456,7 @@ export class InteractSystem {
     pickup('pk_fireaxe', 'fire_axe', 1, 'town', 72, 26);
     pickup('pk_spear', 'spear', 1, 'forest_cache', 3, -2);
     pickup('pk_baton', 'riot_baton', 1, 'relay_station', -3, 3);
-    pickup('pk_flaregun', 'flare_gun', 1, 'lighthouse_base', -4, -3);
+    pickup('pk_flaregun', 'flare_gun', 1, 'lighthouse_base', -5.5, -3.5);
     pickup('pk_revolver', 'revolver', 1, 'town', 52, -26);
     pickup('pk_crossbow', 'crossbow', 1, 'jonah_camp', -13, -7);
     pickup('pk_bolts', 'bolts', 12, 'forest_cache', -2, 3);

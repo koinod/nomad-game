@@ -57,4 +57,11 @@ describe('the building QA gate', () => {
     expect(world.poiBuildings.buildings.length).toBe(7);
     expectGate(world.poiBuildings.buildings, 'poi buildings');
   });
+
+  it('passes the rebuilt lighthouse — watch room and lamp room reachable', () => {
+    const world = buildWorld();
+    expect(world.lighthouseBuilding).toBeDefined();
+    expect(world.lampRoomY).toBeGreaterThan(15);
+    expectGate([world.lighthouseBuilding!], 'lighthouse');
+  });
 });

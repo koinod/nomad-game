@@ -8,7 +8,7 @@ import { DIFFICULTIES } from '../store/types';
 import { QUESTS } from '../data/quests';
 import { input, resetEdgeTriggers } from './input';
 import { ITEMS } from '../data/items';
-import { World, heightAt, biomeAt, initTerrainField } from './World';
+import { World, heightAt, biomeAt, initTerrainField, CAMPFIRE_SPOTS } from './World';
 import { CARRIER_DECK_Y } from './Airbase';
 import { Player } from './Player';
 import { Fx } from './Fx';
@@ -171,10 +171,19 @@ export class Game {
     this.houseColliders = [
       ...this.world.houses.colliders,
       ...this.world.poiBuildings.colliders,
+      ...this.world.lighthouseKit.colliders,
       ...this.world.stationColliders,
     ];
-    this.houseFloors = [...this.world.houses.floors, ...this.world.poiBuildings.floors];
-    this.houseRoofs = [...this.world.houses.roofs, ...this.world.poiBuildings.roofs];
+    this.houseFloors = [
+      ...this.world.houses.floors,
+      ...this.world.poiBuildings.floors,
+      ...this.world.lighthouseKit.floors,
+    ];
+    this.houseRoofs = [
+      ...this.world.houses.roofs,
+      ...this.world.poiBuildings.roofs,
+      ...this.world.lighthouseKit.roofs,
+    ];
 
     // snapshot world diff
     const snap = opts.snapshot ?? null;
@@ -326,9 +335,15 @@ export class Game {
         setLastSafe: (x, z) => { this.lastSafe = [x, z]; },
         setCamp: (id) => { this.lastCampId = id; },
         hostilesNear: (x, z, r) => this.husks?.aliveWithin(x, z, r) ?? 0,
+        lampRoomY: this.world.lampRoomY,
       },
       this.world.poiPositions,
-      [...buildContainerDefs(this.world.poiPositions), ...this.world.houses.containers, ...this.world.poiBuildings.containers],
+      [
+        ...buildContainerDefs(this.world.poiPositions),
+        ...this.world.houses.containers,
+        ...this.world.poiBuildings.containers,
+        ...this.world.lighthouseKit.containers,
+      ],
     );
 
     // physical freight: supply / parts crates that can be loaded into beds
@@ -498,7 +513,10 @@ export class Game {
   travelTo(poiId: string): void {
     if (!this.player || !this.world) return;
     const s = useGameStore.getState();
-    const [x, z] = this.world.poi(poiId);
+    const [bx, bz] = this.world.poi(poiId);
+    const [ox, oz] = CAMPFIRE_SPOTS[poiId] ?? [0, 0];
+    const x = bx + ox;
+    const z = bz + oz;
     const dist = Math.hypot(x - this.player.pos.x, z - this.player.pos.z);
     const minutes = Math.max(30, Math.round((dist / 350) * 60));
     this.player.setPosition(x, heightAt(x, z) + 0.5, z);
@@ -1085,7 +1103,7 @@ export class Game {
     }
 
     // reach-type quest steps
-    this.checkReachSteps(s, player.pos.x, player.pos.z);
+    this.checkReachSteps(s, player.pos.x, player.pos.z, player.pos.y);
 
     // battery
     if (s.phoneOpen) s.drainBattery(dt * 0.3);
@@ -1107,7 +1125,7 @@ export class Game {
     }
   }
 
-  private checkReachSteps(s: ReturnType<typeof useGameStore.getState>, px: number, pz: number): void {
+  private checkReachSteps(s: ReturnType<typeof useGameStore.getState>, px: number, pz: number, py: number): void {
     const pois = s.poiPositions;
     for (const q of s.quests) {
       const def = QUESTS.find((d) => d.id === q.id);
@@ -1115,6 +1133,9 @@ export class Game {
       if (!step || step.type !== 'reach' || !step.target.startsWith('poi:')) continue;
       const p = pois[step.target.slice(4)];
       if (!p) continue;
+      // the lamp room is a place you CLIMB to now: standing at the tower
+      // base no longer completes "Reach the lamp room"
+      if (step.target === 'poi:lighthouse_top' && py < (this.world?.lampRoomY ?? 0) - 0.5) continue;
       if (Math.hypot(p[0] - px, p[1] - pz) < 6) {
         s.questEvent('reach', step.target, 1);
       }
