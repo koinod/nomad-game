@@ -13,12 +13,13 @@ export type HuskKind = 'shambler' | 'stalker' | 'armored';
 export type HuskState =
   | 'idle' | 'wander' | 'investigate' | 'hunt' | 'attack' | 'return' | 'dead';
 
-const KIND_STATS: Record<HuskKind, { hp: number; speed: number; damage: number; color: number; height: number }> = {
-  shambler: { hp: 40, speed: 2.3, damage: 12, color: 0x5d6b52, height: 1.8 },
-  stalker: { hp: 30, speed: 3.6, damage: 9, color: 0x46465a, height: 1.95 },
+const KIND_STATS: Record<HuskKind, { hp: number; speed: number; damage: number; color: number; height: number; armorClass: number }> = {
+  shambler: { hp: 40, speed: 2.3, damage: 12, color: 0x5d6b52, height: 1.8, armorClass: 0 },
+  stalker: { hp: 30, speed: 3.6, damage: 9, color: 0x46465a, height: 1.95, armorClass: 0 },
   // the carrier's guard pack: ship-security husks in plate carriers and
-  // helmets — 3x the HP of a shambler, slower, hits much harder
-  armored: { hp: 125, speed: 2.1, damage: 19, color: 0x3f4750, height: 1.92 },
+  // helmets — 3x the HP of a shambler, slower, hits much harder, and the
+  // plate eats small-caliber fire (armorClass 2 — see gunMath.armorMult)
+  armored: { hp: 125, speed: 2.1, damage: 19, color: 0x3f4750, height: 1.92, armorClass: 2 },
 };
 
 export const HUSK_CAP = 14;
@@ -62,6 +63,13 @@ export class Husk {
   staggerT = 0; // heavy hits interrupt the attack windup
   flinchT = 0; // procedural hit reaction clock (head snap + torso rock)
   flinchPow = 0; // 0..1 — how hard this hit rocked the husk
+  // stealth model: being shot builds alert; only a triangulated firing
+  // line (or eyes on the player) earns a hunt — no hive-mind GPS
+  alert = 0; // 0..1
+  private pendingInvest: { x: number; z: number; t: number } | null = null;
+  get armorClass(): number {
+    return KIND_STATS[this.kind].armorClass;
+  }
   limpT = 0; // walk-cycle clock for the shuffle animation
   stunT = 0; // flashbang / concussion: no perception, no movement
   knock = new THREE.Vector3();
@@ -200,18 +208,23 @@ export class Husk {
     fromDir: THREE.Vector3,
     knockPower = 2.2,
     canStagger = false,
-    opts?: { head?: boolean },
+    opts?: { head?: boolean; pen?: number },
   ): boolean {
     if (!this.alive) return false;
     this.hp -= amount;
     this.flashT = 0.18;
     this.bodyMat.emissive.setHex(0xff2222);
     this.knock.addScaledVector(fromDir, knockPower);
+    // a melee hit is point-blank information: the husk KNOWS where you are
+    if (canStagger) this.alert = 1;
     // every connecting hit is FELT: the head snaps and the torso rocks,
-    // scaled by the hit's stagger power (headshots and heavies rock hardest)
+    // scaled by the hit's stagger power (headshots and heavies rock hardest).
+    // Plate shrugs off small-caliber flinch: pen-0 fire barely rocks an
+    // armored husk, and it never breaks its windup.
     const sp = staggerPower(amount, opts?.head ?? false);
+    const plateShrug = this.armorClass >= 2 && !canStagger && (opts?.pen ?? 0) < 1;
     this.flinchT = 0.24;
-    this.flinchPow = Math.max(this.flinchPow, sp);
+    this.flinchPow = Math.max(this.flinchPow, plateShrug ? sp * 0.45 : sp);
     if (this.hp <= 0) {
       this.state = 'dead';
       this.deathT = 0;
@@ -228,8 +241,9 @@ export class Husk {
       this.staggerT = Math.max(this.staggerT, 0.35);
     }
     // a heavy ranged hit (or any headshot) breaks the windup too — a DMR
-    // round to the chest is not something you swing through
-    if (!canStagger && sp >= 0.6) {
+    // round to the chest is not something you swing through — unless a
+    // plate carrier eats it (pen < 1 against the armored kind)
+    if (!canStagger && sp >= 0.6 && !plateShrug) {
       if (this.state === 'attack') {
         this.state = 'hunt';
         this.attackCd = Math.max(this.attackCd, 0.8);
@@ -244,12 +258,51 @@ export class Husk {
     return false;
   }
 
-  investigateAt(p: THREE.Vector3): void {
+  investigateAt(p: THREE.Vector3, opts?: { delay?: number; jitter?: number }): void {
+    if (!this.alive) return;
+    // a distant gunshot is information with travel time and error bars:
+    // the husk reacts when the sound arrives, at a point NEAR the shot
+    if (opts?.delay && opts.delay > 0) {
+      const j = opts.jitter ?? 0;
+      this.pendingInvest = {
+        x: p.x + (Math.random() * 2 - 1) * j,
+        z: p.z + (Math.random() * 2 - 1) * j,
+        t: opts.delay,
+      };
+      return;
+    }
+    this.applyInvestigate(p.x, p.z);
+  }
+
+  private applyInvestigate(x: number, z: number): void {
     if (!this.alive) return;
     if (this.state === 'hunt' || this.state === 'attack') return;
     this.state = 'investigate';
-    this.target.copy(p);
+    this.target.set(x, 0, z);
     this.stateT = 0;
+  }
+
+  /**
+   * Shot from stealth: the husk does NOT get the shooter's live position.
+   * One hit buys a delayed, jittered investigate at the muzzle. Hits stack
+   * alert; only a triangulated line (alert full) earns a hunt.
+   */
+  shotFrom(shooterPos: THREE.Vector3, dist: number, head: boolean): void {
+    if (!this.alive) return;
+    this.alert = Math.min(1, this.alert + (head ? 0.55 : 0.45));
+    if (this.alert >= 0.99) {
+      this.pendingInvest = null;
+      if (this.state !== 'attack') {
+        this.state = 'hunt';
+        this.stateT = 0;
+      }
+      this.target.copy(shooterPos);
+    } else {
+      this.investigateAt(shooterPos, {
+        delay: Math.min(0.45, dist / 400),
+        jitter: Math.max(2, dist * 0.22),
+      });
+    }
   }
 
   /** Concussion: the husk sees nothing, moves nothing, for dur seconds. */
@@ -306,6 +359,21 @@ export class Husk {
       return;
     }
 
+    // a heard shot lands late and off-target: the pending investigation
+    // fires when its delay runs out, if nothing better has happened since
+    if (this.pendingInvest) {
+      this.pendingInvest.t -= dt;
+      if (this.pendingInvest.t <= 0) {
+        const pi = this.pendingInvest;
+        this.pendingInvest = null;
+        this.applyInvestigate(pi.x, pi.z);
+      }
+    }
+    // alert bleeds off while the trail is cold
+    if (this.state !== 'hunt' && this.state !== 'attack' && this.alert > 0) {
+      this.alert = Math.max(0, this.alert - dt * 0.05);
+    }
+
     const st = KIND_STATS[this.kind];
     const speedMul = ctx.isNight ? 1.4 : 0.7;
     const burst = this.kind === 'stalker' && ctx.isNight && this.state === 'hunt' ? 1.3 : 1;
@@ -333,6 +401,8 @@ export class Husk {
     }
     if (sees) {
       this.lostSightT = 0;
+      this.alert = 1; // eyes on you: fully alert, no decay games
+      this.pendingInvest = null;
       if (this.state !== 'attack') this.state = 'hunt';
     } else if (this.state === 'hunt' || this.state === 'attack') {
       this.lostSightT += dt;
@@ -515,7 +585,11 @@ export class HuskManager {
     for (const h of this.husks) {
       if (!h.alive) continue;
       const d = Math.hypot(h.group.position.x - x, h.group.position.z - z);
-      if (d <= radius) h.investigateAt(_v1);
+      if (d <= radius) {
+        // sound arrives at the speed of sound and localizes badly at
+        // range: far husks turn late, toward a point near — not on — it
+        h.investigateAt(_v1, { delay: Math.min(0.5, d / 340), jitter: Math.min(6, d * 0.08) });
+      }
     }
   }
 

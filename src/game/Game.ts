@@ -13,7 +13,7 @@ import { CARRIER_DECK_Y } from './Airbase';
 import { Player } from './Player';
 import { Fx } from './Fx';
 import { ProjectileManager } from './Projectiles';
-import { rangeFalloff } from './gunMath';
+import { rangeFalloff, armorMult } from './gunMath';
 import { HuskManager } from './Husks';
 import type { Husk, SpawnZone } from './Husks';
 import { InteractSystem, buildContainerDefs } from './Interact';
@@ -879,14 +879,14 @@ export class Game {
       husks,
       (x, z) => this.groundY(x, z),
       (hit) => {
-        let dmg = rangeFalloff(hit.shot.damage, hit.dist);
+        let dmg = rangeFalloff(hit.shot.damage, hit.dist) * armorMult(hit.shot.pen, hit.husk.armorClass);
         if (hit.head) dmg *= 2;
         const dealt = Math.round(dmg);
         const kdir = hit.dir.clone();
         kdir.y = 0;
         if (kdir.lengthSq() < 0.001) kdir.set(0, 0, 1); else kdir.normalize();
-        const killed = hit.husk.damage(dealt, kdir, 1.2, false, { head: hit.head });
-        hit.husk.investigateAt(player.pos);
+        const killed = hit.husk.damage(dealt, kdir, 1.2, false, { head: hit.head, pen: hit.shot.pen });
+        hit.husk.shotFrom(player.pos, hit.dist, hit.head);
         this.fx?.impactFlesh(hit.point, dealt, hit.head);
         if (killed) sfx.play('killconfirm', { volume: 0.55 });
         else if (hit.head) sfx.play('headshot', { volume: 0.9 });

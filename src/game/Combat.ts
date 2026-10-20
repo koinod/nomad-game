@@ -8,7 +8,7 @@ import type { HuskManager } from './Husks';
 import { modNoiseMult, modSpreadMult } from '../data/mods';
 import { bloomSpread, moveSpread, rangeFalloff } from './gunMath';
 import {
-  applyWear, conditionDamageMult, rollJam, WEAR_PER_SHOT, WEAR_PER_SWING,
+  applyWear, armorMult, conditionDamageMult, rollJam, WEAR_PER_SHOT, WEAR_PER_SWING,
 } from './gunMath';
 
 export interface CombatFx {
@@ -161,7 +161,11 @@ export function tryMelee(h: CombatHooks): MeleeResult {
       const unaware = t.husk.state === 'idle' || t.husk.state === 'wander' || t.husk.state === 'investigate';
       if (behind || unaware) mult *= 3;
     }
-    const killed = t.husk.damage(Math.round(stats.damage * mult), dir, stats.knockback, true);
+    // plate carriers eat light melee too: only a heavy head of steel
+    // (25+ base damage) counts as pen 1 against the armored kind
+    const meleePen = stats.damage >= 25 ? 1 : 0;
+    const dealt = Math.round(stats.damage * mult * armorMult(meleePen, t.husk.armorClass));
+    const killed = t.husk.damage(dealt, dir, stats.knockback, true, { pen: meleePen });
     t.husk.investigateAt(h.playerPos);
     sfx.play('thud', { volume: 0.9 });
     if (killed) {
@@ -312,7 +316,8 @@ export function tryRanged(h: CombatHooks): RangedResult {
     const res = h.husks.raycastShot(h.eyePos, dir, range);
     const muzzle = h.eyePos.clone().addScaledVector(dir, 0.45);
     if (res) {
-      let dmg = rangeFalloff((def.damage ?? 20) * condMult, res.dist);
+      const pen = def.ammoId ? (ITEMS[def.ammoId]?.pen ?? 0) : 0;
+      let dmg = rangeFalloff((def.damage ?? 20) * condMult, res.dist) * armorMult(pen, res.husk.armorClass);
       if (res.head) dmg *= 2;
       const dealt = Math.round(dmg);
       const kdir = new THREE.Vector3(
@@ -320,8 +325,10 @@ export function tryRanged(h: CombatHooks): RangedResult {
         0,
         res.husk.group.position.z - h.playerPos.z,
       ).normalize();
-      const k = res.husk.damage(dealt, kdir, 1.2, false, { head: res.head });
-      res.husk.investigateAt(h.playerPos);
+      const k = res.husk.damage(dealt, kdir, 1.2, false, { head: res.head, pen });
+      // shot from stealth: delayed, jittered investigate — or a hunt,
+      // if the husk has triangulated the firing line (see Husk.shotFrom)
+      res.husk.shotFrom(h.playerPos, res.dist, res.head);
       if (h.fx) {
         const point = h.eyePos.clone().addScaledVector(dir, res.dist);
         h.fx.impact(point, 'flesh', dealt, res.head);
