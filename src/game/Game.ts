@@ -2291,6 +2291,7 @@ export class Game {
     if (s.screen !== 'game' || s.paused || s.dialogue != null || this.cutscene) return;
     if (document.pointerLockElement !== this.canvas) return;
     if (e.button === 0) this.mouseHeld = true;
+    if (e.button === 0) input.attackHeld = true;
     if (e.button === 0) {
       // left click: fire when holding a loaded gun, bash/swing when not
       const rangedIt = s.equipped.ranged
@@ -2315,6 +2316,7 @@ export class Game {
 
   private handleMouseUp(e: MouseEvent): void {
     if (e.button === 0) this.mouseHeld = false;
+    if (e.button === 0) input.attackHeld = false;
     if (e.button === 2) input.blocking = false;
   }
 

@@ -11,6 +11,7 @@ export interface InputState {
   crouch: boolean; // held
   attackMelee: boolean; // edge-triggered: set true on press, controller clears
   attackRanged: boolean; // edge-triggered
+  attackHeld: boolean; // held: LMB fire button currently down (drives auto fire)
   blocking: boolean; // held: right-click block with melee
   leanLeft: boolean; // held: Q
   leanRight: boolean; // held: E (tap still interacts)
@@ -38,6 +39,7 @@ export const input: InputState = {
   crouch: false,
   attackMelee: false,
   attackRanged: false,
+  attackHeld: false,
   blocking: false,
   leanLeft: false,
   leanRight: false,

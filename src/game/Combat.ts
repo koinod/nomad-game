@@ -6,7 +6,7 @@ import { useGameStore } from '../store/gameStore';
 import { sfx } from '../systems/audio';
 import type { HuskManager } from './Husks';
 import { modNoiseMult, modSpreadMult } from '../data/mods';
-import { rangeFalloff } from './gunMath';
+import { bloomSpread, moveSpread, rangeFalloff } from './gunMath';
 
 export interface CombatFx {
   impact: (p: THREE.Vector3, kind: 'flesh' | 'dust', damage: number, head: boolean) => void;
@@ -26,6 +26,10 @@ export interface CombatHooks {
   onThrow?: (itemId: string) => void; // grenades: hand off to Game's projectile sim
   groundY?: (x: number, z: number) => number; // tracer endpoints + dust on misses
   fx?: CombatFx; // impact puffs + tracers (Game-owned Fx, optional in tests)
+  adsBlend?: number; // 0 hip .. 0.55 shoulder .. 1 sights — eased aim state
+  bloom?: number; // 0..1 sustained-fire bloom (Player-owned)
+  moveSpeedNorm?: number; // 0..1 of sprint speed — firing on the move
+  sway?: { x: number; y: number }; // ADS sway offset, radians on right/up axes
 }
 
 /** Per-weapon melee feel: reach, arc, swing speed, knockback, stamina cost. */
@@ -195,16 +199,32 @@ export function tryRanged(h: CombatHooks): RangedResult {
   const range = def.range ?? 45;
   const pellets = def.pellets ?? 1;
   // accuracy is calculated from stance: hip fire sprays, shoulder aim settles,
-  // down-sights is nearly true. Weapon base spread scales the cone.
-  const aimMult = h.aimLevel === 2 ? 0.18 : h.aimLevel === 1 ? 0.8 : 2.4;
-  const spread = (def.spread ?? 0.045) * aimMult * modSpreadMult(mods, h.aimLevel) + (h.aimLevel === 2 ? 0.002 : 0.006);
+  // down-sights is nearly true. The eased adsBlend drives the cone when the
+  // controller supplies it (a gun still coming up shoots like it's coming up).
+  const aimMult = h.adsBlend != null
+    ? h.adsBlend <= 0.55
+      ? 2.4 + (0.8 - 2.4) * (h.adsBlend / 0.55)
+      : 0.8 + (0.18 - 0.8) * ((h.adsBlend - 0.55) / 0.45)
+    : h.aimLevel === 2 ? 0.18 : h.aimLevel === 1 ? 0.8 : 2.4;
+  const spread =
+    (def.spread ?? 0.045) * aimMult * modSpreadMult(mods, h.aimLevel) +
+    (h.aimLevel === 2 ? 0.002 : 0.006) +
+    bloomSpread(h.bloom ?? 0, def.bloomMax ?? 0) +
+    moveSpread(h.moveSpeedNorm ?? 0, h.aimLevel);
+  // sway bends the whole shot group off the aim point before pellets scatter
+  const baseDir = h.aimDir.clone();
+  if (h.sway && (h.sway.x !== 0 || h.sway.y !== 0)) {
+    const r0 = new THREE.Vector3().crossVectors(baseDir, new THREE.Vector3(0, 1, 0)).normalize();
+    const u0 = new THREE.Vector3().crossVectors(r0, baseDir).normalize();
+    baseDir.addScaledVector(r0, h.sway.x).addScaledVector(u0, h.sway.y).normalize();
+  }
   let hit = false;
   let killed = false;
   let headshot = false;
   let totalDamage = 0;
   for (let p = 0; p < pellets; p++) {
-    // each pellet jitters around the aim dir — tight pattern, real spread feel
-    const dir = h.aimDir.clone();
+    // each pellet jitters around the (possibly swaying) aim dir
+    const dir = baseDir.clone();
     if (spread > 0) {
       const right = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0)).normalize();
       const up = new THREE.Vector3().crossVectors(right, dir).normalize();

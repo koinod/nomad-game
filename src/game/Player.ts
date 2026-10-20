@@ -16,7 +16,24 @@ import {
 } from './moveMath';
 import { useGameStore } from '../store/gameStore';
 import { ITEMS } from '../data/items';
-import { magSizeOf } from '../data/mods';
+import { magSizeOf, modAdsTimeMult, modRecoilMult } from '../data/mods';
+import {
+  RECOIL_RECOVERABLE, bloomAdd, bloomDecay, kickFor, recoveryStep, swayOffset,
+} from './gunMath';
+
+/** Seconds to bring a weapon from carry to ready, by what it is. */
+const DRAW_TIMES: Record<string, number> = {
+  pistol: 0.35, revolver: 0.4, flare_gun: 0.35, smg: 0.45, carbine: 0.5,
+  shotgun: 0.55, crossbow: 0.6, hunting_rifle: 0.65, dmr: 0.65,
+};
+function drawTimeFor(itemId: string | null): number {
+  if (!itemId) return 0.12;
+  if (DRAW_TIMES[itemId] != null) return DRAW_TIMES[itemId];
+  const cat = ITEMS[itemId]?.category;
+  if (cat === 'weapon-ranged') return 0.5;
+  if (cat === 'weapon-melee') return 0.25;
+  return 0.3;
+}
 
 export interface PlayerCtx {
   groundY: (x: number, z: number) => number;
@@ -64,6 +81,17 @@ export class Player {
   private attackT = 0; // melee swing timer (arm anim)
   private recoilT = 0; // ranged recoil timer (arm anim)
   private reloadT = 0; // seconds left on the current reload
+  private reloadUid: string | null = null; // weapon the in-flight reload belongs to
+  // ---- wave 2 weapon handling state ----
+  private bloom = 0; // 0..1 spread bloom from sustained fire
+  private adsBlend = 0; // 0 hip .. 0.55 shoulder .. 1 sights (eased, not stepped)
+  private drawT = 0; // seconds left raising a freshly drawn weapon
+  private drawTotal = 1; // full draw time (for the raise animation curve)
+  private recoilDebtP = 0; // kick the arms still owe back to the aim point
+  private recoilDebtY = 0;
+  private speedNorm = 0; // 0..1 of sprint speed, feeds move spread + sway
+  private timeS = 0; // controller clock (sway phase)
+  private lastHpSeen = -1; // damage interrupts reloads
   private vel = new THREE.Vector3(); // horizontal velocity (smoothed)
   private vy = 0; // vertical velocity
   private grounded = true;
@@ -236,6 +264,10 @@ export class Player {
     const want = activeHandItemId(s.equipped, s.inventory);
     if (want === this.handItemId) return;
     this.handItemId = want;
+    // a fresh weapon comes up at carry height: it takes its draw time to
+    // be ready, and it cannot fire mid-draw
+    this.drawTotal = drawTimeFor(want);
+    this.drawT = this.drawTotal;
     // clear old meshes (third-person hand + first-person view model)
     for (const anchor of [this.handAnchor, this.vmAnchor]) {
       while (anchor.children.length > 0) anchor.remove(anchor.children[0]);
@@ -254,6 +286,9 @@ export class Player {
 
   update(dt: number, ctx: PlayerCtx): void {
     this.syncHandWeapon();
+    this.timeS += dt;
+    if (this.drawT > 0) this.drawT -= dt;
+    this.bloom = bloomDecay(this.bloom, dt);
     // camera zoom (mobile held buttons; desktop wheel writes zoomDist directly)
     if (input.zoomIn) this.zoomDist = clamp(this.zoomDist - 5 * dt, 2.5, 9);
     if (input.zoomOut) this.zoomDist = clamp(this.zoomDist + 5 * dt, 2.5, 9);
@@ -281,6 +316,26 @@ export class Player {
     while (this.camYaw > Math.PI) this.camYaw -= Math.PI * 2;
     while (this.camYaw < -Math.PI) this.camYaw += Math.PI * 2;
     this.camPitch = clamp(this.camPitch - ldy * 0.0022, -1.15, 0.55);
+
+    // recoil recovery: the arms pull the muzzle back toward the point you
+    // were holding — most of the kick settles, the rest is real climb.
+    // Muscling the look yourself forgives most of what's owed.
+    if (Math.abs(ldx) > 6 || Math.abs(ldy) > 6) {
+      this.recoilDebtP *= 0.35;
+      this.recoilDebtY *= 0.35;
+    }
+    if (this.recoilDebtP !== 0) {
+      const r = recoveryStep(this.recoilDebtP, dt);
+      this.camPitch = clamp(this.camPitch - r, -1.15, 0.55);
+      this.recoilDebtP -= r;
+    }
+    if (this.recoilDebtY !== 0) {
+      const r = recoveryStep(this.recoilDebtY, dt);
+      this.camYaw -= r;
+      this.recoilDebtY -= r;
+      while (this.camYaw > Math.PI) this.camYaw -= Math.PI * 2;
+      while (this.camYaw < -Math.PI) this.camYaw += Math.PI * 2;
+    }
 
     this.meleeCd -= dt;
     this.rangedCd -= dt;
@@ -336,6 +391,7 @@ export class Player {
     // walls and furniture are solid
     resolveCollisions(this.pos, 0.45, ctx.colliders, this.pos.y);
     const moving = this.vel.length() > 0.6;
+    this.speedNorm = clamp(this.vel.length() / SPRINT_SPEED, 0, 1);
 
     // jump (edge) + gravity; the heightmap is the ground
     if (input.jump && this.grounded && !this.crouching && !wadeBlocksJump(groundHere)) {
@@ -509,43 +565,71 @@ export class Player {
       this.rig.rotation.y = Math.sin(this.walkPhase) * 0.09;
     }
 
-    // --- reload (R): timed; rounds move from the pack into the magazine ---
+    // --- aim blend: the gun comes up over adsTime seconds, not in a step.
+    // A reflex sight snaps it up; a bare scope takes its time. ---
     {
       const s = useGameStore.getState();
       const rInst = s.equipped.ranged ? s.inventory.find((i) => i.uid === s.equipped.ranged) : undefined;
       const rDef = rInst ? ITEMS[rInst.itemId] : undefined;
+      const target = !rDef ? 0 : this.aimLevel === 2 ? 1 : this.aimLevel === 1 ? 0.55 : 0;
+      const t = Math.max(0.05, (rDef?.adsTime ?? 0.25) * modAdsTimeMult(rInst?.mods ?? []));
+      const step = dt / t;
+      this.adsBlend += clamp(target - this.adsBlend, -step, step);
+    }
+
+    // --- reload (R): timed; rounds move from the pack into the magazine.
+    // Honest state: rounds only move on completion, so an interruption —
+    // sprinting off, taking a hit, swapping the weapon — loses nothing
+    // but the time. ---
+    {
+      const s = useGameStore.getState();
+      const rInst = s.equipped.ranged ? s.inventory.find((i) => i.uid === s.equipped.ranged) : undefined;
+      const rDef = rInst ? ITEMS[rInst.itemId] : undefined;
+      const hpNow = s.hp;
+      const hpDropped = this.lastHpSeen >= 0 && hpNow < this.lastHpSeen - 0.01;
+      this.lastHpSeen = hpNow;
       if (this.reloadT > 0) {
-        this.reloadT -= dt;
-        if (this.reloadT <= 0 && rInst && rDef?.magSize != null && rDef.ammoId) {
-          const cap = magSizeOf(rDef.magSize, rInst.mods ?? []);
-          const need = cap - (rInst.loaded ?? 0);
-          let moved = 0;
-          while (moved < need) {
-            const stack = [...useGameStore.getState().inventory]
-              .reverse()
-              .find((i) => i.itemId === rDef.ammoId && i.qty > 0);
-            if (!stack) break;
-            const take = Math.min(stack.qty, need - moved);
-            useGameStore.getState().removeItem(stack.uid, take);
-            moved += take;
-          }
-          if (moved > 0) {
-            useGameStore.getState().setLoaded(rInst.uid, (rInst.loaded ?? 0) + moved);
-            sfx.play('ui', { volume: 0.5 });
+        const swapped = this.reloadUid !== (s.equipped.ranged ?? null);
+        const sprinted = wantSprint && wishInput;
+        if (swapped || sprinted || hpDropped) {
+          this.reloadT = 0;
+          this.reloadUid = null;
+          if (!swapped) s.addToast('Reload interrupted.');
+        } else {
+          this.reloadT -= dt;
+          if (this.reloadT <= 0 && rInst && rDef?.magSize != null && rDef.ammoId) {
+            const cap = magSizeOf(rDef.magSize, rInst.mods ?? []);
+            const need = cap - (rInst.loaded ?? 0);
+            let moved = 0;
+            while (moved < need) {
+              const stack = [...useGameStore.getState().inventory]
+                .reverse()
+                .find((i) => i.itemId === rDef.ammoId && i.qty > 0);
+              if (!stack) break;
+              const take = Math.min(stack.qty, need - moved);
+              useGameStore.getState().removeItem(stack.uid, take);
+              moved += take;
+            }
+            if (moved > 0) {
+              useGameStore.getState().setLoaded(rInst.uid, (rInst.loaded ?? 0) + moved);
+              sfx.play('ui', { volume: 0.5 });
+            }
+            this.reloadUid = null;
           }
         }
       } else if (input.refuel && rInst && rDef?.magSize != null && rDef.ammoId) {
         const cap = magSizeOf(rDef.magSize, rInst.mods ?? []);
         if ((rInst.loaded ?? 0) < cap && s.inventory.some((i) => i.itemId === rDef.ammoId && i.qty > 0)) {
           this.reloadT = rDef.reloadSec ?? 1.8;
+          this.reloadUid = rInst.uid;
           sfx.play('ui', { volume: 0.35 });
           input.refuel = false;
         }
       }
     }
 
-    // --- attacks (blocked while guarding) ---
-    if (input.attackMelee && this.meleeCd <= 0 && this.blockBlend < 0.5) {
+    // --- attacks (blocked while guarding or mid-draw) ---
+    if (input.attackMelee && this.meleeCd <= 0 && this.blockBlend < 0.5 && this.drawT <= 0) {
       // leaning shifts the swing origin: you can hook a swing around a corner
       const camRight = new THREE.Vector3(Math.cos(this.camYaw), 0, -Math.sin(this.camYaw));
       const swingOrigin = this.pos.clone().addScaledVector(camRight, this.leanAmt * 0.55);
@@ -588,11 +672,17 @@ export class Player {
         if (res.kills > 0) useGameStore.getState().addSkillXp('combat', 10 * res.kills);
       }
     }
-    if (input.attackRanged && this.rangedCd <= 0 && this.blockBlend < 0.5) {
-      const rdef = equippedRangedDef();
+    const rangedEquipped = equippedRangedDef();
+    const wantFire =
+      input.attackRanged || (rangedEquipped?.fireMode === 'auto' && input.attackHeld);
+    if (wantFire && this.rangedCd <= 0 && this.blockBlend < 0.5 && this.drawT <= 0) {
+      const rdef = rangedEquipped;
       this.rangedCd = rdef?.cooldown ?? 0.4;
       this.recoilT = 0.16;
       const { eye, dir } = this.aim(ctx.camera);
+      const sway = rdef
+        ? swayOffset(this.timeS, rdef.sway ?? 0, this.stamina, this.crouching, this.aimLevel)
+        : { x: 0, y: 0 };
       const fired = tryRanged({
         husks: ctx.husks,
         emitNoise: ctx.emitNoise,
@@ -604,6 +694,10 @@ export class Player {
         flashMuzzle: () => this.flashMuzzle(),
         aimLevel: this.aimLevel,
         groundY: ctx.groundY,
+        adsBlend: this.adsBlend,
+        bloom: this.bloom,
+        moveSpeedNorm: this.speedNorm,
+        sway: { x: sway.x * this.adsBlend, y: sway.y * this.adsBlend },
         fx: ctx.fx
           ? {
               impact: (p, kind, damage, head) =>
@@ -612,6 +706,28 @@ export class Player {
             }
           : undefined,
       });
+      if (fired.fired && rdef) {
+        // the kick is real camera motion: climb now, settle most of it
+        // back over the next half-second (recovery runs by the look code)
+        const sNow = useGameStore.getState();
+        const rInst = sNow.equipped.ranged
+          ? sNow.inventory.find((i) => i.uid === sNow.equipped.ranged)
+          : undefined;
+        const kick = kickFor(
+          rdef.recoil ?? 0.012, rdef.recoilDrift ?? 0.004,
+          this.adsBlend, this.crouching, modRecoilMult(rInst?.mods ?? []), Math.random,
+        );
+        this.camPitch = clamp(this.camPitch + kick.pitch, -1.15, 0.55);
+        this.camYaw += kick.yaw;
+        this.recoilDebtP += kick.pitch * RECOIL_RECOVERABLE;
+        this.recoilDebtY += kick.yaw * 0.4;
+        this.bloom = bloomAdd(this.bloom, rdef.bloomPerShot ?? 0.1);
+        // firing mid-reload abandons it — the mag never got swapped
+        if (this.reloadT > 0) {
+          this.reloadT = 0;
+          this.reloadUid = null;
+        }
+      }
       if (fired.fired) {
         // muzzle smoke + a kicked-out casing: the shot leaves evidence
         if (ctx.fx) {
@@ -887,6 +1003,11 @@ export class Player {
   /** First-person arm: bob, swing thrust, and block guard. */
   private updateViewModel(dt: number, leanAmt: number): void {
     const vm = this.viewModel;
+    // draw raise: a freshly swapped weapon starts dipped at carry height
+    // and climbs to ready over its draw time (firing is gated meanwhile)
+    const dip = this.drawT > 0 ? (this.drawT / this.drawTotal) ** 2 : 0;
+    this.vmAnchor.position.y = -dip * 0.32;
+    this.vmAnchor.rotation.x = dip * 0.65;
     const bob = Math.abs(Math.cos(this.walkPhase)) * 0.018;
     if (this.aimLevel === 2) {
       // down the sights: gun centered, steady, no bob or swing theatrics
