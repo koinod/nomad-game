@@ -13,6 +13,10 @@ import type { InvItem } from '../store/types';
 import {
   accelFactor, collisionLossFactor, ramDamageFactor, sandFactor, topSpeedFactor, wearFactor,
 } from '../data/upgrades';
+import { box, chrome, darkTrim, glassTint, lampMat, loftMesh, mat, tailMat, tube } from './modelKit';
+import { buildStallion, applyStallionUpgrades } from './carModels';
+
+export { glassTint } from './modelKit';
 
 export interface VehicleDef {
   id: string;
@@ -84,7 +88,7 @@ export const VEHICLE_DEFS: VehicleDef[] = [
   { id: 'cargo_bob', name: 'CH-47 Cargo Bob', kind: 'heli', length: 15.5, width: 3.8, fuelMax: 400, burnClass: 5, topSpeed: 25, noiseDrive: 115, color: 0x6b7256, storageKg: 2400 },
   { id: 'little_bird', name: 'Scout Little Bird', kind: 'heli', length: 7, width: 1.9, fuelMax: 90, burnClass: 2, topSpeed: 40, noiseDrive: 85, color: 0x5c6650, storageKg: 60 },
   { id: 'sedan', name: 'Sedan', kind: 'car', length: 4.7, width: 1.8, fuelMax: 40, burnClass: 1.0, topSpeed: 21, noiseDrive: 45, color: 0x5a6a7a, storageKg: 70 },
-  { id: 'mustang', name: 'Mustang Dark Horse', kind: 'car', length: 4.8, width: 1.9, fuelMax: 45, burnClass: 1.1, topSpeed: 42, noiseDrive: 55, color: 0x2f4d7d, storageKg: 45 },
+  { id: 'mustang', name: 'Mustang Dark Horse', kind: 'car', length: 4.8, width: 1.9, fuelMax: 45, burnClass: 1.1, topSpeed: 42, noiseDrive: 55, color: 0x3a3f44, storageKg: 45 },
   { id: 'van', name: 'Utility Van', kind: 'car', length: 5.2, width: 2.0, fuelMax: 55, burnClass: 1.3, topSpeed: 19, noiseDrive: 50, color: 0xb8b8b0, storageKg: 260 },
   { id: 'sprinter', name: 'Sprinter Van', kind: 'car', length: 6.0, width: 2.05, fuelMax: 75, burnClass: 1.4, topSpeed: 18, noiseDrive: 48, color: 0x9aa4ac, storageKg: 380 },
   { id: 'v03_hauler', name: 'V-03 Hauler', kind: 'car', length: 5.6, width: 2.1, fuelMax: 65, burnClass: 1.5, topSpeed: 16.5, noiseDrive: 52, color: 0x2f3337, storageKg: 520 },
@@ -141,6 +145,10 @@ export interface Vehicle {
   hardLanding?: 'hard' | 'crash';
   upgradeGroup?: THREE.Group; // armor / racks / bullbar meshes
   cargoGroup?: THREE.Group; // loaded-crate meshes
+  /** Steering wheel spinner (modelKit.buildInterior) — drive() turns it. */
+  steerWheel?: THREE.Object3D;
+  /** Model variant of one def (the Stallion's 'fx' hero build). */
+  variant?: string;
 }
 
 export interface DriveEnv {
@@ -155,26 +163,8 @@ export interface DriveEnv {
   yawIn?: number;
 }
 
-const mat = (c: number, rough = 0.75, metal = 0.15) =>
-  new THREE.MeshStandardMaterial({ color: c, roughness: rough, metalness: metal });
 const glass = () =>
   new THREE.MeshStandardMaterial({ color: 0x2a3540, roughness: 0.15, metalness: 0.5 });
-
-/** Tinted, TRANSPARENT canopy/wheelhouse glass (the cockpit standard):
- *  you can see the modeled interior — and the pilot — through it. */
-export const glassTint = () =>
-  new THREE.MeshStandardMaterial({
-    color: 0x39505e, roughness: 0.08, metalness: 0.65,
-    transparent: true, opacity: 0.42, side: THREE.DoubleSide,
-  });
-
-function box(g: THREE.Group, w: number, h: number, d: number, m: THREE.Material, x = 0, y = 0, z = 0): THREE.Mesh {
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
-  mesh.position.set(x, y, z);
-  mesh.castShadow = true;
-  g.add(mesh);
-  return mesh;
-}
 
 function wheel(g: THREE.Group, r: number, w: number, x: number, y: number, z: number, spin: THREE.Object3D[], pivots?: THREE.Object3D[]): THREE.Group {
   const pivot = new THREE.Group();
@@ -199,16 +189,12 @@ function wheel(g: THREE.Group, r: number, w: number, x: number, y: number, z: nu
 // +Z is the nose. The Mustang branch stays as built from its sheet.
 // ---------------------------------------------------------------------------
 
-const darkTrim = () => mat(0x23272c, 0.9, 0.05);
-const chrome = () => mat(0x9aa2ac, 0.3, 0.8);
-const lampMat = () => mat(0xe8ecdf, 0.25, 0.1);
-const tailMat = () => mat(0x9e1622, 0.35, 0.1);
-
 function mirrors(g: THREE.Group, W: number, y: number, z: number, spread = 0.06): void {
   for (const sgn of [1, -1]) box(g, 0.08, 0.14, 0.12, darkTrim(), sgn * (W / 2 + spread), y, z);
 }
 
 function buildCarBody(g: THREE.Group, def: VehicleDef, v: Vehicle): void {
+  if (def.id === 'mustang') { buildStallion(g, def, v); return; } // CRAFT WAVE: lofted Stallion family
   const { length: L, width: W } = def;
   const color = def.id === 'semi' ? SEMI_PAINTS[v.colorPick % SEMI_PAINTS.length] : def.color;
   const body = mat(color, 0.55, 0.35);
@@ -957,58 +943,6 @@ function buildTug(g: THREE.Group, def: VehicleDef): void {
 // instrument panel with gauges, cyclic + collective), and the pilot seat
 // placed so the avatar reads through the glass.
 
-interface LoftSection { z: number; w: number; h: number; y: number }
-
-/** Sweep elliptical cross-sections into a smooth body shell. `arc`
- *  optionally limits the ring sweep (radians) for open glass bands. */
-function loftMesh(sections: LoftSection[], material: THREE.Material, arc?: [number, number]): THREE.Mesh {
-  const SEG = 16;
-  const a0 = arc ? arc[0] : 0;
-  const a1 = arc ? arc[1] : Math.PI * 2;
-  const wrap = !arc;
-  const positions: number[] = [];
-  const indices: number[] = [];
-  sections.forEach((s) => {
-    for (let i = 0; i <= SEG; i++) {
-      const a = a0 + ((a1 - a0) * i) / SEG;
-      positions.push(Math.cos(a) * s.w * 0.5, s.y + Math.sin(a) * s.h * 0.5, s.z);
-    }
-  });
-  const cols = SEG + 1;
-  for (let si = 0; si < sections.length - 1; si++) {
-    const last = wrap ? SEG : SEG - 1;
-    for (let i = 0; i <= last; i++) {
-      const a = si * cols + i;
-      const b = si * cols + ((i + 1) % cols);
-      const c = a + cols;
-      const d = b + cols;
-      indices.push(a, c, b, b, c, d);
-    }
-  }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geo.setIndex(indices);
-  geo.computeVertexNormals();
-  const mesh = new THREE.Mesh(geo, material);
-  (material as THREE.MeshStandardMaterial).side = THREE.DoubleSide;
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  return mesh;
-}
-
-/** A cylinder strut between two points (skids, struts, pitch links). */
-function tube(g: THREE.Group, ax: number, ay: number, az: number, bx: number, by: number, bz: number, r: number, material: THREE.Material): THREE.Mesh {
-  const a = new THREE.Vector3(ax, ay, az);
-  const b = new THREE.Vector3(bx, by, bz);
-  const len = a.distanceTo(b);
-  const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 8), material);
-  m.position.copy(a).lerp(b, 0.5);
-  m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.sub(a).normalize());
-  m.castShadow = true;
-  g.add(m);
-  return m;
-}
-
 function heliSeat(g: THREE.Group, x: number, y: number, z: number, fabric: THREE.Material, frame: THREE.Material): void {
   box(g, 0.52, 0.1, 0.5, fabric, x, y, z);
   const back = box(g, 0.52, 0.74, 0.1, fabric, x, y + 0.4, z - 0.27);
@@ -1386,7 +1320,7 @@ function buildLittleBird(g: THREE.Group, def: VehicleDef, v: Vehicle): void {
   void def;
 }
 
-function makeVehicle(def: VehicleDef, x: number, z: number, heading: number, groundY: (x: number, z: number) => number): Vehicle {
+function makeVehicle(def: VehicleDef, x: number, z: number, heading: number, groundY: (x: number, z: number) => number, variant?: string): Vehicle {
   const g = new THREE.Group();
   const v: Vehicle = {
     uid: def.id,
@@ -1415,6 +1349,7 @@ function makeVehicle(def: VehicleDef, x: number, z: number, heading: number, gro
     cargoCrates: 0,
     doors: [],
     loadedOn: null,
+    variant,
   };
   if (def.kind === 'skiff') {
     if (def.id === 'tug') buildTug(g, def);
@@ -1443,6 +1378,8 @@ export interface SpawnDef {
   /** Absolute deck height for vehicles parked aboard a structure (the
    *  carrier) — terrain height does not apply there. */
   y?: number;
+  /** Model variant (the Stallion FX hero car). */
+  variant?: string;
 }
 
 // AIRBASE wave: the fleet consolidates at the depot motor pool — two
@@ -1457,6 +1394,7 @@ const SPAWNS: SpawnDef[] = [
   // car row
   { id: 'sedan', poi: 'airbase', dx: -4, dz: 52, heading: Math.PI },
   { id: 'mustang', poi: 'airbase', dx: 3, dz: 52, heading: Math.PI },
+  { id: 'mustang', poi: 'airbase', dx: 58, dz: 52, heading: Math.PI, variant: 'fx' },
   { id: 'pickup', poi: 'airbase', dx: 10, dz: 52, heading: Math.PI },
   { id: 'bronco', poi: 'airbase', dx: 17, dz: 52, heading: Math.PI },
   { id: 'f250', poi: 'airbase', dx: 25, dz: 52, heading: Math.PI },
@@ -1496,7 +1434,7 @@ export class VehicleManager {
         // nudge seaward until the hull floats
         for (let i = 0; i < 12 && groundY(x, z) > -0.3; i++) x -= 8;
       }
-      const v = makeVehicle(def, x, z, s.heading, groundY);
+      const v = makeVehicle(def, x, z, s.heading, groundY, s.variant);
       if (s.y !== undefined) v.group.position.y = s.y; // parked on a deck, not terrain
       // duplicate hulls of one def (the carrier's second pickup/bronco)
       // need unique uids — storage, hitching, and the fleet list key on uid
@@ -1726,6 +1664,7 @@ export class VehicleManager {
     // wheels: spin by true rolling radius; front pivots show the real angle
     for (const w of v.wheelSpin) w.rotation.x += (v.speed / v.wheelR) * dt;
     for (const p of v.wheelPivots) p.rotation.y = -v.steerAngle;
+    if (v.steerWheel) v.steerWheel.rotation.z = -v.steerAngle * 2.3;
 
     this.finishDriveStep(dt, v, env, th, speedRatio);
   }
@@ -1893,6 +1832,11 @@ export class VehicleManager {
 
 /** Rebuild the visible upgrade hardware (armor, racks, bullbar, weapons). */
 export function applyUpgradeVisuals(v: Vehicle): void {
+  // the Stallion's roof turret is itself an upgrade visual — remove it first
+  if (v.def.id === 'mustang' && v.turret) {
+    v.group.remove(v.turret);
+    v.turret = undefined;
+  }
   if (v.upgradeGroup) {
     v.group.remove(v.upgradeGroup);
     v.upgradeGroup = undefined;
@@ -1906,6 +1850,13 @@ export function applyUpgradeVisuals(v: Vehicle): void {
   const { length: L, width: W } = v.def;
   const steel = mat(0x3d434b, 0.6, 0.5);
   const dark = darkTrim();
+  if (v.def.id === 'mustang') {
+    // Convoy Combat Edition: the upgrade tree made visible (carModels.ts)
+    applyStallionUpgrades(v, g);
+    v.group.add(g);
+    v.upgradeGroup = g;
+    return;
+  }
   if (v.upgrades.includes('armor')) {
     // welded plate over doors, hood, and quarters
     for (const sgn of [1, -1]) {

@@ -63,8 +63,9 @@ describe('canInstallUpgrade', () => {
     expect(canInstallUpgrade({ kind: 'car', id: 'tank' }, 'armor', [])).toBe(false);
   });
 
-  it('bullbar false for mustang (excluded)', () => {
-    expect(canInstallUpgrade({ kind: 'car', id: 'mustang' }, 'bullbar', [])).toBe(false);
+  it('bullbar installs on the mustang (Combat Edition ram bar), not the tank', () => {
+    expect(canInstallUpgrade({ kind: 'car', id: 'mustang' }, 'bullbar', [])).toBe(true);
+    expect(canInstallUpgrade({ kind: 'car', id: 'tank' }, 'bullbar', [])).toBe(false);
   });
 
   it('engine_tune false for bike (kind not allowed)', () => {
@@ -175,8 +176,9 @@ describe('wearFactor', () => {
 });
 
 describe('weapon mounts (Ian correction: Goliath 6x6 + tank tiers)', () => {
-  it('mg_mount installs on the goliath only', () => {
+  it('mg_mount installs on the goliath + the Stallion (roof pintle gun)', () => {
     expect(canInstallUpgrade({ kind: 'car', id: 'goliath' }, 'mg_mount', [])).toBe(true);
+    expect(canInstallUpgrade({ kind: 'car', id: 'mustang' }, 'mg_mount', [])).toBe(true);
     expect(canInstallUpgrade({ kind: 'car', id: 'pickup' }, 'mg_mount', [])).toBe(false);
     expect(canInstallUpgrade({ kind: 'car', id: 'tank' }, 'mg_mount', [])).toBe(false);
   });

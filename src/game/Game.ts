@@ -182,7 +182,9 @@ export class Game {
       // would stack every save entry onto the first hull.
       const usedVeh = new Set<string>();
       for (const vs of snap.vehicles ?? []) {
-        const v = this.vehicles.vehicles.find((x) => !usedVeh.has(x.uid) && x.def.id === (vs.defId === 'apc' ? 'goliath' : vs.defId));
+        const wantId = vs.defId === 'apc' ? 'goliath' : vs.defId;
+        const v = this.vehicles.vehicles.find((x) => !usedVeh.has(x.uid) && x.def.id === wantId && x.variant === vs.variant)
+          ?? this.vehicles.vehicles.find((x) => !usedVeh.has(x.uid) && x.def.id === wantId);
         if (!v) continue;
         usedVeh.add(v.uid);
         v.group.position.set(vs.x, vs.y, vs.z);
@@ -436,6 +438,7 @@ export class Game {
       tiresFlat: v.tiresFlat,
       colorPick: v.colorPick,
       cargoCrates: v.cargoCrates,
+      variant: v.variant,
     }));
   }
 
@@ -702,7 +705,7 @@ export class Game {
       s.setFleet(
         this.vehicles.vehicles.map((v) => ({
           defId: v.def.id,
-          name: v.def.name,
+          name: v.def.name + (v.variant === 'fx' ? ' FX' : ''),
           fuelPct: Math.round((v.fuel / v.def.fuelMax) * 100),
           condPct: Math.round(v.condition * 100),
           dist: Math.round(Math.hypot(v.group.position.x - player.pos.x, v.group.position.z - player.pos.z)),
@@ -1267,7 +1270,7 @@ export class Game {
     this.updateVehicleWeapons(dt, v, s);
     s.setVehicle({
       uid: v.uid,
-      name: v.def.name,
+      name: v.def.name + (v.variant === 'fx' ? ' FX' : ''),
       speedKmh: Math.round(Math.abs(v.speed) * 3.6),
       fuelPct: v.fuel / v.def.fuelMax,
       condPct: v.condition,
@@ -1291,7 +1294,7 @@ export class Game {
     const s = useGameStore.getState();
     s.setVehicle({
       uid: v.uid,
-      name: v.def.name,
+      name: v.def.name + (v.variant === 'fx' ? ' FX' : ''),
       speedKmh: 0,
       fuelPct: v.fuel / v.def.fuelMax,
       condPct: v.condition,

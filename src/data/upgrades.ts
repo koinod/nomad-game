@@ -17,11 +17,11 @@ export const UPGRADES: UpgradeDef[] = [
   { id: 'armor', name: 'Armor Plating', desc: 'Welded plate over the vitals. Collision and wear damage cut hard.', cost: [{ itemId: 'armor_plate', qty: 2 }, { itemId: 'scrap', qty: 4 }], kinds: ['car'], excludeIds: ['tank'] },
   { id: 'engine_tune', name: 'Engine Tune', desc: 'Timing, injectors, a freer exhaust. +12% top speed, stronger pull.', cost: [{ itemId: 'gun_parts', qty: 4 }, { itemId: 'engine_part', qty: 1 }], kinds: ['car', 'atv'] },
   { id: 'cargo_racks', name: 'Cargo Racks', desc: 'Roof rack, bed rails, tie-downs. Storage capacity +60%.', cost: [{ itemId: 'scrap', qty: 4 }, { itemId: 'wood', qty: 2 }], kinds: ['car', 'atv'] },
-  { id: 'bullbar', name: 'Bullbar', desc: 'A welded push bar. Ramming hurts them a lot more than it hurts you.', cost: [{ itemId: 'scrap', qty: 5 }], kinds: ['car'], excludeIds: ['mustang', 'tank'] },
+  { id: 'bullbar', name: 'Bullbar', desc: 'A welded push bar. Ramming hurts them a lot more than it hurts you.', cost: [{ itemId: 'scrap', qty: 5 }], kinds: ['car'], excludeIds: ['tank'] },
   { id: 'lift_kit', name: 'Lift Kit', desc: 'Raised suspension and clearance. Sand barely slows you; body sits higher.', cost: [{ itemId: 'scrap', qty: 4 }, { itemId: 'engine_part', qty: 1 }], kinds: ['car', 'atv'], excludeIds: ['mustang', 'tank'] },
   { id: 'run_flats', name: 'Run-Flat Tires', desc: 'Reinforced sidewalls. A blown tire stops being a thing that happens to you.', cost: [{ itemId: 'tire', qty: 2 }], kinds: ['car', 'atv'], excludeIds: ['tank'] },
   // Goliath 6x6 weapon mounts (mutually exclusive — one ring, one weapon)
-  { id: 'mg_mount', name: 'MG Mount', desc: 'A ring-mounted machine gun on the Goliath. Fire it from the driver\u2019s seat.', cost: [{ itemId: 'gun_parts', qty: 6 }, { itemId: 'scrap', qty: 3 }], kinds: ['car'], onlyIds: ['goliath'], group: 'mount' },
+  { id: 'mg_mount', name: 'MG Mount', desc: 'A ring-mounted machine gun on the Goliath. Fire it from the driver\u2019s seat.', cost: [{ itemId: 'gun_parts', qty: 6 }, { itemId: 'scrap', qty: 3 }], kinds: ['car'], onlyIds: ['goliath', 'mustang'], group: 'mount' },
   { id: 'cannon_40', name: '40mm Cannon', desc: 'A turreted 40mm cannon for the Goliath. Slow, deafening, decisive.', cost: [{ itemId: 'gun_parts', qty: 10 }, { itemId: 'engine_part', qty: 1 }, { itemId: 'scrap', qty: 4 }], kinds: ['car'], onlyIds: ['goliath'], group: 'mount' },
   // Tank tiers (its main cannon is integral; these extend it)
   { id: 'tank_coax', name: 'Coax Machine Gun', desc: 'A coaxial MG beside the tank\u2019s main gun. For the small problems.', cost: [{ itemId: 'gun_parts', qty: 5 }, { itemId: 'scrap', qty: 2 }], kinds: ['car'], onlyIds: ['tank'] },

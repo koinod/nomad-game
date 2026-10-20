@@ -189,6 +189,7 @@ export interface VehicleSave {
   tiresFlat?: number;
   colorPick?: number;
   cargoCrates?: number;
+  variant?: string; // model variant of one def (the Stallion 'fx')
 }
 
 /** A trailer's persisted state (v3). */
