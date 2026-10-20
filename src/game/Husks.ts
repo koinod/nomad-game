@@ -551,6 +551,17 @@ export class HuskManager {
     }
   }
 
+  /** Live husks within a radius — the base-claim gate reads this. */
+  aliveWithin(x: number, z: number, radius: number): number {
+    let n = 0;
+    for (const h of this.husks) {
+      if (!h.alive) continue;
+      const c = h.group.position;
+      if (Math.hypot(c.x - x, c.z - z) <= radius) n++;
+    }
+    return n;
+  }
+
   update(dt: number, ctx: HuskCtx, playerPos: THREE.Vector3, isNight: boolean): void {
     const full: HuskCtx = { ...ctx, playerPos, isNight };
     for (let i = this.husks.length - 1; i >= 0; i--) {

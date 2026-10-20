@@ -5,6 +5,7 @@ import { QUESTS } from '../data/quests';
 import { FACTIONS, repTier } from '../data/factions';
 import { SKILLS, TREES, PERKS, xpToNext } from '../data/skills';
 import { traitName, moraleBand, type SurvivorJob } from '../data/survivors';
+import { FACILITIES, baseHeat, heatBand } from '../data/base';
 import { carryLimitKg, encumbranceTier, totalWeightKg } from '../store/inventoryUtils';
 import { DIFFICULTIES } from '../store/types';
 import type { PhoneTab } from '../store/types';
@@ -291,6 +292,72 @@ function WorldMap() {
 
 /* ---------------- COMMAND tab ---------------- */
 
+function BaseSection() {
+  const base = useGameStore((s) => s.base);
+  const buildFacility = useGameStore((s) => s.buildFacility);
+  const inventory = useGameStore((s) => s.inventory);
+  const survivors = useGameStore((s) => s.survivors);
+  const daysElapsed = useGameStore((s) => s.daysElapsed);
+
+  if (!base) {
+    return (
+      <section>
+        <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Base</h3>
+        <p className="text-sm text-[#8a94a3]">
+          No home base. Clear a camp and use its gold claim post — Shore Camp, Jonah's Camp, or the
+          Lighthouse Grounds. A base produces daily and gives your crew somewhere to be.
+        </p>
+      </section>
+    );
+  }
+  const heat = baseHeat(base.facilities, survivors.length, daysElapsed);
+  const count = (id: string) => inventory.filter((i) => i.itemId === id).reduce((a, i) => a + i.qty, 0);
+  return (
+    <section>
+      <h3 className="mb-2 flex items-center justify-between text-xs font-semibold text-[#8a94a3]">
+        Base — {base.poiId.replace(/_/g, ' ')}
+        <span className={heat >= 60 ? 'text-[#d9534f]' : heat >= 30 ? 'text-[#e8b34b]' : 'text-[#5aa469]'}>
+          Heat {heat} · {heatBand(heat)}
+        </span>
+      </h3>
+      <p className="mb-2 text-[11px] text-[#8a94a3]">
+        Heat = stockpile + crew + time, minus defenses. At 30/60 the island starts paying attention —
+        sieges are still coming (Phase 3), so build walls before you need them.
+      </p>
+      <div className="flex flex-col gap-1.5">
+        {FACILITIES.map((f) => {
+          const owned = base.facilities.includes(f.id);
+          const afford = f.cost.every((c) => count(c.itemId) >= c.qty);
+          return (
+            <div key={f.id} className={`flex items-start justify-between gap-2 rounded border p-2 ${owned ? 'border-[#5aa469] bg-[#101812]' : 'border-[#232b36] bg-[#0b0e12]'}`}>
+              <div>
+                <div className="text-xs font-medium text-[#d7dde5]">{f.name}</div>
+                <div className="text-[11px] text-[#8a94a3]">{f.desc}</div>
+                {!owned && f.cost.length > 0 && (
+                  <div className="mt-0.5 text-[11px] text-[#8a94a3]">
+                    Cost: {f.cost.map((c) => `${c.qty}× ${ITEMS[c.itemId]?.name ?? c.itemId} (${count(c.itemId)})`).join(', ')}
+                  </div>
+                )}
+              </div>
+              {owned ? (
+                <span className="shrink-0 text-[11px] text-[#5aa469]">Built</span>
+              ) : (
+                <button
+                  onClick={() => { sfx.play('ui'); buildFacility(f.id); }}
+                  disabled={!afford}
+                  className="shrink-0 rounded border border-[#232b36] px-2 py-1 text-[11px] text-[#e8b34b] transition-colors hover:border-[#e8b34b] disabled:opacity-40"
+                >
+                  Build
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function CommandTab() {
   const quests = useGameStore((s) => s.quests);
   const doneQuests = useGameStore((s) => s.doneQuests);
@@ -305,6 +372,7 @@ function CommandTab() {
 
   return (
     <div className="nomad-scroll flex h-full flex-col gap-4 overflow-y-auto">
+      <BaseSection />
       {/* quests */}
       <section>
         <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Quests</h3>

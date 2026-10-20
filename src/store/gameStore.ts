@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { ITEMS, FIELD_RECIPES, STATION_RECIPES, STATION_LABEL } from '../data/items';
 import { PERKS as PERKS_ALL } from '../data/skills';
 import { MODS as MODS_ALL, magSizeOf } from '../data/mods';
+import { FACILITIES as FACILITY_DEFS } from '../data/base';
 import { TRAITS as TRAIT_DEFS } from '../data/survivors';
 import { QUESTS } from '../data/quests';
 import { DIFFICULTIES } from './types';
@@ -41,6 +42,8 @@ interface GameState {
   maxStamina: number;
   pos: [number, number, number];
   timeMinutes: number; // world clock, 0..1440
+  daysElapsed: number;
+  advanceDay: () => void;
   playSeconds: number;
 
   // inventory
@@ -97,6 +100,12 @@ interface GameState {
   recruitSurvivor: (def: import('../data/survivors').SurvivorDef) => void;
   assignJob: (id: string, job: import('../data/survivors').SurvivorJob) => void;
   moraleTick: () => void;
+
+  // base management (BASE_DESIGN)
+  base: { poiId: string; facilities: string[] } | null;
+  claimBase: (poiId: string) => void;
+  buildFacility: (facilityId: string) => void;
+  baseTick: () => void;
 
   // hold-to-search: active search of a container / corpse / safe
   search: { id: string; label: string; frac: number } | null;
@@ -208,6 +217,7 @@ export const useGameStore = create<GameState>()((set, get) => {
     hp: 100, maxHp: 100, stamina: 100, maxStamina: 100,
     pos: [0, 0, 0],
     timeMinutes: 480, // 08:00
+    daysElapsed: 0,
     playSeconds: 0,
 
     inventory: [],
@@ -262,6 +272,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         paused: false,
         hp: 100, stamina: 100,
         timeMinutes: 480,
+        daysElapsed: 0,
         playSeconds: 0,
         inventory: [], equipped: { ...initialEquipped }, hotbar: [null, null, null],
         quests: [{ id: 'q_prologue', stepIndex: 0, progress: 0 }],
@@ -322,6 +333,8 @@ export const useGameStore = create<GameState>()((set, get) => {
       if (s.restedMinutesLeft > 0 && rested === 0) s.addToast('The well-rested feeling fades.');
       set({ timeMinutes: (s.timeMinutes + minutes) % 1440, restedMinutesLeft: rested });
     },
+
+    advanceDay: () => set((s) => ({ daysElapsed: s.daysElapsed + 1 })),
 
     addItem: (itemId, qty, quiet) => {
       const def = ITEMS[itemId];
@@ -715,6 +728,73 @@ export const useGameStore = create<GameState>()((set, get) => {
         return { ...x, morale: Math.max(0, Math.min(100, x.morale + d)) };
       });
       set({ survivors: next });
+    },
+
+    base: null,
+    claimBase: (poiId) => {
+      const s = get();
+      if (s.base) {
+        s.addToast('You already hold a home base. (Relocating comes later.)');
+        return;
+      }
+      set({ base: { poiId, facilities: ['command_post'] } });
+      s.setFlag('base_claimed');
+      s.addToast('Base claimed. Build it up from the sat phone → Command.');
+      s.addSkillXp('leadership', 10);
+      sfx.play('quest', { volume: 0.6 });
+    },
+    buildFacility: (facilityId) => {
+      const s = get();
+      const b = s.base;
+      if (!b) return;
+      const def = FACILITY_DEFS.find((f) => f.id === facilityId);
+      if (!def || b.facilities.includes(facilityId)) return;
+      for (const c of def.cost) {
+        if (s.countItem(c.itemId) < c.qty) {
+          s.addToast(`Needs ${c.qty}× ${ITEMS[c.itemId]?.name ?? c.itemId}.`);
+          return;
+        }
+      }
+      for (const c of def.cost) {
+        let left = c.qty;
+        while (left > 0) {
+          const it = [...get().inventory].reverse().find((i) => i.itemId === c.itemId);
+          if (!it) break;
+          const take = Math.min(it.qty, left);
+          s.removeItem(it.uid, take);
+          left -= take;
+        }
+      }
+      set({ base: { ...b, facilities: [...b.facilities, facilityId] } });
+      s.addToast(`Built: ${def.name}.`);
+      s.addSkillXp('leadership', 2);
+      sfx.play('craft', { volume: 0.5 });
+    },
+    baseTick: () => {
+      const s = get();
+      const b = s.base;
+      if (!b) return;
+      const made: string[] = [];
+      const f = b.facilities;
+      if (f.includes('rain_collector')) {
+        s.addItem('water_bottle', 1, true);
+        made.push('1 water');
+      }
+      if (f.includes('garden')) {
+        const qty = s.survivors.some((x) => x.job === 'Farmer') ? 4 : 2;
+        s.addItem('produce', qty, true);
+        made.push(`${qty} produce`);
+      }
+      if (f.includes('salvage_rig')) {
+        s.addItem('scrap', 1, true);
+        made.push('1 scrap');
+      }
+      if (f.includes('infirmary') && s.survivors.length > 0) {
+        set({
+          survivors: get().survivors.map((x) => ({ ...x, hp: Math.min(130, x.hp + 20) })),
+        });
+      }
+      if (made.length > 0) s.addToast(`Base produced: ${made.join(', ')}.`);
     },
 
     openPhone: (tab) => {

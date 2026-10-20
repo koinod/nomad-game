@@ -205,6 +205,7 @@ export class Game {
         markCleared: (id) => { this.cleared.add(id); },
         setLastSafe: (x, z) => { this.lastSafe = [x, z]; },
         setCamp: (id) => { this.lastCampId = id; },
+        hostilesNear: (x, z, r) => this.husks?.aliveWithin(x, z, r) ?? 0,
       },
       this.world.poiPositions,
       [...buildContainerDefs(this.world.poiPositions), ...this.world.houses.containers, ...this.world.poiBuildings.containers],
@@ -523,7 +524,11 @@ export class Game {
       s.advanceTime(this.timeT);
       this.timeT = 0;
       // a new day (clock wrapped past midnight): crew morale settles
-      if (s.timeMinutes < before) s.moraleTick();
+      if (s.timeMinutes < before) {
+        s.advanceDay();
+        s.moraleTick();
+        s.baseTick();
+      }
     }
 
     // crafting-station proximity: stand within 4.5m of a station to use it

@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { useGameStore } from '../store/gameStore';
 import { ITEMS, HUSK_LOOT, LOG_LOOT, BUSH_LOOT } from '../data/items';
 import { DESIGNED_RECRUITS } from '../data/survivors';
+import { CLAIMABLE } from '../data/base';
 import { buildGroundMesh } from './weaponMeshes';
 import { buildFurnitureMesh, FURNITURE_LABEL, type FurnitureKind } from './furnitureMeshes';
 import { sfx } from '../systems/audio';
@@ -42,6 +43,7 @@ export interface InteractHooks {
   markCleared: (id: string) => void;
   setLastSafe: (x: number, z: number) => void;
   setCamp?: (poiId: string) => void; // which campfire opened the sleep dialog
+  hostilesNear?: (x: number, z: number, r: number) => number; // base-claim gate
 }
 
 export interface Interactable {
@@ -249,6 +251,47 @@ export class InteractSystem {
           s.addToast(r.line);
           s.recruitSurvivor({ ...def });
           sfx.play('quest', { volume: 0.5 });
+        },
+      });
+    }
+
+    // ---- claim posts: take a camp as your home base (BASE_DESIGN) ----
+    for (const c of CLAIMABLE) {
+      const [px, pz] = at(c.poiId);
+      const x = px - 4;
+      const z = pz + 6;
+      const y = hooks.groundY(x, z);
+      const post = new THREE.Group();
+      const pole = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.06, 0.08, 2.6, 8),
+        new THREE.MeshStandardMaterial({ color: 0x6a5136, roughness: 0.9 }),
+      );
+      pole.position.y = 1.3;
+      post.add(pole);
+      const banner = new THREE.Mesh(
+        new THREE.BoxGeometry(0.9, 0.55, 0.05),
+        new THREE.MeshStandardMaterial({ color: 0xe8b34b, roughness: 0.7, emissive: 0x442e08 }),
+      );
+      banner.position.set(0.45, 2.2, 0);
+      post.add(banner);
+      post.position.set(x, y, z);
+      hooks.scene.add(post);
+      this.interactables.push({
+        id: `claim:${c.poiId}`,
+        kind: 'switch',
+        pos: post.position.clone(),
+        label: `Claim ${c.name} as home base`,
+        use: () => {
+          if (s.base) {
+            s.addToast(`Your home base is already claimed.`);
+            return;
+          }
+          const hostiles = hooks.hostilesNear?.(x, z, 40) ?? 0;
+          if (hostiles > 0) {
+            s.addToast(`Clear the camp first — ${hostiles} husk${hostiles > 1 ? 's' : ''} nearby.`);
+            return;
+          }
+          s.claimBase(c.poiId);
         },
       });
     }
