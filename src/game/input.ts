@@ -6,6 +6,8 @@ export interface InputState {
   lookDX: number; // accumulated pixels, consumed per tick
   lookDY: number;
   sprint: boolean;
+  jump: boolean; // edge-triggered
+  crouch: boolean; // held
   attackMelee: boolean; // edge-triggered: set true on press, controller clears
   attackRanged: boolean; // edge-triggered
   interact: boolean; // edge-triggered
@@ -21,6 +23,8 @@ export const input: InputState = {
   lookDX: 0,
   lookDY: 0,
   sprint: false,
+  jump: false,
+  crouch: false,
   attackMelee: false,
   attackRanged: false,
   interact: false,
@@ -39,6 +43,7 @@ export function consumeLook(): [number, number] {
 }
 
 export function resetEdgeTriggers(): void {
+  input.jump = false;
   input.attackMelee = false;
   input.attackRanged = false;
   input.interact = false;

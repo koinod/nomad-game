@@ -531,6 +531,14 @@ export class Game {
       case 'ShiftRight':
         input.sprint = true;
         break;
+      case 'Space':
+        input.jump = true;
+        break;
+      case 'KeyC':
+      case 'ControlLeft':
+      case 'ControlRight':
+        input.crouch = true;
+        break;
       case 'KeyE':
         input.interact = true;
         break;
@@ -567,6 +575,9 @@ export class Game {
     this.keys.delete(e.code);
     if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
       input.sprint = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
+    }
+    if (e.code === 'KeyC' || e.code === 'ControlLeft' || e.code === 'ControlRight') {
+      input.crouch = this.keys.has('KeyC') || this.keys.has('ControlLeft') || this.keys.has('ControlRight');
     }
     this.applyMoveKeys();
   }

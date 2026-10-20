@@ -14,6 +14,8 @@ function fmtDate(ts: number): string {
 const CONTROLS: [string, string][] = [
   ['Move', 'WASD or arrow keys'],
   ['Sprint', 'Hold Shift'],
+  ['Jump', 'Space'],
+  ['Crouch (quiet)', 'C or Ctrl'],
   ['Look', 'Click the world to capture the mouse'],
   ['Interact', 'E'],
   ['Melee', 'F or left click'],

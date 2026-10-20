@@ -6,6 +6,7 @@ import { tryMelee, tryRanged } from './Combat';
 import { sfx } from '../systems/audio';
 import type { HuskManager } from './Husks';
 import { clamp, lerp } from './rng';
+import { useGameStore } from '../store/gameStore';
 
 export interface PlayerCtx {
   groundY: (x: number, z: number) => number;
@@ -18,7 +19,12 @@ export interface PlayerCtx {
 
 const WALK_SPEED = 4.9;
 const SPRINT_SPEED = 8.8;
+const CROUCH_SPEED = 2.3;
 const CAM_DIST = 6.4;
+const JUMP_VEL = 5.6;
+const GRAVITY = 20;
+const ACCEL_GROUND = 11;
+const ACCEL_AIR = 3.2;
 
 export class Player {
   readonly group = new THREE.Group();
@@ -45,6 +51,11 @@ export class Player {
   private idleT = 0;
   private attackT = 0; // melee swing timer (arm anim)
   private recoilT = 0; // ranged recoil timer (arm anim)
+  private vel = new THREE.Vector3(); // horizontal velocity (smoothed)
+  private vy = 0; // vertical velocity
+  private grounded = true;
+  private crouching = false;
+  private landDip = 0; // camera dip on hard landing, decays
 
   constructor(scene: THREE.Scene) {
     this.buildMesh();
@@ -126,26 +137,30 @@ export class Player {
       if (this.muzzleT <= 0) this.muzzle.intensity = 0;
     }
 
-    // --- movement ---
+    // --- movement: smoothed velocity, jump, crouch ---
     const mx = clamp(input.moveX, -1, 1);
     const mz = clamp(input.moveY, -1, 1);
-    const moving = Math.abs(mx) > 0.05 || Math.abs(mz) > 0.05;
-    const wantSprint = input.sprint && ctx.sprintAllowed && this.stamina > 1 && mz > 0.1;
-    const sprinting = wantSprint && moving;
+    const wishInput = Math.abs(mx) > 0.05 || Math.abs(mz) > 0.05;
+    this.crouching = input.crouch && this.grounded;
+    const wantSprint = input.sprint && ctx.sprintAllowed && this.stamina > 1 && mz > 0.1 && !this.crouching;
+    const sprinting = wantSprint && wishInput;
 
     let speed = WALK_SPEED * ctx.speedMul;
     if (sprinting) speed = SPRINT_SPEED * ctx.speedMul;
+    else if (this.crouching) speed = CROUCH_SPEED * ctx.speedMul;
 
-    if (moving) {
-      // camera-relative wish direction: forward = (sin yaw, cos yaw),
-      // right = (-cos yaw, sin yaw). (Both axes were negated before — W walked backward.)
-      const sin = Math.sin(this.camYaw);
-      const cos = Math.cos(this.camYaw);
+    // camera-relative wish direction: forward = (sin yaw, cos yaw),
+    // right = (-cos yaw, sin yaw). (Both axes were negated before — W walked backward.)
+    const sin = Math.sin(this.camYaw);
+    const cos = Math.cos(this.camYaw);
+    let wishX = 0;
+    let wishZ = 0;
+    if (wishInput) {
       const wx = mz * sin - mx * cos;
       const wz = mz * cos + mx * sin;
       const len = Math.hypot(wx, wz) || 1;
-      this.pos.x += (wx / len) * speed * dt;
-      this.pos.z += (wz / len) * speed * dt;
+      wishX = (wx / len) * speed;
+      wishZ = (wz / len) * speed;
       // face travel direction
       const targetYaw = Math.atan2(wx, wz);
       let d = targetYaw - this.yaw;
@@ -153,27 +168,73 @@ export class Player {
       while (d < -Math.PI) d += Math.PI * 2;
       this.yaw += d * Math.min(1, dt * 10);
       this.group.rotation.y = this.yaw;
+    }
+    // smooth accel toward wish velocity: snappy on ground, drifty in air
+    const accel = this.grounded ? ACCEL_GROUND : ACCEL_AIR;
+    const vk = Math.min(1, dt * accel);
+    this.vel.x = lerp(this.vel.x, wishX, vk);
+    this.vel.z = lerp(this.vel.z, wishZ, vk);
+    this.pos.x += this.vel.x * dt;
+    this.pos.z += this.vel.z * dt;
+    const moving = this.vel.length() > 0.6;
 
+    // jump (edge) + gravity; the heightmap is the ground
+    if (input.jump && this.grounded && !this.crouching) {
+      this.vy = JUMP_VEL;
+      this.grounded = false;
+      sfx.play('step', { volume: 0.4 });
+    }
+    if (!this.grounded) {
+      this.vy -= GRAVITY * dt;
+      this.pos.y += this.vy * dt;
+      const gy = Math.max(ctx.groundY(this.pos.x, this.pos.z), -0.5);
+      if (this.pos.y <= gy) {
+        this.pos.y = gy;
+        if (this.vy < -13) {
+          // hard fall: damage scales past the safe threshold, camera dips
+          const dmg = Math.round((-this.vy - 13) * 6);
+          useGameStore.getState().damagePlayer(dmg, 'fall');
+          this.landDip = Math.min(0.35, 0.1 + dmg * 0.004);
+          sfx.play('hurt', { volume: 0.5 });
+        } else if (this.vy < -6) {
+          this.landDip = 0.08;
+          sfx.play('step', { volume: 0.5 });
+        }
+        this.vy = 0;
+        this.grounded = true;
+      }
+    } else {
+      // glued to terrain when grounded (walk off a ledge -> next tick we're airborne)
+      const gy = Math.max(ctx.groundY(this.pos.x, this.pos.z), -0.5);
+      if (this.pos.y > gy + 0.02) this.grounded = false; // walked off something
+      else this.pos.y = gy;
+    }
+    this.landDip = lerp(this.landDip, 0, Math.min(1, dt * 7));
+
+    if (moving) {
       // locomotion cycle: limbs swing from hip/shoulder pivots
-      this.walkPhase += dt * (sprinting ? 13 : 9);
+      this.walkPhase += dt * (sprinting ? 13 : this.crouching ? 6 : 9);
       const sw = Math.sin(this.walkPhase);
-      const amp = sprinting ? 0.68 : 0.52;
+      const amp = sprinting ? 0.68 : this.crouching ? 0.34 : 0.52;
       this.legL.rotation.x = sw * amp;
       this.legR.rotation.x = -sw * amp;
       this.armL.rotation.x = -sw * amp * 0.75;
       this.armR.rotation.x = sw * amp * 0.75;
-      // body bob on the rig, forward lean when sprinting, roll into strafes
-      this.rig.position.y = Math.abs(Math.cos(this.walkPhase)) * (sprinting ? 0.085 : 0.05);
-      this.leanF = lerp(this.leanF, sprinting ? 0.17 : 0.05, Math.min(1, dt * 6));
+      // body bob on the rig, forward lean when sprinting, roll into strafes,
+      // and ride low when crouching
+      const crouchDrop = lerp(this.rig.userData.crouchDrop ?? 0, this.crouching ? 0.42 : 0, Math.min(1, dt * 10));
+      this.rig.userData.crouchDrop = crouchDrop;
+      this.rig.position.y = Math.abs(Math.cos(this.walkPhase)) * (sprinting ? 0.085 : 0.05) - crouchDrop;
+      this.leanF = lerp(this.leanF, sprinting ? 0.17 : this.crouching ? 0.22 : 0.05, Math.min(1, dt * 6));
       this.leanS = lerp(this.leanS, -mx * 0.07, Math.min(1, dt * 6));
       this.rig.rotation.x = this.leanF;
       this.rig.rotation.z = this.leanS;
 
-      // footsteps + locomotion noise
-      this.stepAcc += speed * dt;
+      // footsteps + locomotion noise (crouching is quiet)
+      this.stepAcc += this.vel.length() * dt;
       if (this.stepAcc > 2.4) {
         this.stepAcc = 0;
-        sfx.play('step', { volume: sprinting ? 0.5 : 0.28 });
+        sfx.play('step', { volume: sprinting ? 0.5 : this.crouching ? 0.12 : 0.28 });
       }
       this.walkNoiseT -= dt;
       this.sprintNoiseT -= dt;
@@ -182,13 +243,15 @@ export class Player {
         ctx.emitNoise(this.pos.x, this.pos.z, 14);
       } else if (!sprinting && this.walkNoiseT <= 0) {
         this.walkNoiseT = 2.5;
-        ctx.emitNoise(this.pos.x, this.pos.z, 6);
+        ctx.emitNoise(this.pos.x, this.pos.z, this.crouching ? 3 : 6);
       }
     } else {
-      // idle: settle the limbs, breathe
+      // idle: settle the limbs, breathe (stay low if crouching)
       this.idleT += dt;
-      this.rig.position.y = Math.sin(this.idleT * 2.1) * 0.015;
-      this.leanF = lerp(this.leanF, 0, Math.min(1, dt * 6));
+      const crouchDrop = lerp(this.rig.userData.crouchDrop ?? 0, this.crouching ? 0.42 : 0, Math.min(1, dt * 10));
+      this.rig.userData.crouchDrop = crouchDrop;
+      this.rig.position.y = Math.sin(this.idleT * 2.1) * 0.015 - crouchDrop;
+      this.leanF = lerp(this.leanF, this.crouching ? 0.22 : 0, Math.min(1, dt * 6));
       this.leanS = lerp(this.leanS, 0, Math.min(1, dt * 6));
       this.rig.rotation.x = this.leanF;
       this.rig.rotation.z = this.leanS;
@@ -205,10 +268,6 @@ export class Player {
       const regen = moving ? 4.5 : 10;
       this.stamina = Math.min(100, this.stamina + regen * dt);
     }
-
-    // clamp to terrain (walk off ledges is fine — we just snap down)
-    const gy = ctx.groundY(this.pos.x, this.pos.z);
-    this.pos.y = lerp(this.pos.y, Math.max(gy, -0.5), Math.min(1, dt * 14));
 
     // --- attack animation (right-arm override, after locomotion) ---
     if (this.attackT > 0) {
@@ -258,7 +317,8 @@ export class Player {
 
     // --- third-person camera ---
     const cam = ctx.camera;
-    const target = new THREE.Vector3(this.pos.x, this.pos.y + 1.9, this.pos.z);
+    const camH = (this.crouching ? 1.35 : 1.9) - this.landDip;
+    const target = new THREE.Vector3(this.pos.x, this.pos.y + camH, this.pos.z);
     const cp = Math.cos(this.camPitch);
     const off = new THREE.Vector3(
       -Math.sin(this.camYaw) * cp,

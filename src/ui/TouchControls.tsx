@@ -118,6 +118,7 @@ export default function TouchControls() {
   const joyBaseRef = useRef<HTMLDivElement | null>(null);
   const joyId = useRef<number | null>(null);
   const [knob, setKnob] = useState({ x: 0, y: 0 });
+  const [crouchOn, setCrouchOn] = useState(false);
   const lookId = useRef<number | null>(null);
   const lookLast = useRef({ x: 0, y: 0 });
 
@@ -220,6 +221,19 @@ export default function TouchControls() {
 
       {/* combat cluster: right side, PUBG-style big FIRE */}
       <div className="absolute bottom-28 right-6 flex items-end gap-3">
+        <div className="flex flex-col gap-3">
+          <ControlButton label="JUMP" ariaLabel="Jump" onPress={() => { input.jump = true; }} />
+          <ControlButton
+            label="CRCH"
+            ariaLabel="Toggle crouch"
+            className={crouchOn ? 'border-[#e8b34b] text-[#e8b34b]' : undefined}
+            onPress={() => {
+              const next = !crouchOn;
+              setCrouchOn(next);
+              input.crouch = next;
+            }}
+          />
+        </div>
         <div className="flex flex-col gap-3">
           <ControlButton label="ATK" ariaLabel="Melee attack" onPress={() => { input.attackMelee = true; }} />
           <ControlButton label="E" ariaLabel="Interact" onPress={() => { input.interact = true; }} />
