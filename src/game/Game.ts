@@ -284,17 +284,28 @@ export class Game {
 
     // husks
     const [carrierX, carrierZ] = this.world.poi('carrier');
+    const [airbaseX, airbaseZ] = this.world.poi('airbase');
     const zones: SpawnZone[] = [
-      { id: 'forest', x: 180, z: 40, radius: 55, count: 3, kinds: ['shambler', 'stalker'] },
+      { id: 'forest', x: 180, z: 40, radius: 55, count: 3, kinds: ['shambler', 'stalker', 'crawler'] },
       { id: 'town', x: 40, z: 0, radius: 60, count: 4, kinds: ['shambler'] },
-      { id: 'relay', x: 330, z: -40, radius: 42, count: 5, kinds: ['shambler', 'stalker'] },
-      { id: 'dunes', x: 470, z: 150, radius: 55, count: 2, kinds: ['stalker'], nightOnly: true },
+      { id: 'relay', x: 330, z: -40, radius: 42, count: 5, kinds: ['shambler', 'stalker', 'spitter'] },
+      { id: 'dunes', x: 470, z: 150, radius: 55, count: 2, kinds: ['stalker', 'crawler'], nightOnly: true },
       // the carrier's guard pack: six armored husks on that deck — the
-      // richest loot on the island is a fight, not a shopping trip
-      { id: 'carrier', x: carrierX, z: carrierZ, radius: 15, count: 6, kinds: ['armored', 'armored', 'stalker'] },
+      // richest loot on the island is a fight, not a shopping trip. Wave 4
+      // adds the deck's bloater and the screamer in the island tower: trip
+      // the shriek and the whole pack comes at once.
+      { id: 'carrier', x: carrierX, z: carrierZ, radius: 15, count: 6, kinds: ['armored', 'armored', 'stalker', 'bloater', 'screamer'] },
+      // the airbase perimeter: a brute walks the fence line with spitter
+      // support — the depot's fleet is guarded, not gifted
+      { id: 'airbase', x: airbaseX, z: airbaseZ, radius: 48, count: 4, kinds: ['shambler', 'brute', 'spitter', 'stalker'] },
     ];
     this.husks = new HuskManager(this.scene, zones, opts.seed);
-    this.husks.spawnInitial(this.deadHusks, (x, z) => this.groundY(x, z), this.isNight());
+    this.husks.spawnInitial(
+      this.deadHusks,
+      (x, z) => this.groundY(x, z),
+      this.isNight(),
+      useGameStore.getState().daysElapsed,
+    );
 
     // wildlife: deer + rabbits, huntable for raw meat
     this.animals = new AnimalManager(this.scene, opts.seed);
@@ -874,6 +885,9 @@ export class Game {
         groundY: (x, z, refY) => this.groundYRef(x, z, refY ?? 0),
         colliders: this.houseColliders,
         onHuskKilled: (h) => this.onHuskKilled(h),
+        daysElapsed: s.daysElapsed,
+        // a bloater burst reads on screen as a heavy dust/flesh impact
+        onBurstFx: (x, y, z) => this.fx?.impactDust(new THREE.Vector3(x, y, z)),
       },
       player.pos,
       night,
@@ -1119,8 +1133,8 @@ export class Game {
     this.deadHusks.add(h.id);
     const s = useGameStore.getState();
     s.questEvent('kill', 'husk', 1);
-    // the body stays where it fell — search it for zone-tied loot
-    this.interact?.registerCorpse(h.id, h.group.position.x, h.group.position.z, h.zoneId);
+    // the body stays where it fell — search it for zone + kind loot
+    this.interact?.registerCorpse(h.id, h.group.position.x, h.group.position.z, h.zoneId, h.kind);
   }
 
   private updateCutscene(dt: number): void {

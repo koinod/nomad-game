@@ -312,6 +312,37 @@ export interface HuskLootEntry {
   chance: number;
 }
 
+// Wave 4: corpse loot keyed by KIND, rolled in addition to the zone table —
+// what it WAS decides the bonus. A brute carried for a crew; a bloater is
+// a chemistry set that walks.
+export const HUSK_KIND_LOOT: Record<string, HuskLootEntry[]> = {
+  screamer: [
+    { id: 'cloth', min: 2, max: 3, chance: 0.6 },
+    { id: 'flare', min: 1, max: 1, chance: 0.3 },
+    { id: 'chemicals', min: 1, max: 1, chance: 0.2 },
+  ],
+  brute: [
+    { id: 'scrap', min: 2, max: 4, chance: 0.7 },
+    { id: 'canned_food', min: 1, max: 2, chance: 0.4 },
+    { id: 'armor_plate', min: 1, max: 1, chance: 0.18 },
+    { id: 'ammo_556', min: 3, max: 6, chance: 0.25 },
+  ],
+  crawler: [
+    { id: 'cloth', min: 1, max: 2, chance: 0.5 },
+    { id: 'raw_meat', min: 1, max: 2, chance: 0.35 },
+    { id: 'wire', min: 1, max: 2, chance: 0.2 },
+  ],
+  bloater: [
+    { id: 'chemicals', min: 1, max: 3, chance: 0.75 },
+    { id: 'cloth', min: 1, max: 2, chance: 0.4 },
+  ],
+  spitter: [
+    { id: 'chemicals', min: 1, max: 2, chance: 0.6 },
+    { id: 'bandage', min: 1, max: 1, chance: 0.3 },
+    { id: 'water_bottle', min: 1, max: 1, chance: 0.25 },
+  ],
+};
+
 export const HUSK_LOOT: Record<string, HuskLootEntry[]> = {
   // the carrier's armored guard pack drops military salvage
   carrier: [

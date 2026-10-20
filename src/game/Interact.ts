@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { useGameStore } from '../store/gameStore';
-import { ITEMS, HUSK_LOOT, LOG_LOOT, BUSH_LOOT } from '../data/items';
+import { ITEMS, HUSK_LOOT, HUSK_KIND_LOOT, LOG_LOOT, BUSH_LOOT } from '../data/items';
 import { DESIGNED_RECRUITS } from '../data/survivors';
 import { CLAIMABLE } from '../data/base';
 import { buildGroundMesh } from './weaponMeshes';
@@ -459,10 +459,14 @@ export class InteractSystem {
    * Register a searchable husk corpse. Loot rolls from the zone's table —
    * what they were is what they carried (Skyrim-style).
    */
-  registerCorpse(id: string, x: number, z: number, zoneId: string): void {
+  registerCorpse(id: string, x: number, z: number, zoneId: string, kind?: string): void {
     const s = useGameStore.getState();
     const pos = new THREE.Vector3(x, this.hooks.groundY(x, z), z);
-    const table = HUSK_LOOT[zoneId] ?? HUSK_LOOT.default;
+    // zone table (what the place was) + kind table (what the thing was)
+    const table = [
+      ...(HUSK_LOOT[zoneId] ?? HUSK_LOOT.default),
+      ...(kind ? (HUSK_KIND_LOOT[kind] ?? []) : []),
+    ];
     const entry: Interactable = {
       id: `corpse:${id}`,
       kind: 'corpse',
