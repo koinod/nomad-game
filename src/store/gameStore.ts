@@ -135,6 +135,7 @@ interface GameState {
   vehicle: {
     uid: string; name: string; speedKmh: number; fuelPct: number; condPct: number;
     storageUsedKg: number; storageCapKg: number; tiresFlat: number; upgrades: string[];
+    kind?: string;
   } | null;
   fleet: FleetEntry[];
   trailerFleet: TrailerFleetEntry[];

@@ -185,6 +185,12 @@ export class Game {
         if (!v) continue;
         usedVeh.add(v.uid);
         v.group.position.set(vs.x, vs.y, vs.z);
+        // a helicopter never restores mid-air: a save written in flight
+        // comes back parked on the ground under where it was
+        if (v.def.kind === 'heli') {
+          v.group.position.y = this.groundY(vs.x, vs.z) + 0.02;
+          if (v.heliState) { v.heliState.vy = 0; v.heliState.vx = 0; v.heliState.vz = 0; }
+        }
         v.group.rotation.y = vs.heading;
         v.heading = vs.heading;
         v.fuel = vs.fuel;
@@ -768,6 +774,7 @@ export class Game {
       time: this.elapsed,
     });
     this.vehicles.updateDoors(dt);
+    this.vehicles.updateRotors(dt, this.driving?.uid);
     // any vehicle not towing sheds last frame's trailer mass
     for (const v of this.vehicles.vehicles) {
       if (!this.trailers.trailerTowedBy(v.uid)) v.towedMassKg = 0;
@@ -1075,6 +1082,7 @@ export class Game {
         break;
       case 'Space':
         input.jump = true;
+        input.ascend = true; // held state for the helicopter collective
         break;
       case 'KeyC':
       case 'ControlLeft':
@@ -1133,6 +1141,7 @@ export class Game {
     }
     if (e.code === 'KeyQ') input.leanLeft = false;
     if (e.code === 'KeyE') input.leanRight = false;
+    if (e.code === 'Space') input.ascend = this.keys.has('Space');
     this.applyMoveKeys();
   }
 
@@ -1207,7 +1216,17 @@ export class Game {
         s.setNoiseLevel(Math.min(100, (r / 80) * 100));
       },
       time: this.elapsed,
+      lift: v.def.kind === 'heli' ? (input.ascend ? 1 : 0) - (input.crouch ? 1 : 0) : undefined,
+      yawIn: v.def.kind === 'heli' ? (input.leanRight ? 1 : 0) - (input.leanLeft ? 1 : 0) : undefined,
     });
+    if (v.hardLanding) {
+      s.addToast(
+        v.hardLanding === 'crash'
+          ? 'CRASH LANDING — the airframe is barely holding together'
+          : 'Hard landing — the airframe took damage',
+      );
+      v.hardLanding = undefined;
+    }
     const pos = v.group.position;
     player.driveUpdate(dt, playerCtx, pos.x, pos.y, pos.z, v.def.length * 0.9 + 4, {
       kind: v.def.kind,
@@ -1244,6 +1263,7 @@ export class Game {
       storageCapKg: storageCapKg(v.def.storageKg, v.upgrades),
       tiresFlat: v.tiresFlat,
       upgrades: [...v.upgrades],
+      kind: v.def.kind,
     });
     if (input.interact) {
       this.exitVehicle();
@@ -1267,8 +1287,13 @@ export class Game {
       storageCapKg: storageCapKg(v.def.storageKg, v.upgrades),
       tiresFlat: v.tiresFlat,
       upgrades: [...v.upgrades],
+      kind: v.def.kind,
     });
-    s.addToast(`Driving the ${v.def.name}. F to get out${v.fuel <= 0.05 ? ' — the tank is dry, find a fuel can.' : ''}`);
+    s.addToast(
+      v.def.kind === 'heli'
+        ? `Flying the ${v.def.name}. Hold SPACE to climb, C to descend, Q/E to yaw, WASD is the cyclic. F to get out.`
+        : `Driving the ${v.def.name}. F to get out${v.fuel <= 0.05 ? ' — the tank is dry, find a fuel can.' : ''}`,
+    );
     sfx.play('ui', { volume: 0.5 });
   }
 
@@ -1859,8 +1884,11 @@ export class Game {
     const husks = this.husks!;
     const isTank = v.def.id === 'tank';
     const cannon = isTank || v.upgrades.includes('cannon_40');
-    const mg = v.upgrades.includes('mg_mount') || (isTank && v.upgrades.includes('tank_coax'));
-    if (!cannon && !mg) return;
+    // the Sea Hawk's pintle door gun is integral; the Little Bird's skid
+    // rocket pods are live on the cannon pattern (unguided, splash)
+    const mg = v.upgrades.includes('mg_mount') || (isTank && v.upgrades.includes('tank_coax')) || v.def.id === 'seahawk';
+    const rockets = v.def.id === 'little_bird';
+    if (!cannon && !mg && !rockets) return;
     const w = v as unknown as { mgT?: number; cannonT?: number };
     w.mgT = Math.max(0, (w.mgT ?? 0) - dt);
     w.cannonT = Math.max(0, (w.cannonT ?? 0) - dt);
@@ -1871,11 +1899,18 @@ export class Game {
       y: Math.sin(player.camPitch),
       z: Math.cos(player.camYaw) * cp,
     };
-    const origin = {
-      x: v.group.position.x + dir.x * 1.6,
-      y: v.group.position.y + (isTank ? 2.0 : 2.7),
-      z: v.group.position.z + dir.z * 1.6,
-    };
+    const origin = v.def.id === 'seahawk'
+      ? {
+          // the door gun sits on the starboard cabin door, not the roofline
+          x: v.group.position.x - Math.cos(v.heading) * 1.8 + dir.x * 0.4,
+          y: v.group.position.y + 1.55,
+          z: v.group.position.z + Math.sin(v.heading) * 1.8 + dir.z * 0.4,
+        }
+      : {
+          x: v.group.position.x + dir.x * 1.6,
+          y: v.group.position.y + (isTank ? 2.0 : 2.7),
+          z: v.group.position.z + dir.z * 1.6,
+        };
     // first husk the aim line passes close to (arcade hitscan)
     const aimHit = (slop: number, range: number): { x: number; z: number; along: number } | null => {
       let bestA = Infinity;
@@ -1894,6 +1929,22 @@ export class Game {
       }
       return hit;
     };
+    if (rockets && w.cannonT <= 0) {
+      w.cannonT = 0.85;
+      const hit = aimHit(2.2, 110);
+      const ix = hit ? hit.x : origin.x + dir.x * 60;
+      const iz = hit ? hit.z : origin.z + dir.z * 60;
+      husks.damageInRadius(ix, iz, 3.2, 62);
+      this.animals?.damageInRadius(ix, iz, 3.2, 62);
+      this.noiseAt(ix, iz, 45);
+      const flash = new THREE.PointLight(0xffc27a, 60, 20);
+      flash.position.set(ix, this.groundY(ix, iz) + 1.4, iz);
+      this.scene!.add(flash);
+      setTimeout(() => this.scene!.remove(flash), 180);
+      sfx.play('hit', { volume: 0.8 });
+      s.addSkillXp('combat', 1);
+      return;
+    }
     if (cannon && w.cannonT <= 0) {
       w.cannonT = 1.7;
       const hit = aimHit(2.6, 90);

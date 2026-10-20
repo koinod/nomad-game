@@ -7,6 +7,7 @@ export interface InputState {
   lookDY: number;
   sprint: boolean;
   jump: boolean; // edge-triggered
+  ascend: boolean; // held: helicopter collective up (Space while flying)
   crouch: boolean; // held
   attackMelee: boolean; // edge-triggered: set true on press, controller clears
   attackRanged: boolean; // edge-triggered
@@ -33,6 +34,7 @@ export const input: InputState = {
   lookDY: 0,
   sprint: false,
   jump: false,
+  ascend: false,
   crouch: false,
   attackMelee: false,
   attackRanged: false,

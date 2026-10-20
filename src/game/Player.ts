@@ -744,6 +744,12 @@ export class Player {
           lx = 0.3; lz = -0.6; gy = -0.22;
           if (seat.id === 'tug') { lx = 0.35; lz = 1.15; gy = 0.35; } // at the helm, head in the glass band
           break;
+        case 'heli':
+          // pilot seats, modeled per airframe — head inside the glass
+          if (seat.id === 'seahawk') { lx = 0.55; lz = 3.55; gy = -0.32; }
+          else if (seat.id === 'cargo_bob') { lx = 0.6; lz = 5.75; gy = -0.18; }
+          else { lx = 0.3; lz = 1.05; gy = -0.42; } // little bird, in the bubble
+          break;
         default: {
           lx = W * 0.21; // driver's seat, left-hand drive (+X = vehicle left)
           const cabForward = seat.id === 'van' || seat.id === 'v03_hauler' || seat.id === 'boxtruck' || seat.id === 'semi' || seat.id === 'semi_day' || seat.id === 'sprinter' || seat.id === 'goliath';

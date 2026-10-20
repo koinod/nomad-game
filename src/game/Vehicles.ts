@@ -6,6 +6,8 @@ import * as THREE from 'three';
 import { clamp } from './rng';
 import { resolveCollisions, type Collider } from './Colliders';
 import { CARRIER_DECK_Y } from './Airbase';
+import { approach, hoverDamping, landingSeverity, liftAuthority, tiltForVelocity } from './heliMath';
+import { wrapAngle } from './trailerPhysics';
 import { ITEMS } from '../data/items';
 import type { InvItem } from '../store/types';
 import {
@@ -15,7 +17,7 @@ import {
 export interface VehicleDef {
   id: string;
   name: string;
-  kind: 'bike' | 'moto' | 'atv' | 'skiff' | 'car';
+  kind: 'bike' | 'moto' | 'atv' | 'skiff' | 'car' | 'heli';
   length: number;
   width: number;
   fuelMax: number; // L
@@ -77,6 +79,10 @@ export const VEHICLE_DEFS: VehicleDef[] = [
   { id: 'marsh_buggy', name: 'Marsh Buggy', kind: 'car', length: 3.6, width: 1.9, fuelMax: 30, burnClass: 0.8, topSpeed: 17, noiseDrive: 52, color: 0xd8621e, storageKg: 40, sandRunner: true, armorMul: 1.6 },
   { id: 'skiff', name: 'Skiff', kind: 'skiff', length: 5.5, width: 2.0, fuelMax: 24, burnClass: 0.9, topSpeed: 14, noiseDrive: 38, color: 0xd8d8d0, water: true, storageKg: 120 },
   { id: 'tug', name: 'Armored Tug', kind: 'skiff', length: 13, width: 4.6, fuelMax: 160, burnClass: 2.2, topSpeed: 7, noiseDrive: 50, color: 0x4d565e, water: true, storageKg: 1500, armorMul: 0.3 },
+  // helicopters (AIRBASE wave) — arcade flight on the drive loop
+  { id: 'seahawk', name: 'MH-60S Sea Hawk', kind: 'heli', length: 13, width: 3.2, fuelMax: 220, burnClass: 3.5, topSpeed: 33, noiseDrive: 105, color: 0x707880, storageKg: 300 },
+  { id: 'cargo_bob', name: 'CH-47 Cargo Bob', kind: 'heli', length: 15.5, width: 3.8, fuelMax: 400, burnClass: 5, topSpeed: 25, noiseDrive: 115, color: 0x6b7256, storageKg: 2400 },
+  { id: 'little_bird', name: 'Scout Little Bird', kind: 'heli', length: 7, width: 1.9, fuelMax: 90, burnClass: 2, topSpeed: 40, noiseDrive: 85, color: 0x5c6650, storageKg: 60 },
   { id: 'sedan', name: 'Sedan', kind: 'car', length: 4.7, width: 1.8, fuelMax: 40, burnClass: 1.0, topSpeed: 21, noiseDrive: 45, color: 0x5a6a7a, storageKg: 70 },
   { id: 'mustang', name: 'Mustang Dark Horse', kind: 'car', length: 4.8, width: 1.9, fuelMax: 45, burnClass: 1.1, topSpeed: 42, noiseDrive: 55, color: 0x2f4d7d, storageKg: 45 },
   { id: 'van', name: 'Utility Van', kind: 'car', length: 5.2, width: 2.0, fuelMax: 55, burnClass: 1.3, topSpeed: 19, noiseDrive: 50, color: 0xb8b8b0, storageKg: 260 },
@@ -126,6 +132,13 @@ export interface Vehicle {
   interior?: InteriorSpec; // walk-in cargo space (sprinter)
   roofObj?: THREE.Object3D; // hidden while the player is inside, camera outside
   loadedOn: string | null; // trailer uid this vehicle is locked onto, if any
+  /** Helicopters: spinning assemblies (main/tail rotors), spun by the
+   *  drive loop from the live rotor spool. */
+  rotorBlades?: { obj: THREE.Object3D; dir: 1 | -1; axis: 'y' | 'x' }[];
+  /** Helicopter flight state (vertical + drift velocity, rotor spool). */
+  heliState?: { vy: number; vx: number; vz: number; rotor: number };
+  /** Set by a hard touchdown; Game reads + clears it for the toast. */
+  hardLanding?: 'hard' | 'crash';
   upgradeGroup?: THREE.Group; // armor / racks / bullbar meshes
   cargoGroup?: THREE.Group; // loaded-crate meshes
 }
@@ -136,6 +149,10 @@ export interface DriveEnv {
   ram: (x: number, z: number, radius: number, dmg: number) => void;
   noise: (x: number, z: number, r: number) => void;
   time: number;
+  /** Helicopters: collective input -1 (descend) .. 1 (climb). */
+  lift?: number;
+  /** Helicopters: yaw input -1 .. 1 (Q/E). */
+  yawIn?: number;
 }
 
 const mat = (c: number, rough = 0.75, metal = 0.15) =>
@@ -932,6 +949,443 @@ function buildTug(g: THREE.Group, def: VehicleDef): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Helicopters (AIRBASE wave). Built to the Sea Hawk render as the fidelity
+// bar: LOFTED fuselages (elliptical cross-sections swept along the body —
+// no box shells), detailed rotor heads (mast, swashplate, pitch links,
+// grips), transparent tinted canopies over MODELED cockpits (seats,
+// instrument panel with gauges, cyclic + collective), and the pilot seat
+// placed so the avatar reads through the glass.
+
+interface LoftSection { z: number; w: number; h: number; y: number }
+
+/** Sweep elliptical cross-sections into a smooth body shell. `arc`
+ *  optionally limits the ring sweep (radians) for open glass bands. */
+function loftMesh(sections: LoftSection[], material: THREE.Material, arc?: [number, number]): THREE.Mesh {
+  const SEG = 16;
+  const a0 = arc ? arc[0] : 0;
+  const a1 = arc ? arc[1] : Math.PI * 2;
+  const wrap = !arc;
+  const positions: number[] = [];
+  const indices: number[] = [];
+  sections.forEach((s) => {
+    for (let i = 0; i <= SEG; i++) {
+      const a = a0 + ((a1 - a0) * i) / SEG;
+      positions.push(Math.cos(a) * s.w * 0.5, s.y + Math.sin(a) * s.h * 0.5, s.z);
+    }
+  });
+  const cols = SEG + 1;
+  for (let si = 0; si < sections.length - 1; si++) {
+    const last = wrap ? SEG : SEG - 1;
+    for (let i = 0; i <= last; i++) {
+      const a = si * cols + i;
+      const b = si * cols + ((i + 1) % cols);
+      const c = a + cols;
+      const d = b + cols;
+      indices.push(a, c, b, b, c, d);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, material);
+  (material as THREE.MeshStandardMaterial).side = THREE.DoubleSide;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+/** A cylinder strut between two points (skids, struts, pitch links). */
+function tube(g: THREE.Group, ax: number, ay: number, az: number, bx: number, by: number, bz: number, r: number, material: THREE.Material): THREE.Mesh {
+  const a = new THREE.Vector3(ax, ay, az);
+  const b = new THREE.Vector3(bx, by, bz);
+  const len = a.distanceTo(b);
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 8), material);
+  m.position.copy(a).lerp(b, 0.5);
+  m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.sub(a).normalize());
+  m.castShadow = true;
+  g.add(m);
+  return m;
+}
+
+function heliSeat(g: THREE.Group, x: number, y: number, z: number, fabric: THREE.Material, frame: THREE.Material): void {
+  box(g, 0.52, 0.1, 0.5, fabric, x, y, z);
+  const back = box(g, 0.52, 0.74, 0.1, fabric, x, y + 0.4, z - 0.27);
+  back.rotation.x = 0.1;
+  box(g, 0.3, 0.15, 0.08, fabric, x, y + 0.84, z - 0.31);
+  box(g, 0.42, 0.3, 0.42, frame, x, y - 0.22, z);
+}
+
+/** Instrument panel: sloped console, glareshield, gauge discs, plus a
+ *  cyclic stick and collective lever per pilot position. */
+function heliPanel(g: THREE.Group, w: number, x: number, y: number, z: number, dark: THREE.Material): void {
+  const p = box(g, w, 0.55, 0.26, dark, x, y, z);
+  p.rotation.x = -0.3;
+  box(g, w, 0.07, 0.36, dark, x, y + 0.31, z - 0.03);
+  const gaugeM = mat(0xcfd4c2, 0.35, 0.4);
+  const n = Math.max(3, Math.floor(w / 0.3));
+  for (let i = 0; i < n; i++) {
+    const gauge = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.025, 12), gaugeM);
+    gauge.rotation.x = Math.PI / 2 - 0.3;
+    gauge.position.set(x - w / 2 + ((i + 0.5) * w) / n, y + 0.05, z + 0.13);
+    g.add(gauge);
+  }
+}
+
+function heliControls(g: THREE.Group, x: number, y: number, z: number, dark: THREE.Material): void {
+  const cyc = tube(g, x, y, z + 0.05, x, y + 0.48, z + 0.16, 0.024, dark);
+  cyc.castShadow = false;
+  box(g, 0.05, 0.16, 0.05, dark, x, y + 0.52, z + 0.17);
+  const col = tube(g, x - 0.36, y + 0.02, z - 0.05, x - 0.42, y + 0.3, z + 0.18, 0.026, dark);
+  col.castShadow = false;
+}
+
+/** A detailed main-rotor head: mast, swashplate, hub, pitch links,
+ *  grips, and tapered blades. Registers the spinning group on the
+ *  vehicle so the drive loop can spin it from the rotor spool. */
+function rotorHead(g: THREE.Group, v: Vehicle, x: number, y: number, z: number, blades: number, bladeLen: number, dir: 1 | -1, dark: THREE.Material): void {
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 0.55, 10), dark);
+  mast.position.set(x, y - 0.24, z);
+  mast.castShadow = true;
+  g.add(mast);
+  const grp = new THREE.Group();
+  grp.position.set(x, y, z);
+  g.add(grp);
+  const swash = new THREE.Mesh(new THREE.CylinderGeometry(0.21, 0.23, 0.07, 12), mat(0x9aa0a4, 0.35, 0.7));
+  swash.position.y = -0.13;
+  grp.add(swash);
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.16, 10), dark);
+  grp.add(hub);
+  const bladeM = mat(0x2e3236, 0.55, 0.3);
+  for (let i = 0; i < blades; i++) {
+    const bg = new THREE.Group();
+    bg.rotation.y = (i / blades) * Math.PI * 2;
+    grp.add(bg);
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.07, 0.1), dark);
+    grip.position.x = 0.26;
+    bg.add(grip);
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(bladeLen, 0.035, 0.27), bladeM);
+    blade.position.x = 0.4 + bladeLen / 2;
+    blade.rotation.x = 0.05;
+    blade.castShadow = true;
+    bg.add(blade);
+    const tip = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.033, 0.24), bladeM);
+    tip.position.set(0.4 + bladeLen + 0.18, 0.012, 0.05);
+    tip.rotation.y = -0.35;
+    bg.add(tip);
+    const link = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.24, 6), dark);
+    link.position.set(0.3, -0.12, 0.07);
+    bg.add(link);
+  }
+  (v.rotorBlades ??= []).push({ obj: grp, dir, axis: 'y' });
+}
+
+function tailRotor(g: THREE.Group, v: Vehicle, x: number, y: number, z: number, blades: number, len: number, dir: 1 | -1, dark: THREE.Material): void {
+  const grp = new THREE.Group();
+  grp.position.set(x, y, z);
+  g.add(grp);
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.12, 8), dark);
+  hub.rotation.z = Math.PI / 2;
+  grp.add(hub);
+  const bladeM = mat(0x2e3236, 0.55, 0.3);
+  for (let i = 0; i < blades; i++) {
+    const bg = new THREE.Group();
+    bg.rotation.x = (i / blades) * Math.PI * 2;
+    grp.add(bg);
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.045, len, 0.15), bladeM);
+    blade.position.y = len / 2 + 0.05;
+    bg.add(blade);
+  }
+  (v.rotorBlades ??= []).push({ obj: grp, dir, axis: 'x' });
+}
+
+function heliWheel(g: THREE.Group, x: number, y: number, z: number, r: number, dark: THREE.Material): void {
+  const wheel = new THREE.Mesh(new THREE.CylinderGeometry(r, r, r * 0.55, 14), mat(0x17181a, 0.95, 0));
+  wheel.rotation.z = Math.PI / 2;
+  wheel.position.set(x, y, z);
+  wheel.castShadow = true;
+  g.add(wheel);
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.45, r * 0.45, r * 0.58, 10), dark);
+  hub.rotation.z = Math.PI / 2;
+  hub.position.set(x, y, z);
+  g.add(hub);
+}
+
+/** Small canvas stencil (NAVY / rescue markings) as a side decal. */
+function heliDecal(g: THREE.Group, text: string, w: number, x: number, y: number, z: number, side: 1 | -1): void {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 64;
+  const ctx = c.getContext('2d')!;
+  ctx.clearRect(0, 0, 256, 64);
+  ctx.fillStyle = 'rgba(30,34,38,0.88)';
+  ctx.font = '700 44px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 128, 34);
+  const tex = new THREE.CanvasTexture(c);
+  tex.anisotropy = 4;
+  const m = new THREE.Mesh(
+    new THREE.PlaneGeometry(w, w / 4),
+    new THREE.MeshStandardMaterial({ map: tex, transparent: true, roughness: 0.6, metalness: 0.1, polygonOffset: true, polygonOffsetFactor: -1 }),
+  );
+  m.position.set(x, y, z);
+  m.rotation.y = side > 0 ? Math.PI / 2 : -Math.PI / 2;
+  g.add(m);
+}
+
+// --- MH-60S Sea Hawk (render 04 is the pinned fidelity bar) ---------------
+function buildSeaHawk(g: THREE.Group, def: VehicleDef, v: Vehicle): void {
+  const bodyM = mat(0x868d93, 0.5, 0.35);
+  const dark = mat(0x23272c, 0.7, 0.3);
+  const fabric = mat(0x44503e, 0.95, 0);
+  g.add(loftMesh([
+    { z: -6.4, w: 0.55, h: 1.95, y: 2.52 },
+    { z: -5.6, w: 0.82, h: 1.5, y: 2.26 },
+    { z: -4.0, w: 1.28, h: 1.28, y: 1.96 },
+    { z: -2.2, w: 2.3, h: 2.0, y: 1.72 },
+    { z: -0.5, w: 3.05, h: 2.5, y: 1.62 },
+    { z: 1.8, w: 3.15, h: 2.58, y: 1.6 },
+    { z: 3.8, w: 2.85, h: 2.42, y: 1.58 },
+    { z: 5.4, w: 1.85, h: 1.75, y: 1.45 },
+    { z: 6.35, w: 0.6, h: 0.85, y: 1.32 },
+  ], bodyM));
+  // cockpit glass: an open arc band over the nose (interior shows through)
+  g.add(loftMesh([
+    { z: 3.35, w: 2.92, h: 2.5, y: 1.58 },
+    { z: 4.6, w: 2.62, h: 2.28, y: 1.52 },
+    { z: 5.5, w: 1.92, h: 1.82, y: 1.45 },
+  ], glassTint(), [-0.5, Math.PI + 0.5]));
+  // cabin windows on the port side (starboard is the open gun door)
+  for (const wz of [1.25, 0.05]) {
+    const win = box(g, 0.05, 0.55, 0.95, glassTint(), 1.57, 1.88, wz);
+    win.castShadow = false;
+  }
+  // --- interior: floor, pilot seats, panel, controls, cabin benches ---
+  box(g, 2.9, 0.08, 5.8, dark, 0, 0.5, 1.1);
+  heliSeat(g, 0.55, 0.98, 3.55, fabric, dark);
+  heliSeat(g, -0.55, 0.98, 3.55, fabric, dark);
+  heliPanel(g, 2.1, 0, 1.78, 4.72, dark);
+  heliControls(g, 0.55, 0.98, 3.55, dark);
+  heliControls(g, -0.55, 0.98, 3.55, dark);
+  for (const sgn of [1, -1]) {
+    box(g, 0.5, 0.09, 2.2, fabric, sgn * 1.08, 0.78, 0.3); // cabin bench
+    box(g, 0.09, 0.55, 2.2, fabric, sgn * 1.34, 1.05, 0.3);
+  }
+  box(g, 2.9, 2.3, 0.1, mat(0x767d83, 0.6, 0.3), 0, 1.65, -1.7); // cabin bulkhead
+  // --- open starboard cabin door + pintle MG (the render's signature) ---
+  box(g, 0.06, 1.35, 1.3, mat(0x101215, 0.95, 0), -1.56, 1.5, 1.15); // dark opening
+  const slidDoor = box(g, 0.05, 1.32, 1.24, bodyM, -1.6, 1.5, -0.42); // door slid aft
+  box(g, 0.055, 0.5, 0.9, glassTint(), -1.6, 1.78, -0.42).castShadow = false;
+  void slidDoor;
+  box(g, 0.34, 0.22, 0.5, dark, -1.66, 2.45, 2.35); // rescue hoist
+  tube(g, -1.66, 2.35, 2.35, -1.95, 2.2, 1.7, 0.035, dark);
+  const mgM = mat(0x1d2126, 0.45, 0.6);
+  tube(g, -1.58, 0.95, 1.15, -1.72, 1.48, 1.15, 0.04, mgM); // pintle post
+  const gun = new THREE.Group();
+  gun.position.set(-1.78, 1.52, 1.15);
+  gun.rotation.z = 0.06;
+  g.add(gun);
+  const recv = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.17, 0.15), mgM);
+  recv.castShadow = true;
+  gun.add(recv);
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.8, 8), mgM);
+  barrel.rotation.z = Math.PI / 2;
+  barrel.position.x = -0.62;
+  gun.add(barrel);
+  const ammoBox = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.2, 0.18), mat(0x59614f, 0.8, 0.2));
+  ammoBox.position.set(0.05, -0.2, 0.12);
+  gun.add(ammoBox);
+  tube(gun, 0.3, 0, 0.06, 0.48, -0.14, 0.1, 0.02, mgM);
+  tube(gun, 0.3, 0, -0.06, 0.48, -0.14, -0.1, 0.02, mgM);
+  // --- engines: twin nacelles + angled exhausts on the spine ---
+  for (const sgn of [1, -1]) {
+    const nac = box(g, 0.66, 0.52, 2.0, bodyM, sgn * 0.74, 2.98, 1.05);
+    nac.rotation.x = 0.03;
+    box(g, 0.5, 0.3, 0.3, dark, sgn * 0.74, 3.0, 2.12); // intake face
+    const exh = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.17, 0.75, 10), dark);
+    exh.position.set(sgn * 1.12, 2.98, 0.05);
+    exh.rotation.set(-0.5, 0, sgn * 0.7);
+    g.add(exh);
+  }
+  box(g, 0.8, 0.34, 2.4, bodyM, 0, 3.02, 1.0); // doghouse fairing
+  // sensor ball under the nose
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(0.27, 16, 12), dark);
+  ball.position.set(0, 0.6, 5.25);
+  ball.castShadow = true;
+  g.add(ball);
+  const ballEye = new THREE.Mesh(new THREE.SphereGeometry(0.17, 12, 10), glassTint());
+  ballEye.position.set(0, 0.55, 5.42);
+  g.add(ballEye);
+  // tail: stabilizer + tail wheel + tail rotor on the fin
+  box(g, 2.35, 0.07, 0.55, bodyM, 0, 2.02, -5.45);
+  tube(g, 0, 1.5, -5.75, 0, 0.3, -5.9, 0.05, dark);
+  heliWheel(g, 0, 0.27, -5.92, 0.27, dark);
+  tailRotor(g, v, -0.4, 2.56, -6.18, 4, 0.82, -1, dark);
+  for (const sgn of [1, -1]) {
+    tube(g, sgn * 1.15, 0.85, 0.95, sgn * 1.32, 0.38, 0.95, 0.06, dark);
+    heliWheel(g, sgn * 1.35, 0.36, 0.95, 0.36, dark);
+  }
+  rotorHead(g, v, 0, 3.32, 1.3, 4, 2.95, 1, dark);
+  heliDecal(g, 'NAVY', 1.7, 0.68, 2.0, -4.1, 1);
+  heliDecal(g, 'NAVY', 1.7, -0.68, 2.0, -4.1, -1);
+  heliDecal(g, '615', 0.9, 1.6, 1.6, 3.1, 1);
+  void def;
+}
+
+// --- CH-47 Cargo Bob: tandem rotors, rear loading ramp --------------------
+function buildCargoBob(g: THREE.Group, def: VehicleDef, v: Vehicle): void {
+  void def;
+  const bodyM = mat(0x6b7256, 0.55, 0.25);
+  const dark = mat(0x23272c, 0.7, 0.3);
+  const fabric = mat(0x4c5546, 0.95, 0);
+  g.add(loftMesh([
+    { z: -7.7, w: 2.7, h: 2.3, y: 2.05 },
+    { z: -6.8, w: 3.3, h: 2.95, y: 1.98 },
+    { z: -4.0, w: 3.6, h: 3.05, y: 1.95 },
+    { z: 0, w: 3.62, h: 3.05, y: 1.95 },
+    { z: 4.0, w: 3.55, h: 3.0, y: 1.95 },
+    { z: 6.2, w: 2.9, h: 2.5, y: 1.85 },
+    { z: 7.3, w: 1.6, h: 1.7, y: 1.6 },
+    { z: 7.75, w: 0.5, h: 0.8, y: 1.45 },
+  ], bodyM));
+  g.add(loftMesh([
+    { z: 5.75, w: 2.98, h: 2.56, y: 1.86 },
+    { z: 6.7, w: 2.5, h: 2.14, y: 1.74 },
+    { z: 7.35, w: 1.66, h: 1.76, y: 1.6 },
+  ], glassTint(), [-0.45, Math.PI + 0.45]));
+  // cargo-bay windows down both flanks
+  for (const sgn of [1, -1]) {
+    for (const wz of [-4.6, -2.2, 0.2, 2.6]) {
+      const win = box(g, 0.05, 0.5, 0.62, glassTint(), sgn * 1.8, 2.45, wz);
+      win.castShadow = false;
+    }
+  }
+  // --- interior: cockpit + a real cargo bay the ramp opens into ---
+  box(g, 3.1, 0.08, 12.6, dark, 0, 0.6, -1.2); // bay floor
+  heliSeat(g, 0.6, 1.1, 5.75, fabric, dark);
+  heliSeat(g, -0.6, 1.1, 5.75, fabric, dark);
+  heliPanel(g, 2.3, 0, 1.92, 6.85, dark);
+  heliControls(g, 0.6, 1.1, 5.75, dark);
+  heliControls(g, -0.6, 1.1, 5.75, dark);
+  for (const sgn of [1, -1]) {
+    for (let i = 0; i < 5; i++) {
+      box(g, 0.08, 2.3, 0.16, mat(0x59614f, 0.7, 0.3), sgn * 1.68, 1.8, -6 + i * 2.6); // bay ribs
+    }
+    box(g, 0.4, 0.07, 9.5, fabric, sgn * 1.45, 0.85, -2.4); // fold-down troop seats
+  }
+  box(g, 0.5, 0.14, 10.5, dark, 0, 3.28, -2.2); // ceiling spine beam
+  // rear ramp (animated on the shared door system, hinge at the sill)
+  const pivot = new THREE.Group();
+  pivot.position.set(0, 0.62, -7.72);
+  g.add(pivot);
+  const rampPanel = new THREE.Mesh(new THREE.BoxGeometry(2.7, 2.55, 0.1), bodyM);
+  rampPanel.position.set(0, 1.28, 0);
+  rampPanel.castShadow = true;
+  pivot.add(rampPanel);
+  const rampLip = new THREE.Mesh(new THREE.BoxGeometry(2.7, 0.1, 0.5), dark);
+  rampLip.position.set(0, 2.5, 0.12);
+  pivot.add(rampLip);
+  v.doors.push({ obj: pivot, kind: 'ramp', base: 0, t: 0, target: 0, travel: -1.82 });
+  // pylons + tandem rotors (counter-rotating)
+  box(g, 1.15, 0.85, 1.7, bodyM, 0, 3.85, 5.35);
+  const pylon = box(g, 1.05, 2.1, 1.9, bodyM, 0, 4.1, -6.55);
+  pylon.rotation.x = 0.06;
+  rotorHead(g, v, 0, 4.42, 5.4, 3, 3.3, 1, dark);
+  rotorHead(g, v, 0, 5.32, -6.6, 3, 3.3, -1, dark);
+  // sponsons + landing gear
+  for (const sgn of [1, -1]) {
+    const spon = box(g, 0.55, 0.85, 8.6, bodyM, sgn * 2.0, 0.98, -0.4);
+    spon.rotation.x = 0.0;
+    box(g, 0.5, 0.6, 1.1, bodyM, sgn * 1.98, 1.05, 3.95);
+    box(g, 0.5, 0.6, 1.1, bodyM, sgn * 1.98, 1.05, -4.85);
+    heliWheel(g, sgn * 1.95, 0.42, 4.4, 0.42, dark);
+    heliWheel(g, sgn * 1.95, 0.42, -4.7, 0.42, dark);
+    const exh = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 0.9, 10), dark);
+    exh.position.set(sgn * 1.35, 3.3, -5.6);
+    exh.rotation.x = -0.6;
+    g.add(exh);
+  }
+  heliDecal(g, 'CARGO', 1.9, 1.84, 2.0, -1.5, 1);
+  heliDecal(g, 'CARGO', 1.9, -1.84, 2.0, -1.5, -1);
+}
+
+// --- Scout "Little Bird": all-glass bubble, skid stores -------------------
+function buildLittleBird(g: THREE.Group, def: VehicleDef, v: Vehicle): void {
+  const bodyM = mat(0x5c6650, 0.55, 0.25);
+  const dark = mat(0x23272c, 0.7, 0.3);
+  const fabric = mat(0x54493a, 0.95, 0);
+  g.add(loftMesh([
+    { z: -2.6, w: 0.55, h: 0.72, y: 1.36 },
+    { z: -1.4, w: 1.35, h: 1.45, y: 1.18 },
+    { z: 0.2, w: 1.75, h: 1.8, y: 1.12 },
+    { z: 1.15, w: 1.6, h: 1.65, y: 1.1 },
+  ], bodyM));
+  // THE bubble: a full tinted-glass dome — the pilot sits inside it
+  const bubble = new THREE.Mesh(new THREE.SphereGeometry(1.04, 26, 20), glassTint());
+  bubble.position.set(0, 1.34, 1.78);
+  bubble.scale.set(0.94, 1.02, 1.28);
+  g.add(bubble);
+  const noseShell = box(g, 1.15, 0.5, 1.3, bodyM, 0, 0.6, 2.15);
+  noseShell.rotation.x = 0.25;
+  // interior under the glass: floor, bench, panel, cyclic
+  box(g, 1.5, 0.07, 2.3, dark, 0, 0.74, 1.25);
+  box(g, 1.3, 0.09, 0.48, fabric, 0, 0.98, 0.92);
+  const backrest = box(g, 1.3, 0.62, 0.09, fabric, 0, 1.3, 0.66);
+  backrest.rotation.x = 0.1;
+  heliPanel(g, 1.15, 0, 1.5, 2.32, dark);
+  heliControls(g, 0.3, 0.98, 1.15, dark);
+  // engine deck + exhaust behind the bubble
+  box(g, 1.25, 0.52, 1.7, bodyM, 0, 2.18, -0.55);
+  const exh = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 0.6, 8), dark);
+  exh.position.set(0.3, 2.2, -1.6);
+  exh.rotation.x = 1.1;
+  g.add(exh);
+  rotorHead(g, v, 0, 2.68, 0.05, 5, 2.55, 1, dark);
+  // tail boom + fin + 2-blade tail rotor
+  const boom = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.15, 3.3, 10), bodyM);
+  boom.rotation.x = Math.PI / 2 - 0.03;
+  boom.position.set(0, 1.44, -4.15);
+  boom.castShadow = true;
+  g.add(boom);
+  box(g, 0.06, 0.78, 0.52, bodyM, 0, 1.68, -5.62);
+  box(g, 1.15, 0.05, 0.3, bodyM, 0, 1.32, -5.3);
+  tailRotor(g, v, -0.13, 1.52, -5.62, 2, 0.6, 1, dark);
+  // skid gear: struts + tubes with upturned noses
+  const skidM = mat(0x3a3f45, 0.5, 0.5);
+  for (const sgn of [1, -1]) {
+    tube(g, sgn * 0.6, 0.78, 0.85, sgn * 0.8, 0.14, 1.35, 0.04, skidM);
+    tube(g, sgn * 0.6, 0.78, -1.15, sgn * 0.8, 0.14, -1.55, 0.04, skidM);
+    tube(g, sgn * 0.8, 0.12, 2.35, sgn * 0.8, 0.12, -1.85, 0.045, skidM);
+    tube(g, sgn * 0.8, 0.12, 2.35, sgn * 0.8, 0.5, 2.85, 0.045, skidM);
+  }
+  tube(g, -0.8, 0.3, 1.0, 0.8, 0.3, 1.0, 0.035, skidM);
+  tube(g, -0.8, 0.3, -1.4, 0.8, 0.3, -1.4, 0.035, skidM);
+  // skid stores: rocket pod (port) + gun pod (starboard)
+  const podM = mat(0x4a5244, 0.6, 0.3);
+  const pod = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 1.15, 12), podM);
+  pod.rotation.x = Math.PI / 2;
+  pod.position.set(1.02, 0.66, 1.1);
+  pod.castShadow = true;
+  g.add(pod);
+  for (const [ox, oy] of [[-0.08, 0.08], [0.08, 0.08], [-0.08, -0.08], [0.08, -0.08]] as [number, number][]) {
+    const mouth = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.04, 8), dark);
+    mouth.rotation.x = Math.PI / 2;
+    mouth.position.set(1.02 + ox, 0.66 + oy, 1.69);
+    g.add(mouth);
+  }
+  tube(g, 0.8, 0.35, 1.1, 1.0, 0.6, 1.1, 0.03, dark);
+  const gunPod = box(g, 0.3, 0.3, 1.0, podM, -1.02, 0.66, 1.1);
+  void gunPod;
+  const gunBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.55, 8), dark);
+  gunBarrel.rotation.x = Math.PI / 2;
+  gunBarrel.position.set(-1.02, 0.62, 1.85);
+  g.add(gunBarrel);
+  tube(g, -0.8, 0.35, 1.1, -1.0, 0.6, 1.1, 0.03, dark);
+  void def;
+}
+
 function makeVehicle(def: VehicleDef, x: number, z: number, heading: number, groundY: (x: number, z: number) => number): Vehicle {
   const g = new THREE.Group();
   const v: Vehicle = {
@@ -967,6 +1421,12 @@ function makeVehicle(def: VehicleDef, x: number, z: number, heading: number, gro
     else buildSkiff(g, def);
   }
   else if (def.kind === 'bike' || def.kind === 'moto' || def.kind === 'atv') buildBike(g, def, v);
+  else if (def.kind === 'heli') {
+    g.rotation.order = 'YXZ'; // yaw first, then flight tilt
+    if (def.id === 'seahawk') buildSeaHawk(g, def, v);
+    else if (def.id === 'cargo_bob') buildCargoBob(g, def, v);
+    else buildLittleBird(g, def, v);
+  }
   else buildCarBody(g, def, v);
   g.position.set(x, Math.max(groundY(x, z), def.water ? 0.05 : 0), z);
   g.rotation.order = 'YXZ';
@@ -1015,6 +1475,11 @@ const SPAWNS: SpawnDef[] = [
   // boats stay at the marina
   { id: 'skiff', poi: 'marina', dx: -64, dz: 8, heading: Math.PI / 2 },
   { id: 'tug', poi: 'marina', dx: -26, dz: 16, heading: Math.PI / 2 },
+  // helicopters on the airbase pads (west pad: Sea Hawk, mid: Cargo Bob,
+  // east: Little Bird), noses into the prevailing wind off the sea
+  { id: 'seahawk', poi: 'airbase', dx: -62, dz: -18, heading: Math.PI },
+  { id: 'cargo_bob', poi: 'airbase', dx: -16, dz: -18, heading: Math.PI },
+  { id: 'little_bird', poi: 'airbase', dx: 30, dz: -18, heading: Math.PI },
 ];
 
 export class VehicleManager {
@@ -1071,6 +1536,11 @@ export class VehicleManager {
     for (const v of this.vehicles) if (v.doors.length) stepDoors(v.doors, dt);
   }
 
+  /** Wind down parked helicopters' rotors each frame. */
+  updateRotors(dt: number, drivenUid?: string): void {
+    this.stepRotors(dt, drivenUid);
+  }
+
   byId(uid: string): Vehicle | null {
     return this.vehicles.find((v) => v.uid === uid) ?? null;
   }
@@ -1090,6 +1560,12 @@ export class VehicleManager {
     const speedRatio = clamp(Math.abs(v.speed) / Math.max(def.topSpeed, 1), 0, 1);
     const hasFuel = v.fuel > 0.05;
     const condF = 0.6 + 0.4 * v.condition;
+
+    // ---------- air: arcade rotor flight ----------
+    if (def.kind === 'heli') {
+      this.driveHeli(dt, v, throttle, steer, env);
+      return;
+    }
 
     // ---------- water: rudder model (boats pivot midships, steer = rudder) ----------
     if (def.water) {
@@ -1255,6 +1731,131 @@ export class VehicleManager {
   }
 
   /** Shared tail of a drive step: fuel, wear, ramming, engine noise. */
+  // ---------- helicopter flight ----------
+  // Arcade rotor model: the rotor spools up over ~2s; lift authority goes
+  // with the SQUARE of spool, so a cold rotor cannot lift. WASD is the
+  // cyclic (desired velocity in the heading frame), Space/Ctrl (env.lift)
+  // is the collective, Q/E (env.yawIn) yaws. The airframe leans into its
+  // velocity, auto-levels in a hover, and a touchdown is graded — soft is
+  // free, hard costs condition, a crash can write the airframe off.
+
+  private static HELI_REST: Record<string, number> = { seahawk: 0.02, cargo_bob: 0.02, little_bird: 0.0 };
+
+  private spinRotors(v: Vehicle, dt: number): void {
+    const rotor = v.heliState?.rotor ?? 0;
+    if (rotor <= 0) return;
+    for (const r of v.rotorBlades ?? []) {
+      if (r.axis === 'x') r.obj.rotation.x += r.dir * rotor * 44 * dt;
+      else r.obj.rotation.y += r.dir * rotor * 36 * dt;
+    }
+  }
+
+  /** Parked helicopters wind their rotors down (the driven one is
+   *  skipped — driveHeli owns its spool). */
+  stepRotors(dt: number, skipUid?: string): void {
+    for (const v of this.vehicles) {
+      if (v.def.kind !== 'heli' || !v.heliState || v.uid === skipUid) continue;
+      if (v.heliState.rotor > 0) {
+        v.heliState.rotor = Math.max(0, v.heliState.rotor - dt / 4.5);
+        this.spinRotors(v, dt);
+      }
+    }
+  }
+
+  private driveHeli(dt: number, v: Vehicle, throttle: number, steer: number, env: DriveEnv): void {
+    const def = v.def;
+    const pos = v.group.position;
+    const H = (v.heliState ??= { vy: 0, vx: 0, vz: 0, rotor: 0 });
+    const rest = VehicleManager.HELI_REST[def.id] ?? 0;
+    const live = v.fuel > 0.05 && v.condition > 0.03;
+    H.rotor = clamp(H.rotor + (live ? dt / 2.2 : -dt / 3), 0, 1);
+    const auth = liftAuthority(H.rotor);
+    const sin = Math.sin(v.heading);
+    const cos = Math.cos(v.heading);
+    // cyclic: desired velocity in the heading frame
+    const sp = def.topSpeed * (0.55 + 0.45 * v.condition) * auth;
+    const desF = clamp(throttle, -1, 1) * sp;
+    const desS = clamp(steer, -1, 1) * sp * 0.6;
+    const desX = sin * desF + cos * desS;
+    const desZ = cos * desF - sin * desS;
+    const accelStep = 10.5 * auth * dt;
+    H.vx = approach(H.vx, desX, accelStep);
+    H.vz = approach(H.vz, desZ, accelStep);
+    if (Math.abs(throttle) < 0.05 && Math.abs(steer) < 0.05) {
+      const damp = hoverDamping(dt);
+      H.vx *= damp;
+      H.vz *= damp;
+    }
+    // yaw (Q/E), gated by spool
+    const yawIn = env.yawIn ?? 0;
+    if (yawIn !== 0) v.heading = wrapAngle(v.heading + yawIn * 1.25 * dt * (0.25 + 0.75 * auth));
+    // collective + the sink of an unspooled rotor
+    const lift = clamp(env.lift ?? 0, -1, 1);
+    let targetVy = lift * (lift > 0 ? 5.4 : 4.4) * auth;
+    if (H.rotor < 0.62) targetVy -= (0.62 - H.rotor) * 13;
+    H.vy = approach(H.vy, targetVy, 7.5 * dt);
+    pos.x += H.vx * dt;
+    pos.z += H.vz * dt;
+    pos.y += H.vy * dt;
+    // ground contact = landing
+    const groundAt = env.groundY(pos.x, pos.z);
+    const restY = groundAt + rest;
+    const onGround = pos.y <= restY + 0.02;
+    if (pos.y <= restY) {
+      pos.y = restY;
+      if (H.vy < -1.4) {
+        const sev = landingSeverity(H.vy);
+        if (sev.damage > 0) {
+          v.condition = clamp(v.condition - sev.damage, sev.grade === 'crash' ? 0.02 : 0.05, 1);
+          if (sev.grade === 'hard' || sev.grade === 'crash') v.hardLanding = sev.grade;
+        }
+      }
+      H.vy = 0;
+      H.vx = approach(H.vx, 0, 16 * dt);
+      H.vz = approach(H.vz, 0, 16 * dt);
+    }
+    // soft ceiling over the local ground
+    const ceil = groundAt + 135;
+    if (pos.y > ceil) {
+      pos.y = ceil;
+      H.vy = Math.min(H.vy, 0);
+    }
+    // buildings only matter down low; open sky above the roofline
+    if (!onGround && pos.y < groundAt + 13) {
+      const bx = pos.x;
+      const bz = pos.z;
+      resolveCollisions(pos, 1.35, env.colliders);
+      if (pos.x !== bx || pos.z !== bz) {
+        const impact = Math.hypot(H.vx, H.vz);
+        if (impact > 9) v.condition = clamp(v.condition - 0.07, 0.03, 1);
+        H.vx *= 0.35;
+        H.vz *= 0.35;
+      }
+    }
+    // airframe lean: into the velocity, plus a touch of yaw bank
+    const vf = H.vx * sin + H.vz * cos;
+    const vs = H.vx * cos - H.vz * sin;
+    const tilt = tiltForVelocity(vf, vs);
+    const levelRate = onGround ? 6 : 2.6;
+    v.bodyPitch = approach(v.bodyPitch, onGround ? 0 : tilt.pitch, levelRate * dt);
+    v.bodyRoll = approach(v.bodyRoll, onGround ? 0 : tilt.roll - yawIn * 0.1, levelRate * dt);
+    v.group.rotation.set(v.bodyPitch, v.heading, v.bodyRoll);
+    v.speed = vf;
+    this.spinRotors(v, dt);
+    stepDoors(v.doors, dt);
+    // fuel, wear, and the loudest noise on the island
+    if (H.rotor > 0.04 && live) {
+      const load = 0.35 + 0.65 * Math.min(1, Math.abs(H.vy) / 5 + Math.hypot(H.vx, H.vz) / def.topSpeed);
+      v.fuel = Math.max(0, v.fuel - def.burnClass * 0.03 * load * H.rotor * dt);
+      v.condition = clamp(v.condition - dt * 0.0001 * load, 0, 1);
+    }
+    (v as { noiseT?: number }).noiseT = ((v as { noiseT?: number }).noiseT ?? 0) + dt;
+    if ((v as { noiseT?: number }).noiseT! > 0.3) {
+      (v as { noiseT?: number }).noiseT = 0;
+      if (H.rotor > 0.12) env.noise(pos.x, pos.z, def.noiseDrive * (0.35 + 0.65 * H.rotor));
+    }
+  }
+
   private finishDriveStep(dt: number, v: Vehicle, env: DriveEnv, engine: number, speedRatio: number): void {
     const def = v.def;
     const pos = v.group.position;
