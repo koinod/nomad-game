@@ -30,6 +30,9 @@ export interface ContainerDef {
   locked?: boolean;
   /** Seconds of hold-to-search before the loot panel opens. */
   searchTime?: number;
+  /** Explicit placement height (upstairs furniture in two-story houses);
+   *  when set, the container ignores terrain/floor inference. */
+  y?: number;
 }
 
 export interface InteractHooks {
@@ -124,7 +127,7 @@ export class InteractSystem {
     const crateMat = new THREE.MeshStandardMaterial({ color: 0x6e5a3e, roughness: 1 });
     const crateGeo = new THREE.BoxGeometry(0.9, 0.9, 0.9);
     for (const c of containers) {
-      const y = hooks.groundY(c.x, c.z);
+      const y = c.y ?? hooks.groundY(c.x, c.z);
       const pos = new THREE.Vector3(c.x, y, c.z);
       let mesh: THREE.Object3D;
       if (c.meshKind) {

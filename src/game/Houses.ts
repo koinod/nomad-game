@@ -1,6 +1,8 @@
 // Houses.ts — procedural enterable houses for POIs.
-// v1: camp + suburban, single-story. Wall colliders, floor rects, furniture
-// loot, 3-4 visual variants per tier. Deterministic from seed ^ house id.
+// v2: closed roofs (gable ends on the correct faces — v1 put them on the
+// eave sides, leaving the roof open at both ends), two-story houses with
+// real stairs + height-aware floors, a rich two-story variant, garages.
+// Wall colliders, floor rects, furniture loot. Deterministic from seed.
 
 import * as THREE from 'three';
 import { mulberry32 } from './rng';
@@ -11,7 +13,7 @@ import { FURNITURE_LABEL, FURNITURE_HALF, type FurnitureKind } from './furniture
 
 export type HouseTier = 'camp' | 'suburban';
 export type VariantName =
-  | 'ranch' | 'bungalow' | 'farmhouse'   // suburban
+  | 'ranch' | 'bungalow' | 'farmhouse' | 'ranch2' | 'richhouse' | 'garage' // suburban
   | 'cabin' | 'shack' | 'leanto' | 'ruin'; // camp (+ suburban ruin)
 
 interface HousePlacement {
@@ -25,10 +27,12 @@ interface HousePlacement {
 const PLACEMENTS: HousePlacement[] = [
   // town — replaces the old shell boxes
   { poi: 'town', dx: -20, dz: -6, variant: 'ranch', rotQ: 1 },
-  { poi: 'town', dx: 16, dz: 12, variant: 'bungalow', rotQ: 3 },
+  { poi: 'town', dx: 16, dz: 12, variant: 'ranch2', rotQ: 3 },
   { poi: 'town', dx: 2, dz: 24, variant: 'farmhouse', rotQ: 0 },
   { poi: 'town', dx: -26, dz: 14, variant: 'cabin', rotQ: 2 },
   { poi: 'town', dx: 26, dz: -22, variant: 'shack', rotQ: 1 },
+  { poi: 'town', dx: 36, dz: 10, variant: 'richhouse', rotQ: 2 },
+  { poi: 'town', dx: -38, dz: -20, variant: 'garage', rotQ: 0 },
   // camps
   { poi: 'shore_camp', dx: 10, dz: 8, variant: 'cabin', rotQ: 0 },
   { poi: 'shore_camp', dx: -9, dz: -10, variant: 'leanto', rotQ: 1 },
@@ -48,8 +52,14 @@ interface VariantSpec {
   wallColor: number;
   roof: 'pitched' | 'shed' | 'none';
   interiorWall: boolean; // one dividing wall with a door gap
-  openFront: boolean; // lean-to: no front wall
+  openFront: boolean; // lean-to / garage: no front wall
   furniture: { kind: FurnitureKind; lx: number; lz: number; rot: number }[];
+  /** v2: a real second story — slab, stairs up the east wall, upper rooms. */
+  twoStory?: boolean;
+  /** Upstairs furniture. Align lx/lz with ground pieces below where
+   *  possible: colliders are height-blind, so an upstairs piece only earns
+   *  a collider when it sits (nearly) over an existing ground collider. */
+  furnitureUp?: { kind: FurnitureKind; lx: number; lz: number; rot: number }[];
 }
 
 const VARIANTS: Record<VariantName, VariantSpec> = {
@@ -84,6 +94,50 @@ const VARIANTS: Record<VariantName, VariantSpec> = {
       { kind: 'dresser', lx: 2.4, lz: 3.2, rot: 2 },
       { kind: 'bookshelf', lx: -2.6, lz: 3.2, rot: 1 },
       { kind: 'crate', lx: 0.5, lz: 1.0, rot: 0 },
+    ],
+  },
+  ranch2: {
+    tier: 'suburban', w: 9.5, d: 8, wallH: 2.75, wallColor: 0x8f8272, roof: 'pitched',
+    interiorWall: true, openFront: false, twoStory: true,
+    furniture: [
+      { kind: 'fridge', lx: -3.4, lz: -3.1, rot: 0 },
+      { kind: 'cabinets', lx: -1.7, lz: -3.3, rot: 0 },
+      { kind: 'bookshelf', lx: 2.5, lz: -3.1, rot: 0 },
+      { kind: 'dresser', lx: 2.9, lz: 2.9, rot: 2 },
+      { kind: 'crate', lx: -3.0, lz: 3.0, rot: 1 },
+    ],
+    furnitureUp: [
+      { kind: 'dresser', lx: 2.5, lz: -3.1, rot: 0 },
+      { kind: 'bookshelf', lx: 2.9, lz: 2.9, rot: 2 },
+      { kind: 'cabinets', lx: -3.4, lz: -3.1, rot: 0 },
+      { kind: 'crate', lx: -3.0, lz: 3.0, rot: 3 },
+    ],
+  },
+  richhouse: {
+    tier: 'suburban', w: 11, d: 9.5, wallH: 2.8, wallColor: 0xa3967c, roof: 'pitched',
+    interiorWall: true, openFront: false, twoStory: true,
+    furniture: [
+      { kind: 'fridge', lx: -4.2, lz: -3.9, rot: 0 },
+      { kind: 'cabinets', lx: -2.4, lz: -4.1, rot: 0 },
+      { kind: 'cabinets', lx: -0.6, lz: -4.1, rot: 0 },
+      { kind: 'bookshelf', lx: 3.4, lz: -3.9, rot: 0 },
+      { kind: 'dresser', lx: 3.8, lz: 3.4, rot: 2 },
+      { kind: 'crate', lx: -4.0, lz: 3.6, rot: 1 },
+    ],
+    furnitureUp: [
+      { kind: 'dresser', lx: 3.4, lz: -3.9, rot: 0 },
+      { kind: 'bookshelf', lx: 3.8, lz: 3.4, rot: 2 },
+      { kind: 'dresser', lx: -4.2, lz: -3.9, rot: 0 },
+      { kind: 'cabinets', lx: -2.4, lz: -4.1, rot: 0 },
+    ],
+  },
+  garage: {
+    tier: 'suburban', w: 6.5, d: 6, wallH: 2.6, wallColor: 0x7d7466, roof: 'pitched',
+    interiorWall: false, openFront: true,
+    furniture: [
+      { kind: 'toolbox', lx: -2.2, lz: -2.2, rot: 1 },
+      { kind: 'crate', lx: 2.2, lz: -2.2, rot: 0 },
+      { kind: 'barrel', lx: 2.4, lz: 0.8, rot: 0 },
     ],
   },
   cabin: {
@@ -296,7 +350,7 @@ function buildOne(
 
   // windows: framed units with glass, mullion cross, and a sill —
   // sill sits 0.95m above the floor, per residential convention
-  const addWindow = (wx: number, wz: number, ry: number) => {
+  const addWindow = (wx: number, wz: number, ry: number, yOff = 0) => {
     const g = new THREE.Group();
     const TRIMC = 0x4a3826;
     const W = 1.06;
@@ -317,7 +371,7 @@ function buildOne(
     const sill = box(W + 0.14, 0.07, 0.2, TRIMC);
     sill.position.set(0, -H / 2 - 0.035, 0.04);
     g.add(top, bot, lf, rt, glass, mv, mh, sill);
-    g.position.set(wx, cy, wz);
+    g.position.set(wx, cy + yOff, wz);
     g.rotation.y = ry;
     group.add(g);
   };
@@ -355,10 +409,30 @@ function buildOne(
     }
   }
 
-  // roof
+  // roof — CLOSED construction: pitched roofs get their triangular gable
+  // ends on the X faces (the ridge runs along X; v1 misplaced them on the
+  // eave sides, leaving both ends of every roof open), shed roofs get a
+  // raised back filler + sloped end caps.
+  const roofBase = spec.twoStory && !ruin ? wh + 2.52 : wallTop;
   if (spec.roof !== 'none') {
     const roofGroup = new THREE.Group();
     const roofCol = new THREE.Color(0x4a3a30).offsetHSL(0, 0, (rng() - 0.5) * 0.05).getHex();
+    const capMat = new THREE.MeshStandardMaterial({ color: wallCol, roughness: 1, side: THREE.DoubleSide });
+    // flat end cap in the ZY plane at x = ±hw, from shape points (z, y).
+    // flipZ for asymmetric shapes (shed): rotateY(+90°) maps shape X to
+    // world -Z, which would mirror the slope; -90° keeps z as z.
+    const endCap = (pts: [number, number][], x: number, flipZ = false) => {
+      const shape = new THREE.Shape();
+      shape.moveTo(pts[0][0], pts[0][1]);
+      for (let i = 1; i < pts.length; i++) shape.lineTo(pts[i][0], pts[i][1]);
+      shape.closePath();
+      const geo = new THREE.ShapeGeometry(shape);
+      geo.rotateY(flipZ ? -Math.PI / 2 : Math.PI / 2);
+      const m = new THREE.Mesh(geo, capMat);
+      m.position.set(x, 0, 0);
+      m.castShadow = true;
+      roofGroup.add(m);
+    };
     if (spec.roof === 'pitched') {
       const rise = Math.min(spec.w, spec.d) * 0.3;
       const slope = Math.hypot(hd, rise);
@@ -366,34 +440,26 @@ function buildOne(
       for (const sgn of [1, -1]) {
         const panel = box(spec.w + 0.7, 0.14, slope + 0.5, roofCol);
         panel.rotation.x = sgn * a;
-        panel.position.set(0, wallTop + rise / 2, (sgn * hd) / 2);
+        panel.position.set(0, roofBase + rise / 2, (sgn * hd) / 2);
         roofGroup.add(panel);
       }
       // fascia along the eaves + ridge cap: the roof reads as connected,
       // not two slabs floating over the walls
       for (const sgn of [1, -1]) {
         const fascia = box(spec.w + 0.9, 0.2, 0.07, 0x4a3826);
-        fascia.position.set(0, wallTop - 0.03, sgn * (hd + 0.3));
+        fascia.position.set(0, roofBase - 0.03, sgn * (hd + 0.3));
         roofGroup.add(fascia);
       }
       const ridge = box(spec.w + 0.8, 0.1, 0.36, roofCol);
-      ridge.position.set(0, wallTop + rise, 0);
+      ridge.position.set(0, roofBase + rise, 0);
       roofGroup.add(ridge);
-      // gable caps
+      // gable caps on the X ends — the triangle spans the depth (z) and
+      // rises to the ridge; this is what actually closes the roof
       for (const sgn of [1, -1]) {
-        const shape = new THREE.Shape();
-        shape.moveTo(-hw, wallTop);
-        shape.lineTo(hw, wallTop);
-        shape.lineTo(0, wallTop + rise);
-        shape.closePath();
-        const cap = new THREE.Mesh(
-          new THREE.ShapeGeometry(shape),
-          new THREE.MeshStandardMaterial({ color: wallCol, roughness: 1 }),
+        endCap(
+          [[-hd, roofBase - 0.05], [hd, roofBase - 0.05], [0, roofBase + rise]],
+          sgn * (hw - 0.02),
         );
-        cap.position.set(0, 0, sgn * hd);
-        if (sgn < 0) cap.rotation.y = Math.PI;
-        cap.castShadow = true;
-        roofGroup.add(cap);
       }
     } else {
       // shed roof: single slope, high at the back
@@ -402,11 +468,24 @@ function buildOne(
       const a = Math.atan2(rise, spec.d);
       const panel = box(spec.w + 0.5, 0.12, slope + 0.4, roofCol);
       panel.rotation.x = a;
-      panel.position.set(0, wallTop + rise / 2 - 0.1, 0);
+      panel.position.set(0, roofBase + rise / 2 - 0.1, 0);
       roofGroup.add(panel);
       const fascia = box(spec.w + 0.7, 0.2, 0.07, 0x4a3826);
-      fascia.position.set(0, wallTop - 0.12, hd + 0.22);
+      fascia.position.set(0, roofBase - 0.12, hd + 0.22);
       roofGroup.add(fascia);
+      // raised back filler: the panel's high edge floats `rise` above the
+      // back wall — fill that band so the back of the roof is closed too
+      const filler = box(spec.w - 0.05, rise + 0.15, 0.1, wallCol);
+      filler.position.set(0, roofBase + (rise - 0.15) / 2 - 0.05, -hd + 0.05);
+      roofGroup.add(filler);
+      // trapezoid end caps following the slope
+      for (const sgn of [1, -1]) {
+        endCap(
+          [[-hd, roofBase - 0.3], [hd, roofBase - 0.3], [hd, roofBase - 0.08], [-hd, roofBase + rise - 0.12]],
+          sgn * (hw - 0.02),
+          true,
+        );
+      }
     }
     group.add(roofGroup);
     roofs.push({ bounds: aabb(-hw, -hd, hw, hd), group: roofGroup });
@@ -424,6 +503,9 @@ function buildOne(
       id: `f_${id}_${f.kind}_${i}`,
       x: wx,
       z: wz,
+      // two-story houses pin every container's height: floor inference
+      // would otherwise float ground furniture up to the second floor
+      ...(spec.twoStory ? { y: floorTop } : {}),
       loot: FURNITURE_LOOT[f.kind][spec.tier] as ContainerDef['loot'],
       label: FURNITURE_LABEL[f.kind],
       meshKind: f.kind,
@@ -431,8 +513,9 @@ function buildOne(
     });
   });
 
-  // safes: locked loot, 20% on suburban houses (HOUSES_DESIGN) — bedroom corner
-  if (spec.tier === 'suburban' && rng() < 0.2) {
+  // safes: locked loot, 20% on suburban houses (HOUSES_DESIGN) — bedroom
+  // corner. Two-story houses roll theirs upstairs in the block below.
+  if (!spec.twoStory && spec.tier === 'suburban' && rng() < 0.2) {
     const [wx, wz] = pt(-hw + 0.9, -hd + 0.9);
     const [hx, hz] = FURNITURE_HALF.safe;
     const rotated = p.rotQ % 2 === 1;
@@ -448,6 +531,95 @@ function buildOne(
       locked: true,
       searchTime: 4,
     });
+  }
+
+  // ---------- second story (v2) ----------
+  if (spec.twoStory && !ruin && !spec.openFront) {
+    const floorTop2 = base + wh + 0.12; // world height of the upstairs floor
+    // slab (visual) — its top is the walking surface
+    const slab2 = box(spec.w - t, 0.16, spec.d - t, 0x5a5348);
+    slab2.position.set(0, wh + 0.04, 0);
+    group.add(slab2);
+    // floor rects: full floor minus the stairwell (east strip, north run)
+    const stairW = 1.35;
+    floors.push({ ...aabb(-hw + t / 2, -hd + t / 2, hw - stairW, hd - t / 2), y: floorTop2 });
+    floors.push({ ...aabb(hw - stairW, -hd + 3.1, hw - t / 2, hd - t / 2), y: floorTop2 });
+    // stairs: a solid stepped wedge up the east wall, north → south.
+    // 10 steps of ~0.27 rise; each tread is also a floor rect, and the
+    // height-aware floor lookup climbs them one at a time.
+    const steps = 10;
+    const riseEach = (wh + 0.12 - 0.14) / steps;
+    const z0 = -hd + 0.55;
+    const runEach = 2.75 / steps;
+    for (let i = 0; i < steps; i++) {
+      const topY = 0.14 + (i + 1) * riseEach;
+      const step = box(1.15, topY, runEach + 0.06, 0x6e5f4c);
+      step.position.set(hw - 0.72, topY / 2, z0 + i * runEach);
+      group.add(step);
+      floors.push({
+        ...aabb(hw - 1.32, z0 + i * runEach - runEach / 2 - 0.03, hw - 0.12, z0 + i * runEach + runEach / 2 + 0.03),
+        y: base + topY,
+      });
+    }
+    // upper perimeter walls — same footprint as the ground walls (their
+    // colliders already exist), no interior partitions upstairs (open loft)
+    const uh = 2.6;
+    const uN = box(spec.w, uh, t, wallCol); uN.position.set(0, wh + uh / 2 - 0.05, -hd);
+    const uS = box(spec.w, uh, t, wallCol); uS.position.set(0, wh + uh / 2 - 0.05, hd);
+    const uW = box(t, uh, spec.d, wallCol); uW.position.set(-hw, wh + uh / 2 - 0.05, 0);
+    const uE = box(t, uh, spec.d, wallCol); uE.position.set(hw, wh + uh / 2 - 0.05, 0);
+    group.add(uN, uS, uW, uE);
+    addWindow(0, -hd - t / 2 - 0.03, 0, wh + 0.05);
+    addWindow(hw + t / 2 + 0.03, 0.6, Math.PI / 2, wh + 0.05);
+    addWindow(-hw - t / 2 - 0.03, -0.6, Math.PI / 2, wh + 0.05);
+    // upstairs furniture: pinned to floor 2; a collider only where it sits
+    // over an existing ground collider (height-blind colliders must not
+    // invent new blocked spots on the floor below)
+    const overlapsExisting = (c: Collider): boolean =>
+      colliders.some((o) => c.x0 < o.x1 && c.x1 > o.x0 && c.z0 < o.z1 && c.z1 > o.z0);
+    (spec.furnitureUp ?? []).forEach((f, i) => {
+      const [wx, wz] = pt(f.lx, f.lz);
+      const [hx, hz] = FURNITURE_HALF[f.kind];
+      const rotated = p.rotQ % 2 === 1;
+      const hxw = rotated ? hz : hx;
+      const hzw = rotated ? hx : hz;
+      const col: Collider = { x0: wx - hxw, z0: wz - hzw, x1: wx + hxw, z1: wz + hzw };
+      if (overlapsExisting(col)) colliders.push(col);
+      containers.push({
+        id: `f_${id}_up_${f.kind}_${i}`,
+        x: wx,
+        z: wz,
+        y: floorTop2,
+        loot: FURNITURE_LOOT[f.kind][spec.tier] as ContainerDef['loot'],
+        label: FURNITURE_LABEL[f.kind],
+        meshKind: f.kind,
+        rotY: f.rot * Math.PI * 0.5 + p.rotQ * Math.PI * 0.5,
+      });
+    });
+    // the safe lives upstairs in a two-story house (rich: 45%, else 20%)
+    const safeChance = p.variant === 'richhouse' ? 0.45 : 0.2;
+    if (rng() < safeChance) {
+      const [wx, wz] = pt(-hw + 0.9, -hd + 0.9);
+      const [hx, hz] = FURNITURE_HALF.safe;
+      const rotated = p.rotQ % 2 === 1;
+      const col: Collider = {
+        x0: wx - (rotated ? hz : hx), z0: wz - (rotated ? hx : hz),
+        x1: wx + (rotated ? hz : hx), z1: wz + (rotated ? hx : hz),
+      };
+      if (overlapsExisting(col)) colliders.push(col);
+      containers.push({
+        id: `f_${id}_safe`,
+        x: wx,
+        z: wz,
+        y: floorTop2,
+        loot: SAFE_LOOT,
+        label: FURNITURE_LABEL.safe,
+        meshKind: 'safe',
+        rotY: p.rotQ * Math.PI * 0.5 + Math.PI / 4,
+        locked: true,
+        searchTime: 4,
+      });
+    }
   }
 
   group.position.set(cx, base, cz);

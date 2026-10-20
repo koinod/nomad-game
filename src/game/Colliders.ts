@@ -56,3 +56,26 @@ export function floorYAt(x: number, z: number, floors: readonly FloorRect[]): nu
   }
   return y;
 }
+
+/**
+ * Height-aware floor lookup for stacked floors (houses v2): the highest
+ * floor at (x,z) that is no more than `stepUp` above the walker's current
+ * height — so a ground-floor walker isn't snapped onto the floor above,
+ * stairs climb one step at a time, and the upstairs floor holds you once
+ * you're on it.
+ */
+export function floorYAtRef(
+  x: number,
+  z: number,
+  floors: readonly FloorRect[],
+  refY: number,
+  stepUp = 0.55,
+): number {
+  let y = -Infinity;
+  for (const f of floors) {
+    if (x >= f.x0 && x <= f.x1 && z >= f.z0 && z <= f.z1 && f.y <= refY + stepUp && f.y > y) {
+      y = f.y;
+    }
+  }
+  return y;
+}

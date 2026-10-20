@@ -15,7 +15,7 @@ import type { Husk, SpawnZone } from './Husks';
 import { InteractSystem, buildContainerDefs } from './Interact';
 import { AnimalManager } from './Animals';
 import { VehicleManager, type Vehicle } from './Vehicles';
-import { floorYAt, resolveCollisions, type Collider, type FloorRect } from './Colliders';
+import { floorYAt, floorYAtRef, resolveCollisions, type Collider, type FloorRect } from './Colliders';
 import { sfx, ambience } from '../systems/audio';
 import { ENDING_LINES } from '../narrative/dialogue';
 import {
@@ -315,6 +315,12 @@ export class Game {
     return Math.max(heightAt(x, z), floorYAt(x, z, this.houseFloors));
   }
 
+  /** Height-aware ground: floors above the walker's reach don't count —
+   *  the ground floor of a two-story house stays on the ground floor. */
+  groundYRef(x: number, z: number, refY: number): number {
+    return Math.max(heightAt(x, z), floorYAtRef(x, z, this.houseFloors, refY));
+  }
+
   respawnAtSafePoint(): void {
     if (!this.player) return;
     const [x, z] = this.lastSafe;
@@ -553,7 +559,7 @@ export class Game {
     const speedMul = tier === 'ok' ? 1 : tier === 'heavy' ? 0.75 : 0.55;
 
     const playerCtx = {
-      groundY: (x: number, z: number) => this.groundY(x, z),
+      groundY: (x: number, z: number) => this.groundYRef(x, z, player.pos.y),
       sprintAllowed: tier === 'ok',
       speedMul,
       husks,
@@ -604,7 +610,7 @@ export class Game {
       {
         playerPos: player.pos,
         isNight: night,
-        groundY: (x, z) => this.groundY(x, z),
+        groundY: (x, z, refY) => this.groundYRef(x, z, refY ?? 0),
         colliders: this.houseColliders,
         onHuskKilled: (h) => this.onHuskKilled(h),
       },

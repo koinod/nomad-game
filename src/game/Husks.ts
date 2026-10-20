@@ -22,7 +22,7 @@ export const HUSK_CAP = 14;
 export interface HuskCtx {
   playerPos: THREE.Vector3;
   isNight: boolean;
-  groundY: (x: number, z: number) => number;
+  groundY: (x: number, z: number, refY?: number) => number;
   colliders: readonly Collider[];
   onHuskKilled: (h: Husk) => void;
 }
@@ -238,7 +238,7 @@ export class Husk {
       this.stunT -= dt;
       g.rotation.x = 0.25;
       if (this.stunT <= 0) g.rotation.x = 0;
-      g.position.y = ctx.groundY(g.position.x, g.position.z);
+      g.position.y = ctx.groundY(g.position.x, g.position.z, g.position.y);
       return;
     }
 
@@ -296,7 +296,7 @@ export class Husk {
       return 0;
     };
     const groundClamp = () => {
-      g.position.y = ctx.groundY(g.position.x, g.position.z);
+      g.position.y = ctx.groundY(g.position.x, g.position.z, g.position.y);
     };
 
     switch (this.state) {
