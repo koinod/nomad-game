@@ -57,6 +57,7 @@ export class Husk {
   lostSightT = 0;
   staggerT = 0; // heavy hits interrupt the attack windup
   limpT = 0; // walk-cycle clock for the shuffle animation
+  stunT = 0; // flashbang / concussion: no perception, no movement
   knock = new THREE.Vector3();
   removed = false;
   killReported = false;
@@ -202,6 +203,13 @@ export class Husk {
     this.stateT = 0;
   }
 
+  /** Concussion: the husk sees nothing, moves nothing, for dur seconds. */
+  stun(dur: number): void {
+    this.stunT = Math.max(this.stunT, dur);
+    this.state = 'idle';
+    this.stateT = 0;
+  }
+
   update(dt: number, ctx: HuskCtx, rng: () => number): void {
     const g = this.group;
     if (this.state === 'dead') {
@@ -223,6 +231,15 @@ export class Husk {
       const k = Math.min(1, this.staggerT / 0.55);
       g.rotation.x = Math.sin(k * Math.PI) * 0.4; // jolt back, then recover
       if (this.staggerT <= 0) g.rotation.x = 0;
+    }
+
+    // stunned (flashbang): frozen, head down, senses gone
+    if (this.stunT > 0) {
+      this.stunT -= dt;
+      g.rotation.x = 0.25;
+      if (this.stunT <= 0) g.rotation.x = 0;
+      g.position.y = ctx.groundY(g.position.x, g.position.z);
+      return;
     }
 
     const st = KIND_STATS[this.kind];
@@ -506,6 +523,32 @@ export class HuskManager {
       }
     }
     return best;
+  }
+
+  /** Explosion / area damage: full at the core, falloff to the rim. */
+  damageInRadius(x: number, z: number, radius: number, dmg: number): number {
+    let kills = 0;
+    for (const h of this.husks) {
+      if (!h.alive) continue;
+      const c = h.group.position;
+      const d = Math.hypot(c.x - x, c.z - z);
+      if (d > radius) continue;
+      const fall = 1 - (d / radius) * 0.7;
+      const dir = _v1.set(c.x - x, 0, c.z - z);
+      if (dir.lengthSq() < 0.01) dir.set(1, 0, 0);
+      dir.normalize();
+      if (h.damage(Math.round(dmg * fall), dir, 5, true)) kills++;
+    }
+    return kills;
+  }
+
+  /** Flashbang: everything alive in radius loses its senses for dur seconds. */
+  stunInRadius(x: number, z: number, radius: number, dur: number): void {
+    for (const h of this.husks) {
+      if (!h.alive) continue;
+      const c = h.group.position;
+      if (Math.hypot(c.x - x, c.z - z) <= radius) h.stun(dur);
+    }
   }
 
   update(dt: number, ctx: HuskCtx, playerPos: THREE.Vector3, isNight: boolean): void {

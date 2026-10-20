@@ -189,6 +189,8 @@ export default function HUD() {
   const stamina = useGameStore((s) => s.stamina);
   const maxStamina = useGameStore((s) => s.maxStamina);
   const interactPrompt = useGameStore((s) => s.interactPrompt);
+  const noiseLevel = useGameStore((s) => s.noiseLevel);
+  const search = useGameStore((s) => s.search);
   const lowHp = hp / maxHp < 0.3 && hp > 0;
 
   return (
@@ -200,6 +202,21 @@ export default function HUD() {
             background: 'radial-gradient(ellipse at center, transparent 55%, rgba(217,83,79,0.45) 100%)',
           }}
         />
+      )}
+
+      {/* hold-to-search progress */}
+      {search && (
+        <div className="absolute left-1/2 top-[58%] w-64 -translate-x-1/2">
+          <div className="mb-1 text-center text-xs uppercase tracking-wider text-[#d7dde5]">
+            Searching {search.label.replace(/^Search /, '').replace(/^Pick /, '')}…
+          </div>
+          <div className="h-2 overflow-hidden rounded bg-[#232b36]">
+            <div
+              className="h-full rounded bg-[#e8b34b]"
+              style={{ width: `${Math.round(search.frac * 100)}%` }}
+            />
+          </div>
+        </div>
       )}
 
       {/* crosshair */}
@@ -218,6 +235,18 @@ export default function HUD() {
           <span>Stamina</span>
         </div>
         <Bar value={stamina} max={maxStamina} fill="bg-[#e8b34b]" bg="bg-[#232b36]" />
+        <div className="mb-1 mt-2 flex items-center justify-between text-xs text-[#8a94a3]">
+          <span>Noise</span>
+          <span className={noiseLevel > 60 ? 'text-[#d9534f]' : noiseLevel > 25 ? 'text-[#e8b34b]' : ''}>
+            {noiseLevel > 60 ? 'LOUD' : noiseLevel > 25 ? 'audible' : 'quiet'}
+          </span>
+        </div>
+        <Bar
+          value={noiseLevel}
+          max={100}
+          fill={noiseLevel > 60 ? 'bg-[#d9534f]' : noiseLevel > 25 ? 'bg-[#e8b34b]' : 'bg-[#3b6a8a]'}
+          bg="bg-[#232b36]"
+        />
       </div>
 
       {/* clock + battery, top-right */}

@@ -1,12 +1,52 @@
-# NOMAD — Roadmap (2026-10-19, Ian's direction)
+# NOMAD — Roadmap (2026-10-19, Ian's direction; story canon updated 2026-10-20)
+
+## CANON: the journey (2026-10-20, Ian)
+
+**Easy mode = the road out:** Island (current) → Outer Banks → Norfolk / Virginia
+Beach area → D.C. Each leg is a region, not a menu — the island is chapter one,
+and the lighthouse ending becomes the "leave the island" gate. The Static
+spreads across the regions as you travel.
+
+**The cure flips the game:** reach D.C., get the cure — then it becomes
+**hardmode**. The Static is cured but the enemy changes: the government moves
+in, new factions enter (Mercenaries 2 pattern — new levels, new devils;
+Terraria hardmode pattern — the whole world recontextualizes). New vehicles,
+upgrades, better weapons/guns, better armor, survivor upgrades, new events —
+reasons to keep playing, not a victory lap. Skyrim-style side quests and
+open-ended reasons to stay busy are pinned for later (marked, not built).
+
+**Phase map updated:** Phases 1–3 (island) → Phase 4 road regions (OBX → Norfolk →
+D.C. at 1/10 scale) → cure → hardmode pivot (government + new factions + new
+tech tree) → Stage 2 = New Dawn-like evolved overworld after an ending.
 
 The waves after houses v1, in build order. Each wave ships as a playable,
 beta-testable build before the next starts.
 
-## Wave 0 — Houses v1 (in progress)
+## Wave 0 — Houses v1 (shipped 2026-10-19)
 
 Camp + suburban single-story enterable houses, wall collision, floor rects,
-furniture loot, tiered loot, POI placement. See HOUSES_DESIGN.md.
+furniture loot, tiered loot, POI placement, blueprint-proportioned doors/
+windows/roofs, terrain pads under footprints. See HOUSES_DESIGN.md.
+
+## Build priorities (2026-10-20, Ian's order)
+
+Vehicle + building models are the focus. Sat phone rework is long-term.
+Build order: **island → POIs → factions → buildings → item models → vehicles
+with real (not too advanced) physics → weapon mods → visuals → mobs → special
+mobs.** Cross-cutting: items that work and make sense, crafting trees with
+depth that make crafting worthwhile/necessary, skill trees that deepen gameplay
+and support archetype building.
+
+## Wave 1 — Ambiance / feel
+
+The world has to *feel* right before more systems land on it.
+- **Depth of field** in third person (postprocess; focus on the player,
+  soft distance) — adds cinematic weight and hides far-LOD seams.
+- **Realistic clouds**: cloud sprites/shader dome, drifting, day/night tinted.
+- **Less far visibility in third person**: tighten fog + camera far distance,
+  so the world feels bigger and the horizon doesn't look cheap.
+- General atmosphere pass: light shafts through trees, wind audio + grass
+  motion, distant water sound at shore. (Ian: "the world could be better.")
 
 ## Wave 1 — Ambiance / feel
 
@@ -83,5 +123,6 @@ From sodgame's playbook, plus Ian's military ask:
 ---
 
 Phase map: Waves 1–3 = Phase 1 completion (feel). Waves 4–5 + 7–9 = Phase 2
-(survival systems). Wave 6 = Phase 3 world depth. Stage 2 = New Dawn overworld
-after an ending (unchanged).
+(survival systems). Wave 6 = Phase 3 world depth. Phase 4 = road regions
+(OBX → Norfolk/Va Beach → D.C.). Cure → hardmode pivot. Stage 2 = New Dawn
+overworld after an ending.

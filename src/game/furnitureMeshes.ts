@@ -5,7 +5,8 @@ import * as THREE from 'three';
 
 export type FurnitureKind =
   | 'fridge' | 'cabinets' | 'dresser' | 'bookshelf'
-  | 'cooler' | 'crate' | 'barrel' | 'toolbox';
+  | 'cooler' | 'crate' | 'barrel' | 'toolbox'
+  | 'safe' | 'logpile' | 'berrybush';
 
 /** Half-extents (x,z) for collision — keep the player out of the fridge. */
 export const FURNITURE_HALF: Record<FurnitureKind, [number, number]> = {
@@ -17,6 +18,9 @@ export const FURNITURE_HALF: Record<FurnitureKind, [number, number]> = {
   crate: [0.47, 0.47],
   barrel: [0.37, 0.37],
   toolbox: [0.27, 0.17],
+  safe: [0.34, 0.3],
+  logpile: [0.55, 0.4],
+  berrybush: [0.5, 0.5],
 };
 
 export const FURNITURE_LABEL: Record<FurnitureKind, string> = {
@@ -28,6 +32,9 @@ export const FURNITURE_LABEL: Record<FurnitureKind, string> = {
   crate: 'Search crate',
   barrel: 'Search barrel',
   toolbox: 'Search toolbox',
+  safe: 'Pick safe (locked)',
+  logpile: 'Gather wood',
+  berrybush: 'Gather produce',
 };
 
 function mat(color: number): THREE.MeshStandardMaterial {
@@ -107,6 +114,36 @@ export function buildFurnitureMesh(kind: FurnitureKind): THREE.Group {
     case 'toolbox': {
       add(box(0.5, 0.28, 0.3), 0x8a2f2f, 0, 0.14, 0);
       add(box(0.2, 0.05, 0.04), 0x2e2e2e, 0, 0.3, 0); // handle
+      break;
+    }
+    case 'safe': {
+      add(box(0.62, 0.62, 0.55), 0x3a4048, 0, 0.31, 0); // body
+      add(box(0.5, 0.52, 0.04), 0x2c3339, 0, 0.31, 0.28); // door plate
+      const dial = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.04, 12), mat(0xb0b6bc));
+      dial.rotation.x = Math.PI / 2;
+      dial.position.set(0, 0.42, 0.31);
+      g.add(dial);
+      add(box(0.12, 0.04, 0.04), 0xb0b6bc, 0, 0.24, 0.31); // handle
+      add(box(0.5, 0.03, 0.5), 0x6a2c2c, 0, 0.58, 0); // red stripe — pick me
+      break;
+    }
+    case 'logpile': {
+      const logGeo = new THREE.CylinderGeometry(0.14, 0.16, 1.1, 8);
+      logGeo.rotateZ(Math.PI / 2);
+      add(logGeo, 0x5a4028, 0, 0.15, 0.18);
+      add(logGeo, 0x4a3520, 0.06, 0.15, -0.18);
+      add(logGeo, 0x63482e, -0.03, 0.4, 0.02);
+      break;
+    }
+    case 'berrybush': {
+      const blob = new THREE.IcosahedronGeometry(0.5, 0);
+      add(blob, 0x2e5a2e, 0, 0.55, 0);
+      add(blob, 0x3a6a34, 0.35, 0.4, 0.2);
+      add(blob, 0x264d26, -0.35, 0.42, -0.15);
+      const dot = new THREE.SphereGeometry(0.06, 6, 6);
+      add(dot, 0xc23b4e, 0.18, 0.75, 0.3);
+      add(dot, 0xc23b4e, -0.3, 0.62, 0.34);
+      add(dot, 0xd65668, 0.42, 0.52, -0.1);
       break;
     }
   }

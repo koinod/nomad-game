@@ -134,7 +134,10 @@ export function buildGroundMesh(itemId: string, qty = 1): THREE.Group {
     case 'combat_knife':
     case 'sledgehammer':
     case 'shotgun':
-    case 'hunting_rifle': {
+    case 'hunting_rifle':
+    case 'frag':
+    case 'molotov':
+    case 'flashbang': {
       const m = buildHandMesh(itemId);
       m.position.y = 0.06;
       g.add(m);
@@ -188,6 +191,25 @@ export function buildGroundMesh(itemId: string, qty = 1): THREE.Group {
       add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.02, 0.18), MAT.black()));
       const screen = add(new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.005, 0.15), new THREE.MeshStandardMaterial({ color: 0x2a6e4e, emissive: 0x1a4a32, emissiveIntensity: 0.6 })));
       screen.position.y = 0.013;
+      break;
+    }
+    case 'frag': {
+      const body = add(new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), new THREE.MeshStandardMaterial({ color: 0x3a5230, roughness: 0.7 })));
+      body.position.z = 0.1;
+      const lever = add(new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 0.14), MAT.steel()));
+      lever.position.set(0.05, 0.05, 0.12);
+      break;
+    }
+    case 'molotov': {
+      const bottle = add(new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.28, 10), new THREE.MeshStandardMaterial({ color: 0x8a5a22, roughness: 0.3 })));
+      bottle.rotation.x = Math.PI / 2; bottle.position.z = 0.14;
+      const rag = add(new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.12), MAT.tan()));
+      rag.position.set(0, 0.02, 0.3);
+      break;
+    }
+    case 'flashbang': {
+      const body = add(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.18, 10), MAT.steel()));
+      body.rotation.x = Math.PI / 2; body.position.z = 0.12;
       break;
     }
     default: {

@@ -124,10 +124,11 @@ there (who then isn't at home — the SoD2 beds problem, deliberately).
 
 ### 3.3 Facility slots & tiers
 
-Costs in NOMAD items. Existing: `scrap`, `wire`, `cloth`. Specced in
-HOUSES_DESIGN but **not yet in items.ts** (prerequisite ticket): `valuables`,
-`tire`, `engine_part`, `car_battery`. New items proposed in §3.8: `wood`,
-`fuel_can`, `gun_parts`, `produce`.
+Costs in NOMAD items. Existing: `scrap`, `wire`, `cloth`. Shipped in
+items.ts with the workstation-crafting wave (2026-10-19): `tire`,
+`engine_part`, `car_battery`, `fuel_can`, `chemicals`. Specced in
+HOUSES_DESIGN but not yet in items.ts (prerequisite ticket): `valuables`.
+New items proposed in §3.8: `wood`, `gun_parts`, `produce`.
 Build times are in-game hours with 1 Builder on the job (player solo = ×1.5,
 T1 only — §3.5). Power draw from sodgame's 0.4–1.2 kW band.
 

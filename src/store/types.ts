@@ -54,6 +54,8 @@ export interface ItemDef {
   spread?: number; // radians of pellet jitter
   carryBonus?: number; // packs: extra kg
   packSlots?: number; // packs: extra slots
+  armor?: number; // fraction of damage mitigated while carried (vests, plates)
+  thrown?: { aoe: number; dmg: number; fuse: number; fire?: boolean; blind?: boolean }; // grenades
 }
 
 export interface InvItem {

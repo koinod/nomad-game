@@ -43,6 +43,16 @@ export class Game {
   private husks: HuskManager | null = null;
   private animals: AnimalManager | null = null;
   private interact: InteractSystem | null = null;
+  // thrown weapons in flight + molotov fire zones
+  private throwables: {
+    mesh: THREE.Mesh;
+    vel: THREE.Vector3;
+    fuse: number;
+    itemId: string;
+  }[] = [];
+  private fireZones: { group: THREE.Group; t: number; x: number; z: number }[] = [];
+  // hold-to-search state (container / corpse / safe)
+  private searching: { id: string; label: string; t: number; dur: number; x: number; z: number; hp: number } | null = null;
   private houseColliders: Collider[] = [];
   private houseFloors: FloorRect[] = [];
   private houseRoofs: { bounds: Collider; group: THREE.Group }[] = [];
@@ -529,7 +539,10 @@ export class Game {
       emitNoise: (x, z, r) => {
         husks.emitNoise(x, z, r);
         this.animals?.emitNoise(x, z, r);
+        // the HUD noise meter tracks the loudest sound at the player
+        useGameStore.getState().setNoiseLevel(Math.min(100, (r / 80) * 100));
       },
+      onThrow: (itemId) => this.throwGrenade(itemId),
       onAnimalKill: (kill) => {
         // gut the kill: raw meat appears where the animal fell
         const qty = kill.min + Math.floor(this.rng() * (kill.max - kill.min + 1));
@@ -580,14 +593,84 @@ export class Game {
       }
     }
 
-    // interact prompt (E within 3m)
+    // thrown weapons: arc, bounce lightly off ground, blow on fuse
+    for (let i = this.throwables.length - 1; i >= 0; i--) {
+      const g = this.throwables[i];
+      g.fuse -= dt;
+      g.vel.y -= 9.8 * dt;
+      g.mesh.position.addScaledVector(g.vel, dt);
+      const gy = this.groundY(g.mesh.position.x, g.mesh.position.z);
+      if (g.mesh.position.y < gy + 0.1) {
+        g.mesh.position.y = gy + 0.1;
+        g.vel.y *= -0.35; // cheap bounce
+        g.vel.x *= 0.7;
+        g.vel.z *= 0.7;
+      }
+      if (g.fuse <= 0) {
+        this.throwables.splice(i, 1);
+        this.detonate(g);
+      }
+    }
+    // molotov fire zones: deny the area, tick damage
+    for (let i = this.fireZones.length - 1; i >= 0; i--) {
+      const f = this.fireZones[i];
+      f.t -= dt;
+      if (f.t <= 0) {
+        this.scene!.remove(f.group);
+        this.fireZones.splice(i, 1);
+        continue;
+      }
+      (f as { tick?: number }).tick = ((f as { tick?: number }).tick ?? 0) + dt;
+      if ((f as { tick?: number }).tick! >= 0.5) {
+        (f as { tick?: number }).tick = 0;
+        this.husks!.damageInRadius(f.x, f.z, 4, 14);
+        this.animals?.damageInRadius(f.x, f.z, 4, 14);
+      }
+      f.group.scale.setScalar(0.75 + (f.t / 6) * 0.35); // burns down
+    }
+
+    // hold-to-search: the timer runs while the player stays close and unhurt
+    if (this.searching) {
+      const q = this.searching;
+      const moved = Math.hypot(player.pos.x - q.x, player.pos.z - q.z);
+      if (moved > 2 || s.hp < q.hp) {
+        this.searching = null;
+        s.setSearch(null);
+        s.addToast('Search interrupted.');
+      } else {
+        q.t += dt;
+        s.setSearch({ id: q.id, label: q.label, frac: Math.min(1, q.t / q.dur) });
+        if (q.t >= q.dur) {
+          this.interact!.markSearched(q.id);
+          const def = this.interact!.containerDef(q.id);
+          if (def?.locked) {
+            const lp = s.inventory.find((i) => i.itemId === 'lockpick');
+            if (lp) {
+              s.removeItem(lp.uid, 1);
+              s.addToast('The lockpick turns. One less in the kit.');
+            }
+          }
+          this.searching = null;
+          s.setSearch(null);
+          this.interact!.useById(q.id);
+        }
+      }
+    }
+
+    // noise meter decays — silence is the default state
+    if (s.noiseLevel > 0) s.setNoiseLevel(s.noiseLevel * Math.pow(0.2, dt));
+
+    // interact prompt (F within 3m)
     const near = this.interact!.nearest(player.pos.x, player.pos.z, 3);
-    s.setInteractPrompt(near ? `[E] ${near.label}` : null);
-    if (input.interact && near) {
-      near.use();
-      // refresh prompt (e.g. container now looted)
-      const again = this.interact!.nearest(player.pos.x, player.pos.z, 3);
-      s.setInteractPrompt(again ? `[E] ${again.label}` : null);
+    s.setInteractPrompt(near ? `[F] ${near.label}` : null);
+    if (input.interact && near && !this.searching) {
+      const handled = this.beginSearchIfNeeded(near);
+      if (!handled) {
+        near.use();
+        // refresh prompt (e.g. container now looted)
+        const again = this.interact!.nearest(player.pos.x, player.pos.z, 3);
+        s.setInteractPrompt(again ? `[F] ${again.label}` : null);
+      }
     }
 
     // reach-type quest steps
@@ -755,6 +838,109 @@ export class Game {
       input.lookDX += e.movementX;
       input.lookDY += e.movementY;
     }
+  }
+
+  /** Hold-to-search gate: containers/corpses/safes need a search before the
+   *  loot panel opens — once searched, they open instantly. Returns true when
+   *  the press was consumed (search started, or a lock stopped it). */
+  private beginSearchIfNeeded(near: { id: string; kind: string; label: string }): boolean {
+    if (near.kind !== 'container' && near.kind !== 'corpse') return false;
+    if (this.interact!.isSearched(near.id)) return false;
+    const s = useGameStore.getState();
+    const def = this.interact!.containerDef(near.id);
+    if (def?.locked && !s.inventory.some((i) => i.itemId === 'lockpick')) {
+      s.addToast('Locked. You need a lockpick.');
+      return true;
+    }
+    const dur = def?.searchTime ?? (near.kind === 'corpse' ? 1 : 2);
+    this.searching = {
+      id: near.id,
+      label: near.label,
+      t: 0,
+      dur,
+      x: this.player!.pos.x,
+      z: this.player!.pos.z,
+      hp: s.hp,
+    };
+    return true;
+  }
+
+  /** Grenade leaves the hand: arc it toward where the player is looking. */
+  private throwGrenade(itemId: string): void {
+    const player = this.player!;
+    const dir = new THREE.Vector3();
+    this.camera!.getWorldDirection(dir);
+    const mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(itemId === 'molotov' ? 0.14 : 0.1, 8, 6),
+      new THREE.MeshStandardMaterial({
+        color: itemId === 'frag' ? 0x3a5230 : itemId === 'molotov' ? 0x7a4a22 : 0x9aa0a8,
+        roughness: 0.8,
+      }),
+    );
+    mesh.position.set(player.pos.x, player.pos.y + 1.6, player.pos.z);
+    mesh.castShadow = true;
+    this.scene!.add(mesh);
+    const def = ITEMS[itemId];
+    this.throwables.push({
+      mesh,
+      vel: new THREE.Vector3(dir.x * 16, dir.y * 16 + 4, dir.z * 16),
+      fuse: def.thrown?.fuse ?? 1.6,
+      itemId,
+    });
+    sfx.play('swing', { volume: 0.7 });
+  }
+
+  /** A grenade goes off: frag = damage + noise, molotov = fire zone, flashbang = blind. */
+  private detonate(g: (typeof this.throwables)[number]): void {
+    const s = useGameStore.getState();
+    const husks = this.husks!;
+    const def = ITEMS[g.itemId];
+    const th = def.thrown!;
+    const p = g.mesh.position;
+    this.scene!.remove(g.mesh);
+    if (th.fire) {
+      const group = new THREE.Group();
+      const flames = new THREE.Mesh(
+        new THREE.CylinderGeometry(2.6, 3.4, 1.2, 12, 1, true),
+        new THREE.MeshBasicMaterial({ color: 0xff6a22, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false }),
+      );
+      flames.position.y = 0.6;
+      const glow = new THREE.PointLight(0xff7a33, 24, 16);
+      glow.position.y = 1.2;
+      group.add(flames, glow);
+      group.position.set(p.x, this.groundY(p.x, p.z) + 0.05, p.z);
+      this.scene!.add(group);
+      this.fireZones.push({ group, t: 6, x: p.x, z: p.z });
+      this.noiseAt(p.x, p.z, 14);
+      return;
+    }
+    if (th.blind) {
+      husks.stunInRadius(p.x, p.z, th.aoe, 6);
+      const flash = new THREE.PointLight(0xffffff, 60, 24);
+      flash.position.set(p.x, p.y + 1, p.z);
+      this.scene!.add(flash);
+      setTimeout(() => this.scene!.remove(flash), 300);
+      sfx.play('hit', { volume: 1 });
+      this.noiseAt(p.x, p.z, 30);
+      s.addToast('Flash out — they lost you.');
+      return;
+    }
+    const flash = new THREE.PointLight(0xffd27a, 80, 26);
+    flash.position.set(p.x, p.y + 0.5, p.z);
+    this.scene!.add(flash);
+    setTimeout(() => this.scene!.remove(flash), 250);
+    husks.damageInRadius(p.x, p.z, th.aoe, th.dmg);
+    this.animals?.damageInRadius(p.x, p.z, th.aoe, th.dmg);
+    this.noiseAt(p.x, p.z, 40);
+    this.requestHitstop(0.08);
+    sfx.play('hit', { volume: 1 });
+  }
+
+  /** Noise that doesn't come from the player — explosions, alarms. */
+  private noiseAt(x: number, z: number, r: number): void {
+    this.husks?.emitNoise(x, z, r);
+    this.animals?.emitNoise(x, z, r);
+    useGameStore.getState().setNoiseLevel(Math.min(100, (r / 80) * 100));
   }
 
   private handleMouseDown(e: MouseEvent): void {

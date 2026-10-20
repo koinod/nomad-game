@@ -137,6 +137,50 @@ export const ITEMS: Record<string, ItemDef> = {
     id: 'fire_starter', name: 'Fire starter', category: 'tool', weight: 0.2, slots: 1, stack: 3,
     desc: 'Scrap striker and tinder. Every campfire starts somewhere.',
   },
+  wood: {
+    id: 'wood', name: 'Wood', category: 'material', weight: 1.2, slots: 1, stack: 10,
+    desc: 'Salvaged lumber and solid logs. Building material, fuel, and barricades.',
+  },
+  gun_parts: {
+    id: 'gun_parts', name: 'Gun parts', category: 'material', weight: 0.5, slots: 1, stack: 8,
+    desc: 'Springs, pins, a trigger group. Weapon maintenance and mods.',
+  },
+  valuables: {
+    id: 'valuables', name: 'Valuables', category: 'material', weight: 0.3, slots: 1, stack: 10,
+    desc: 'Jewelry, cash, and pre-Static shine. Traders still want it.',
+  },
+  produce: {
+    id: 'produce', name: 'Wild produce', category: 'food', weight: 0.3, slots: 1, stack: 6,
+    desc: 'Berries and greens off the land. Eat raw or cook it down.', heal: 12,
+  },
+  lockpick: {
+    id: 'lockpick', name: 'Lockpick', category: 'material', weight: 0.05, slots: 1, stack: 5,
+    desc: 'Opens safes and lockers quietly. One use, one shot.',
+  },
+  tool_kit: {
+    id: 'tool_kit', name: 'Tool kit', category: 'material', weight: 2.2, slots: 2, stack: 1,
+    desc: 'Wrenches, drivers, a pry bar. Repairs and machine work go faster with this.',
+  },
+  frag: {
+    id: 'frag', name: 'Frag grenade', category: 'weapon-melee', weight: 0.4, slots: 1, stack: 3,
+    desc: 'Pull, throw, duck. Equip and left-click to throw.', damage: 0, thrown: { aoe: 5.5, dmg: 70, fuse: 1.6 },
+  },
+  molotov: {
+    id: 'molotov', name: 'Molotov', category: 'weapon-melee', weight: 0.5, slots: 1, stack: 3,
+    desc: 'A bottle of bad decisions. Equip and left-click to throw.', damage: 0, thrown: { aoe: 4, dmg: 25, fuse: 0, fire: true },
+  },
+  flashbang: {
+    id: 'flashbang', name: 'Flashbang', category: 'weapon-melee', weight: 0.3, slots: 1, stack: 3,
+    desc: 'Light and noise. Husks lose you for a while. Equip and left-click to throw.', damage: 0, thrown: { aoe: 12, dmg: 0, fuse: 0.8, blind: true },
+  },
+  armored_vest: {
+    id: 'armored_vest', name: 'Armored vest', category: 'material', weight: 2.4, slots: 2, stack: 1,
+    desc: 'Kevlar panels under worn leather. Mitigates 25% of damage while carried.', armor: 0.25,
+  },
+  riot_helmet: {
+    id: 'riot_helmet', name: 'Riot helmet', category: 'material', weight: 1.1, slots: 1, stack: 1,
+    desc: 'Hard shell, cracked visor. Mitigates 15% of damage while carried.', armor: 0.15,
+  },
 };
 
 // Husk corpse loot, keyed by spawn zone — Skyrim-style: what they were is
@@ -309,6 +353,7 @@ export const FURNITURE_LOOT: Record<string, Record<'camp' | 'suburban', HuskLoot
       { id: 'canned_food', min: 1, max: 2, chance: 0.7 },
       { id: 'bandage', min: 1, max: 2, chance: 0.45 },
       { id: 'cloth', min: 1, max: 2, chance: 0.4 },
+      { id: 'chemicals', min: 1, max: 1, chance: 0.15 },
     ],
   },
   dresser: {
@@ -375,3 +420,23 @@ export const FURNITURE_LOOT: Record<string, Record<'camp' | 'suburban', HuskLoot
     ],
   },
 };
+
+/** Safes: locked, expensive to open, worth it. Rolled on suburban houses (20%). */
+export const SAFE_LOOT: HuskLootEntry[] = [
+  { id: 'valuables', min: 2, max: 5, chance: 0.9 },
+  { id: 'gun_parts', min: 1, max: 3, chance: 0.6 },
+  { id: 'ammo_9mm', min: 4, max: 10, chance: 0.5 },
+  { id: 'medkit', min: 1, max: 1, chance: 0.3 },
+  { id: 'lockpick', min: 1, max: 2, chance: 0.35 },
+];
+
+/** Harvest nodes in the wild: fallen logs give wood, berry bushes give produce. */
+export const LOG_LOOT: HuskLootEntry[] = [
+  { id: 'wood', min: 2, max: 4, chance: 1 },
+  { id: 'fire_starter', min: 1, max: 1, chance: 0.2 },
+];
+
+export const BUSH_LOOT: HuskLootEntry[] = [
+  { id: 'produce', min: 1, max: 3, chance: 1 },
+  { id: 'cloth', min: 1, max: 1, chance: 0.25 },
+];

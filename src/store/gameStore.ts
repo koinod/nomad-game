@@ -76,6 +76,14 @@ interface GameState {
   nearStation: import('../data/items').StationId | null;
   setNearStation: (s: import('../data/items').StationId | null) => void;
 
+  // noise: loudest recent noise radius at the player (0–100, decays). HUD meter.
+  noiseLevel: number;
+  setNoiseLevel: (n: number) => void;
+
+  // hold-to-search: active search of a container / corpse / safe
+  search: { id: string; label: string; frac: number } | null;
+  setSearch: (s: { id: string; label: string; frac: number } | null) => void;
+
   // world
   poiPositions: Record<string, [number, number]>; // id -> [x, z]
 
@@ -202,6 +210,9 @@ export const useGameStore = create<GameState>()((set, get) => {
     dialogue: null,
     interactPrompt: null,
 
+    noiseLevel: 0,
+    search: null,
+
     meleeTarget: false,
     hitmark: null,
     nearStation: null,
@@ -254,6 +265,15 @@ export const useGameStore = create<GameState>()((set, get) => {
       // blocking with a melee weapon out: 75% reduction on husk hits
       if (cause === 'husk' && input.blocking) {
         dealt *= 0.25;
+      }
+      // armor carried in the pack still protects (plates in a vest you own)
+      if (cause === 'husk' || cause === 'explosion') {
+        let prot = 0;
+        for (const it of s.inventory) {
+          const def = ITEMS[it.itemId];
+          if (def?.armor) prot += def.armor * it.qty;
+        }
+        dealt *= Math.max(0.5, 1 - Math.min(prot, 0.5));
       }
       const hp = Math.max(0, s.hp - dealt);
       set({ hp });
@@ -488,6 +508,11 @@ export const useGameStore = create<GameState>()((set, get) => {
     setNearStation: (s) => {
       if (get().nearStation !== s) set({ nearStation: s });
     },
+    setNoiseLevel: (n) => {
+      const v = Math.max(0, Math.min(100, n));
+      if (Math.abs(get().noiseLevel - v) > 0.5) set({ noiseLevel: v });
+    },
+    setSearch: (s) => set({ search: s }),
 
     openPhone: (tab) => {
       const s = get();

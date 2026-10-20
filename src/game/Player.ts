@@ -21,6 +21,7 @@ export interface PlayerCtx {
   animals: AnimalManager;
   emitNoise: (x: number, z: number, radius: number) => void;
   onAnimalKill: (kill: AnimalKill & { id: string; min: number; max: number }) => void;
+  onThrow: (itemId: string) => void; // grenades: Game owns the projectile sim
   camera: THREE.PerspectiveCamera;
   colliders: readonly Collider[]; // house walls + furniture
 }
@@ -512,6 +513,7 @@ export class Player {
         eyePos: new THREE.Vector3(),
         spendStamina: (n) => this.spendStamina(n),
         flashMuzzle: () => undefined,
+        onThrow: ctx.onThrow,
       });
       if (res.swung) {
         this.swingTotal = res.stats.swingTime;

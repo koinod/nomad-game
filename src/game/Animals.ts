@@ -276,6 +276,20 @@ export class AnimalManager {
     return hits;
   }
 
+  /** Explosions don't care about facing: pure radius damage. */
+  damageInRadius(x: number, z: number, radius: number, damage: number): void {
+    for (const a of this.animals) {
+      if (a.dead) continue;
+      const dx = a.group.position.x - x;
+      const dz = a.group.position.z - z;
+      if (Math.hypot(dx, dz) > radius) continue;
+      const dir = new THREE.Vector3(dx, 0, dz);
+      if (dir.lengthSq() < 0.01) dir.set(1, 0, 0);
+      dir.normalize();
+      a.damage(damage, dir);
+    }
+  }
+
   /** Hitscan for the pistol. */
   raycastShot(
     origin: THREE.Vector3,

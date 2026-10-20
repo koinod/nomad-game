@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { mulberry32 } from './rng';
 import type { Collider, FloorRect } from './Colliders';
 import type { ContainerDef } from './Interact';
-import { FURNITURE_LOOT } from '../data/items';
+import { FURNITURE_LOOT, SAFE_LOOT } from '../data/items';
 import { FURNITURE_LABEL, FURNITURE_HALF, type FurnitureKind } from './furnitureMeshes';
 
 export type HouseTier = 'camp' | 'suburban';
@@ -430,6 +430,25 @@ function buildOne(
       rotY: f.rot * Math.PI * 0.5 + p.rotQ * Math.PI * 0.5,
     });
   });
+
+  // safes: locked loot, 20% on suburban houses (HOUSES_DESIGN) — bedroom corner
+  if (spec.tier === 'suburban' && rng() < 0.2) {
+    const [wx, wz] = pt(-hw + 0.9, -hd + 0.9);
+    const [hx, hz] = FURNITURE_HALF.safe;
+    const rotated = p.rotQ % 2 === 1;
+    colliders.push({ x0: wx - (rotated ? hz : hx), z0: wz - (rotated ? hx : hz), x1: wx + (rotated ? hz : hx), z1: wz + (rotated ? hx : hz) });
+    containers.push({
+      id: `f_${id}_safe`,
+      x: wx,
+      z: wz,
+      loot: SAFE_LOOT,
+      label: FURNITURE_LABEL.safe,
+      meshKind: 'safe',
+      rotY: p.rotQ * Math.PI * 0.5 + Math.PI / 4,
+      locked: true,
+      searchTime: 4,
+    });
+  }
 
   group.position.set(cx, base, cz);
   group.rotation.y = (p.rotQ * Math.PI) / 2;

@@ -3,9 +3,9 @@
 
 import * as THREE from 'three';
 import { useGameStore } from '../store/gameStore';
-import { ITEMS, HUSK_LOOT } from '../data/items';
+import { ITEMS, HUSK_LOOT, LOG_LOOT, BUSH_LOOT } from '../data/items';
 import { buildGroundMesh } from './weaponMeshes';
-import { buildFurnitureMesh, type FurnitureKind } from './furnitureMeshes';
+import { buildFurnitureMesh, FURNITURE_LABEL, type FurnitureKind } from './furnitureMeshes';
 import { sfx } from '../systems/audio';
 
 export interface LootEntry {
@@ -24,6 +24,10 @@ export interface ContainerDef {
   label?: string;
   meshKind?: FurnitureKind;
   rotY?: number;
+  /** Locked (safes): needs a lockpick to start searching. */
+  locked?: boolean;
+  /** Seconds of hold-to-search before the loot panel opens. */
+  searchTime?: number;
 }
 
 export interface InteractHooks {
@@ -87,6 +91,26 @@ export class InteractSystem {
   private searchedCorpses = new Set<string>();
   private pickupMeshes = new Map<string, THREE.Group>();
   private hooks: InteractHooks;
+  // hold-to-search bookkeeping (Game drives the timer)
+  private containersById = new Map<string, ContainerDef>();
+  private searchedContainers = new Set<string>();
+
+  containerDef(id: string): ContainerDef | undefined {
+    return this.containersById.get(id);
+  }
+
+  isSearched(id: string): boolean {
+    return this.searchedContainers.has(id) || this.searchedCorpses.has(id.replace(/^corpse:/, ''));
+  }
+
+  markSearched(id: string): void {
+    this.searchedContainers.add(id);
+  }
+
+  useById(id: string): void {
+    const it = this.interactables.find((i) => i.id === id);
+    it?.use();
+  }
 
   constructor(hooks: InteractHooks, pois: Record<string, [number, number]>, containers: ContainerDef[]) {
     this.hooks = hooks;
@@ -114,6 +138,7 @@ export class InteractSystem {
       mesh.visible = !hooks.isLooted(c.id);
       hooks.scene.add(mesh);
       this.crateMeshes.set(c.id, mesh);
+      this.containersById.set(c.id, c);
       this.emptyLabels.set(c.id, c.label ? c.label.replace('Search', 'Empty') : 'Empty container');
       if (c.meshKind) this.furnitureIds.add(c.id);
       this.interactables.push({
@@ -256,6 +281,13 @@ export class InteractSystem {
     pickup('pk_knife', 'combat_knife', 1, 'wreck', 1.5, -1);
     pickup('pk_sledge', 'sledgehammer', 1, 'relay_station', -3, 2.5);
     pickup('pk_shotgun', 'shotgun', 1, 'lighthouse_base', 2.5, 3.5);
+    pickup('pk_frag', 'frag', 2, 'relay_station', -4, 4);
+    pickup('pk_molotov', 'molotov', 2, 'jonah_camp', 4, -3);
+    pickup('pk_flashbang', 'flashbang', 2, 'relay_station', 5, 2);
+    pickup('pk_vest', 'armored_vest', 1, 'lighthouse_base', -2.5, 2.5);
+    pickup('pk_helmet', 'riot_helmet', 1, 'relay_station', 2, -4);
+    pickup('pk_lockpick', 'lockpick', 2, 'town', 10, -8);
+    pickup('pk_toolkit', 'tool_kit', 1, 'town', -14, 6);
     pickup('pk_shells', 'shells', 6, 'town', 4, 1.5);
     pickup('pk_rifle', 'hunting_rifle', 1, 'jonah_camp', -3.5, 3.5);
     pickup('pk_rifle_ammo', 'ammo_rifle', 8, 'relay_station', 3.5, -3);
@@ -374,9 +406,16 @@ export function buildContainerDefs(pois: Record<string, [number, number]>): Cont
   };
   const C = (
     id: string, pid: string, dx: number, dz: number, loot: LootEntry[],
+    kind?: 'logpile' | 'berrybush',
   ): ContainerDef => {
     const [x, z] = off(pid, dx, dz);
-    return { id, x, z, loot };
+    const def: ContainerDef = { id, x, z, loot };
+    if (kind) {
+      def.meshKind = kind;
+      def.label = FURNITURE_LABEL[kind];
+      def.searchTime = 1.2; // gathering is quick work
+    }
+    return def;
   };
   return [
     C('c_wreck_phone', 'wreck', 3, 2, [{ id: 'phone', min: 1, max: 1, chance: 1 }]),
@@ -425,5 +464,14 @@ export function buildContainerDefs(pois: Record<string, [number, number]>): Cont
       { id: 'bandage', min: 1, max: 2, chance: 0.8 },
       { id: 'medkit', min: 1, max: 1, chance: 0.4 },
     ]),
+    // harvest nodes: fallen logs give wood, berry bushes give produce
+    C('n_log_1', 'forest_cache', -14, 6, LOG_LOOT, 'logpile'),
+    C('n_log_2', 'forest_cache', 16, -10, LOG_LOOT, 'logpile'),
+    C('n_log_3', 'shore_camp', -12, 10, LOG_LOOT, 'logpile'),
+    C('n_log_4', 'jonah_camp', 14, 12, LOG_LOOT, 'logpile'),
+    C('n_bush_1', 'forest_cache', 8, -14, BUSH_LOOT, 'berrybush'),
+    C('n_bush_2', 'forest_cache', -8, 14, BUSH_LOOT, 'berrybush'),
+    C('n_bush_3', 'jonah_camp', -16, -8, BUSH_LOOT, 'berrybush'),
+    C('n_bush_4', 'dune_cache', -10, 8, BUSH_LOOT, 'berrybush'),
   ];
 }

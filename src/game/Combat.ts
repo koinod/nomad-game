@@ -15,6 +15,7 @@ export interface CombatHooks {
   eyePos: THREE.Vector3; // muzzle origin
   spendStamina: (n: number) => boolean;
   flashMuzzle: () => void;
+  onThrow?: (itemId: string) => void; // grenades: hand off to Game's projectile sim
 }
 
 /** Per-weapon melee feel: reach, arc, swing speed, knockback, stamina cost. */
@@ -73,6 +74,17 @@ export interface MeleeResult {
 /** Swing: cleaves through every husk inside the arc, nearest-first. */
 export function tryMelee(h: CombatHooks): MeleeResult {
   const itemId = equippedMeleeId();
+  // thrown weapons (grenades): consume one and hand the projectile to Game
+  const thrownDef = itemId ? ITEMS[itemId] : undefined;
+  if (itemId && thrownDef?.thrown && h.onThrow) {
+    const s = useGameStore.getState();
+    const uid = s.equipped.melee;
+    if (uid) s.removeItem(uid, 1);
+    sfx.play('swing', { volume: 0.6 });
+    h.onThrow(itemId);
+    const tStats: MeleeStats = { damage: 0, range: 0, halfArcRad: 0, swingTime: 0.4, knockback: 0, stamina: 6, cleave: 0 };
+    return { swung: true, hits: 0, kills: 0, stats: tStats };
+  }
   // no melee weapon but a gun in hand: bash with the gun itself
   const stats = itemId == null && equippedRangedDef() ? GUN_BASH_STATS : meleeStatsFor(itemId);
   const empty: MeleeResult = { swung: false, hits: 0, kills: 0, stats };
@@ -129,7 +141,7 @@ export function tryRanged(h: CombatHooks): RangedResult {
 
   sfx.play('shot', { volume: 1 });
   h.flashMuzzle();
-  h.emitNoise(h.playerPos.x, h.playerPos.z, 60);
+  h.emitNoise(h.playerPos.x, h.playerPos.z, 80); // a gunshot carries (design: 80m)
 
   const range = def.range ?? 45;
   const pellets = def.pellets ?? 1;
