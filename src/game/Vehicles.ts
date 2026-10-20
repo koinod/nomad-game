@@ -866,7 +866,7 @@ export class VehicleManager {
     const radius = Math.max(def.length, def.width) / 2 * 0.75;
     const p3 = { x: pos.x, z: pos.z };
     const before = { x: pos.x, z: pos.z };
-    resolveCollisions(p3, radius, env.colliders);
+    resolveCollisions(p3, radius, env.colliders, pos.y);
     const clipped = Math.hypot(p3.x - before.x, p3.z - before.z) > 0.001;
     if (clipped && Math.abs(v.speed) > 5) {
       if (def.tracked) {

@@ -6,6 +6,10 @@ export interface Collider {
   z0: number;
   x1: number;
   z1: number;
+  /** Height gate: this collider only exists for walkers whose feet are at
+   *  or above minY (minus a step tolerance) — e.g. a balcony railing must
+   *  not wall off the yard below it. Callers pass feetY to opt in. */
+  minY?: number;
 }
 
 export interface FloorRect extends Collider {
@@ -16,13 +20,16 @@ function clamp(v: number, a: number, b: number): number {
   return Math.max(a, Math.min(b, v));
 }
 
-/** Push a circle out of every collider it overlaps. Mutates pos in place. */
+/** Push a circle out of every collider it overlaps. Mutates pos in place.
+ *  When feetY is given, colliders gated above the walker (minY) are skipped. */
 export function resolveCollisions(
   pos: { x: number; z: number },
   radius: number,
   colliders: readonly Collider[],
+  feetY?: number,
 ): void {
   for (const c of colliders) {
+    if (feetY !== undefined && c.minY !== undefined && c.minY > feetY + 0.6) continue;
     const cx = clamp(pos.x, c.x0, c.x1);
     const cz = clamp(pos.z, c.z0, c.z1);
     const dx = pos.x - cx;

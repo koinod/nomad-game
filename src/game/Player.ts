@@ -327,7 +327,7 @@ export class Player {
     this.pos.x += this.vel.x * dt;
     this.pos.z += this.vel.z * dt;
     // walls and furniture are solid
-    resolveCollisions(this.pos, 0.45, ctx.colliders);
+    resolveCollisions(this.pos, 0.45, ctx.colliders, this.pos.y);
     const moving = this.vel.length() > 0.6;
 
     // jump (edge) + gravity; the heightmap is the ground

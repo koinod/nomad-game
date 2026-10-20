@@ -13,7 +13,7 @@ import { FURNITURE_LABEL, FURNITURE_HALF, type FurnitureKind } from './furniture
 
 export type HouseTier = 'camp' | 'suburban';
 export type VariantName =
-  | 'ranch' | 'bungalow' | 'farmhouse' | 'ranch2' | 'richhouse' | 'garage' // suburban
+  | 'ranch' | 'bungalow' | 'farmhouse' | 'ranch2' | 'richhouse' | 'garage' | 'beach' // suburban
   | 'cabin' | 'shack' | 'leanto' | 'ruin'; // camp (+ suburban ruin)
 
 interface HousePlacement {
@@ -42,6 +42,11 @@ const PLACEMENTS: HousePlacement[] = [
   { poi: 'forest_cache', dx: -8, dz: 9, variant: 'cabin', rotQ: 1 },
   { poi: 'dune_cache', dx: 7, dz: -8, variant: 'shack', rotQ: 3 },
   { poi: 'relay_station', dx: -12, dz: -9, variant: 'ruin', rotQ: 0 },
+  // beach houses (appended last: keeps the rng stream of every house
+  // above untouched) — 2 in town, 1 at the shore camp starting base
+  { poi: 'town', dx: 58, dz: 14, variant: 'beach', rotQ: 2 },
+  { poi: 'town', dx: -52, dz: -34, variant: 'beach', rotQ: 1 },
+  { poi: 'shore_camp', dx: -16, dz: 16, variant: 'beach', rotQ: 0 },
 ];
 
 interface VariantSpec {
@@ -56,6 +61,13 @@ interface VariantSpec {
   furniture: { kind: FurnitureKind; lx: number; lz: number; rot: number }[];
   /** v2: a real second story — slab, stairs up the east wall, upper rooms. */
   twoStory?: boolean;
+  /** Per-variant roof color (default: the weathered brown 0x4a3a30). */
+  roofColor?: number;
+  /** Per-variant trim color for windows/doors/corners (default 0x4a3826). */
+  trimColor?: number;
+  /** Wrap-around second-floor balcony: railed deck ring on floor rects,
+   *  reached through a sliding door in the upper front wall. */
+  balcony?: boolean;
   /** Upstairs furniture. Align lx/lz with ground pieces below where
    *  possible: colliders are height-blind, so an upstairs piece only earns
    *  a collider when it sits (nearly) over an existing ground collider. */
@@ -140,6 +152,28 @@ const VARIANTS: Record<VariantName, VariantSpec> = {
       { kind: 'barrel', lx: 2.9, lz: 1.0, rot: 0 },
     ],
   },
+  // house_beach_2br (Stitch, newest beach set): weathered two-story beach
+  // house — pastel mint siding, white trim, rusted corrugated gable roof,
+  // wrap-around balcony upstairs, ground porch. The standard starting base.
+  beach: {
+    tier: 'suburban', w: 10, d: 8, wallH: 3.05, wallColor: 0x9fd8c9, roof: 'pitched',
+    roofColor: 0x9a5a38, trimColor: 0xe8e2d4,
+    interiorWall: true, openFront: false, twoStory: true, balcony: true,
+    furniture: [
+      { kind: 'fridge', lx: -3.9, lz: -3.2, rot: 0 },
+      { kind: 'cabinets', lx: -2.0, lz: -3.4, rot: 0 },
+      { kind: 'cabinets', lx: 0.2, lz: -3.4, rot: 0 },
+      { kind: 'bookshelf', lx: 3.2, lz: -3.2, rot: 0 },
+      { kind: 'dresser', lx: 3.4, lz: 2.8, rot: 2 },
+      { kind: 'crate', lx: -3.5, lz: 3.0, rot: 1 },
+    ],
+    furnitureUp: [
+      { kind: 'dresser', lx: 3.2, lz: -3.2, rot: 0 },
+      { kind: 'dresser', lx: -3.9, lz: -3.2, rot: 0 },
+      { kind: 'cabinets', lx: -2.0, lz: -3.4, rot: 0 },
+      { kind: 'bookshelf', lx: 3.4, lz: 2.8, rot: 2 },
+    ],
+  },
   cabin: {
     tier: 'camp', w: 5.5, d: 6.5, wallH: 2.95, wallColor: 0x6e5a3e, roof: 'shed',
     interiorWall: false, openFront: false,
@@ -222,6 +256,113 @@ function box(w: number, h: number, d: number, color: number): THREE.Mesh {
   return m;
 }
 
+/**
+ * The beach house's signature (Stitch house_beach_2br): upper front wall
+ * with a sliding-glass door aligned over the entry below, a wrap-around
+ * railed balcony on floor rects, and a ground porch with an awning.
+ * Railing colliders are height-gated (minY) so they hold a balcony
+ * walker without walling off the yard underneath.
+ */
+function buildBalcony(
+  group: THREE.Group,
+  spec: VariantSpec,
+  o: {
+    hw: number; hd: number; wh: number; t: number; doorAt: number;
+    trimC: number; wallCol: number; base: number; floorTop: number; floorTop2: number;
+    aabb: (lx0: number, lz0: number, lx1: number, lz1: number) => Collider;
+    floors: FloorRect[]; colliders: Collider[];
+  },
+): void {
+  const { hw, hd, wh, t, doorAt, trimC, wallCol } = o;
+  const uh = 2.75;
+  // upper front wall: runs + header around the slider (door column = the
+  // ground door's, so the height-blind wall collider's gap lines up)
+  const sGapLo = doorAt - 0.6;
+  const sGapHi = doorAt + 0.6;
+  const runL = box(sGapLo + hw, uh, t, wallCol); runL.position.set((-hw + sGapLo) / 2, wh + uh / 2 - 0.05, hd);
+  const runR = box(hw - sGapHi, uh, t, wallCol); runR.position.set((sGapHi + hw) / 2, wh + uh / 2 - 0.05, hd);
+  const sHead = box(1.2, uh - 2.1, t, wallCol); sHead.position.set(doorAt, wh + 2.1 + (uh - 2.1) / 2 - 0.05, hd);
+  group.add(runL, runR, sHead);
+  // sliding glass: fixed pane + a pane slid open on the outside track
+  const glassMat = new THREE.MeshStandardMaterial({ color: 0x9fc4cc, roughness: 0.2, metalness: 0.3, transparent: true, opacity: 0.55 });
+  const paneF = new THREE.Mesh(new THREE.BoxGeometry(0.58, 2.02, 0.04), glassMat);
+  paneF.position.set(doorAt - 0.3, wh + 1.06, hd);
+  const paneS = new THREE.Mesh(new THREE.BoxGeometry(0.58, 2.02, 0.04), glassMat);
+  paneS.position.set(doorAt + 0.33, wh + 1.06, hd + 0.1);
+  paneF.castShadow = true;
+  paneS.castShadow = true;
+  const track = box(1.3, 0.07, 0.12, trimC); track.position.set(doorAt, wh + 2.14, hd);
+  group.add(paneF, paneS, track);
+  // ----- deck ring -----
+  const RD = 1.3;
+  const deckMat = 0x8a7a66; // weathered gray-brown boards
+  const deckY = wh + 0.06; // slab center; top = wh + 0.12 = floorTop2 - base
+  const dF = box(spec.w + 2 * RD, 0.12, RD, deckMat); dF.position.set(0, deckY, hd + RD / 2);
+  const dB = box(spec.w + 2 * RD, 0.12, RD, deckMat); dB.position.set(0, deckY, -(hd + RD / 2));
+  const dE = box(RD, 0.12, spec.d, deckMat); dE.position.set(hw + RD / 2, deckY, 0);
+  const dW = box(RD, 0.12, spec.d, deckMat); dW.position.set(-(hw + RD / 2), deckY, 0);
+  group.add(dF, dB, dE, dW);
+  // floor rects reach t/2 into the wall band so the door crossing never dips
+  o.floors.push({ ...o.aabb(-hw - RD, hd - t / 2, hw + RD, hd + RD), y: o.floorTop2 });
+  o.floors.push({ ...o.aabb(-hw - RD, -hd - RD, hw + RD, -hd + t / 2), y: o.floorTop2 });
+  o.floors.push({ ...o.aabb(hw - t / 2, -hd, hw + RD, hd), y: o.floorTop2 });
+  o.floors.push({ ...o.aabb(-hw - RD, -hd, -hw + t / 2, hd), y: o.floorTop2 });
+  // support posts under the ring
+  for (const [px, pz] of [
+    [-hw - RD + 0.18, hd + RD - 0.18], [hw + RD - 0.18, hd + RD - 0.18],
+    [-hw - RD + 0.18, -(hd + RD - 0.18)], [hw + RD - 0.18, -(hd + RD - 0.18)],
+    [-hw * 0.45, hd + RD - 0.18], [hw * 0.45, hd + RD - 0.18],
+  ] as [number, number][]) {
+    const post = box(0.16, wh + 0.16, 0.16, trimC);
+    post.position.set(px, (wh + 0.16) / 2 - 0.12, pz);
+    group.add(post);
+  }
+  // railing: top + mid rails and balusters on the outer edge
+  const edge = RD - 0.04;
+  const railBase = wh + 0.12;
+  const railRun = (alongX: boolean, fixed: number, from: number, to: number) => {
+    const len = to - from;
+    const midC = (from + to) / 2;
+    const top = box(alongX ? len : 0.07, 0.07, alongX ? 0.07 : len, trimC);
+    top.position.set(alongX ? midC : fixed, railBase + 1.05, alongX ? fixed : midC);
+    const mid = box(alongX ? len : 0.05, 0.05, alongX ? 0.05 : len, trimC);
+    mid.position.set(alongX ? midC : fixed, railBase + 0.58, alongX ? fixed : midC);
+    group.add(top, mid);
+    const n = Math.max(2, Math.round(len / 1.4));
+    for (let i = 0; i <= n; i++) {
+      const c = from + (len * i) / n;
+      const post = box(0.06, 1.02, 0.06, trimC);
+      post.position.set(alongX ? c : fixed, railBase + 0.51, alongX ? fixed : c);
+      group.add(post);
+    }
+  };
+  railRun(true, hd + edge, -hw - edge, hw + edge);
+  railRun(true, -(hd + edge), -hw - edge, hw + edge);
+  railRun(false, hw + edge, -hd - edge, hd + edge);
+  railRun(false, -(hw + edge), -hd - edge, hd + edge);
+  const railMinY = o.base + wh - 0.55;
+  o.colliders.push({ ...o.aabb(-hw - RD, hd + RD - 0.14, hw + RD, hd + RD + 0.02), minY: railMinY });
+  o.colliders.push({ ...o.aabb(-hw - RD, -hd - RD - 0.02, hw + RD, -hd - RD + 0.14), minY: railMinY });
+  o.colliders.push({ ...o.aabb(hw + RD - 0.14, -hd - RD, hw + RD + 0.02, hd + RD), minY: railMinY });
+  o.colliders.push({ ...o.aabb(-hw - RD - 0.02, -hd - RD, -hw - RD + 0.14, hd + RD), minY: railMinY });
+  // ----- ground porch under the front balcony -----
+  const porch = box(7.0, 0.14, 1.8, deckMat); porch.position.set(0, 0.1, hd + 0.9);
+  group.add(porch);
+  o.floors.push({ ...o.aabb(-3.5, hd - t / 2, 3.5, hd + 1.8), y: o.base + 0.17 });
+  const step = box(3.2, 0.09, 0.45, deckMat); step.position.set(0, 0.045, hd + 2.0);
+  group.add(step);
+  o.floors.push({ ...o.aabb(-1.6, hd + 1.8, 1.6, hd + 2.25), y: o.base + 0.09 });
+  for (const px of [-3.3, 3.3]) {
+    const post = box(0.1, 2.44, 0.1, trimC);
+    post.position.set(px, 0.17 + 1.22, hd + 1.7);
+    group.add(post);
+  }
+  const awn = box(7.4, 0.08, 2.1, spec.roofColor ?? 0x4a3a30);
+  awn.rotation.x = 0.07;
+  awn.position.set(0, 2.66, hd + 0.95);
+  group.add(awn);
+}
+
 function buildOne(
   id: string,
   p: HousePlacement,
@@ -253,6 +394,7 @@ function buildOne(
   // slight per-house tint so variants don't read as clones
   const tintShift = (rng() - 0.5) * 0.06;
   const wallCol = new THREE.Color(wallMat).offsetHSL(0, 0, tintShift).getHex();
+  const trimC = spec.trimColor ?? 0x4a3826;
 
   interface Seg { ax: number; az: number; bx: number; bz: number; hMul: number }
   const segs: Seg[] = [];
@@ -314,7 +456,7 @@ function buildOne(
   // entry door: jambs, header, threshold, wall above, and a leaf swung open
   // inward — real 36"×80" proportions (door opening never blocks; leaf never collides)
   if (!spec.openFront && !ruin) {
-    const TRIMC = 0x4a3826;
+    const TRIMC = trimC;
     const DOOR_COLORS = [0x3a5a6e, 0x6e3a3a, 0x6b5335, 0x3f5a3a];
     for (const jx of [gapLo, gapHi]) {
       const jamb = box(0.1, DOOR_H, t + 0.08, TRIMC);
@@ -352,7 +494,7 @@ function buildOne(
   // sill sits 0.95m above the floor, per residential convention
   const addWindow = (wx: number, wz: number, ry: number, yOff = 0) => {
     const g = new THREE.Group();
-    const TRIMC = 0x4a3826;
+    const TRIMC = trimC;
     const W = 1.06;
     const H = 1.26;
     const cy = 1.64;
@@ -404,7 +546,7 @@ function buildOne(
   // corner boards: trim that visually connects the wall runs
   if (!ruin) {
     for (const [ccx, ccz] of [[-hw, -hd], [hw, -hd], [-hw, hd], [hw, hd]] as [number, number][]) {
-      const cb = box(0.14, wallTop, 0.14, 0x4a3826);
+      const cb = box(0.14, wallTop, 0.14, trimC);
       cb.position.set(ccx, wallTop / 2 - 0.3, ccz);
       group.add(cb);
     }
@@ -417,7 +559,7 @@ function buildOne(
   const roofBase = spec.twoStory && !ruin ? wh + 2.67 : wallTop;
   if (spec.roof !== 'none') {
     const roofGroup = new THREE.Group();
-    const roofCol = new THREE.Color(0x4a3a30).offsetHSL(0, 0, (rng() - 0.5) * 0.05).getHex();
+    const roofCol = new THREE.Color(spec.roofColor ?? 0x4a3a30).offsetHSL(0, 0, (rng() - 0.5) * 0.05).getHex();
     const capMat = new THREE.MeshStandardMaterial({ color: wallCol, roughness: 1, side: THREE.DoubleSide });
     // flat end cap in the ZY plane at x = ±hw, from shape points (z, y).
     // flipZ for asymmetric shapes (shed): rotateY(+90°) maps shape X to
@@ -447,7 +589,7 @@ function buildOne(
       // fascia along the eaves + ridge cap: the roof reads as connected,
       // not two slabs floating over the walls
       for (const sgn of [1, -1]) {
-        const fascia = box(spec.w + 0.9, 0.2, 0.07, 0x4a3826);
+        const fascia = box(spec.w + 0.9, 0.2, 0.07, trimC);
         fascia.position.set(0, roofBase - 0.03, sgn * (hd + 0.3));
         roofGroup.add(fascia);
       }
@@ -566,10 +708,15 @@ function buildOne(
     // colliders already exist), no interior partitions upstairs (open loft)
     const uh = 2.75;
     const uN = box(spec.w, uh, t, wallCol); uN.position.set(0, wh + uh / 2 - 0.05, -hd);
-    const uS = box(spec.w, uh, t, wallCol); uS.position.set(0, wh + uh / 2 - 0.05, hd);
     const uW = box(t, uh, spec.d, wallCol); uW.position.set(-hw, wh + uh / 2 - 0.05, 0);
     const uE = box(t, uh, spec.d, wallCol); uE.position.set(hw, wh + uh / 2 - 0.05, 0);
-    group.add(uN, uS, uW, uE);
+    group.add(uN, uW, uE);
+    if (spec.balcony) {
+      buildBalcony(group, spec, { hw, hd, wh, t, doorAt, trimC, wallCol, base, floorTop, floorTop2, aabb, floors, colliders });
+    } else {
+      const uS = box(spec.w, uh, t, wallCol); uS.position.set(0, wh + uh / 2 - 0.05, hd);
+      group.add(uS);
+    }
     addWindow(0, -hd - t / 2 - 0.03, 0, wh + 0.05);
     addWindow(hw + t / 2 + 0.03, 0.6, Math.PI / 2, wh + 0.05);
     addWindow(-hw - t / 2 - 0.03, -0.6, Math.PI / 2, wh + 0.05);
@@ -645,11 +792,13 @@ export function houseFootprints(pois: Record<string, [number, number]>): HouseFo
     if (!poi) continue;
     const spec = VARIANTS[p.variant];
     const swap = p.rotQ % 2 === 1;
+    // balcony houses: the pad also flattens under the deck ring + posts
+    const grow = spec.balcony ? 1.45 : 0;
     out.push({
       cx: poi[0] + p.dx,
       cz: poi[1] + p.dz,
-      hw: (swap ? spec.d : spec.w) / 2,
-      hd: (swap ? spec.w : spec.d) / 2,
+      hw: (swap ? spec.d : spec.w) / 2 + grow,
+      hd: (swap ? spec.w : spec.d) / 2 + grow,
     });
   }
   return out;

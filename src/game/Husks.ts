@@ -364,7 +364,7 @@ export class Husk {
       }
     }
     // husks respect walls too — they come through the door, not the drywall
-    resolveCollisions(g.position, 0.5, ctx.colliders);
+    resolveCollisions(g.position, 0.5, ctx.colliders, g.position.y);
     groundClamp();
 
     // the shuffle: asymmetric limp walk — bob, roll, and a yaw wobble driven

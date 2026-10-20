@@ -1278,7 +1278,7 @@ export class Game {
     player.pos.x = ex;
     player.pos.z = ez;
     player.pos.y = this.groundY(ex, ez);
-    resolveCollisions(player.pos, 0.45, this.houseColliders);
+    resolveCollisions(player.pos, 0.45, this.houseColliders, player.pos.y);
     v.speed = 0;
     this.driving = null;
     player.endDrive();
@@ -1566,7 +1566,7 @@ export class Game {
       player.pos.x = w.x;
       player.pos.z = w.z;
       player.pos.y = this.groundY(w.x, w.z);
-      resolveCollisions(player.pos, 0.45, this.houseColliders);
+      resolveCollisions(player.pos, 0.45, this.houseColliders, player.pos.y);
       s.setVehicle(null);
     }
     s.addToast(`${v.def.name} locked down on the ${t.def.name}. It rides.`);
