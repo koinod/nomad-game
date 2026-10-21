@@ -440,6 +440,7 @@ function syntheticAuthoredTemplate(withSac = false): THREE.Group {
  *  re-posed quadruped at runtime. Rows land one class per commit. */
 const AUTHORED2: { kind: HuskKind; file: string; skullY: number; hipY: number; legX: number; extra: string[] }[] = [
   { kind: 'crawler', file: 'husk_crawler_authored.glb', skullY: 1.62, hipY: 0.864, legX: 0.0851, extra: [] },
+  { kind: 'spitter', file: 'husk_spitter_authored.glb', skullY: 1.76, hipY: 0.888, legX: 0.0875, extra: ['sac'] },
 ];
 
 describe('authored husk GLBs (wave 2)', () => {
@@ -501,5 +502,18 @@ describe('authored husk GLBs (wave 2)', () => {
     expect(rig.legL.rotation.x).toBe(0.95);
     expect(rig.legR.position.z).toBe(-0.2);
     expect(rig.group.scale.y).toBe(0.96);
+  });
+
+  it('spitter swap binds the authored sac and lands on the kit slump', () => {
+    const sp = new Husk('auth2_sp', 'spitter', 0, 0, 'test', groundY);
+    expect(sp.useAuthoredFigure(syntheticAuthoredTemplate(true))).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rig = (sp as any).rig as FigureRig;
+    expect(rig.sac).not.toBeNull();
+    expect(rig.sac!.name).toBe('sac');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((sp as any).sacMesh).toBe(rig.sac); // the telegraph pulses THIS mesh
+    expect(rig.pose.torsoX).toBe(0.14);
+    expect(rig.torso.rotation.x).toBe(0.14);
   });
 });
