@@ -178,9 +178,10 @@ export const SUSP_TUNES: Record<string, SuspTune> = {
   // the steer arch lip (measured from the GLB) sits at 1.17 m and a
   // 1.05 m wheel may rise only 0.11 m before its top would pass it.
   nomad_prime: { stiffness: 110, compression: 7, relaxation: 9, travel: 0.3, archTravelM: 0.11, archTopM: 1.17, maxForceN: 72000 },
-  // Lifted 4x4 van: softer, longer travel; flare lip measured at
-  // 1.025 m over a 0.84 m wheel -> 0.16 m of visual tuck.
-  sprinter_van: { stiffness: 60, compression: 5, relaxation: 7, travel: 0.26, archTravelM: 0.16, archTopM: 1.02, maxForceN: 26000 },
+  // Lifted 4x4 van: softer, longer travel; flare lip re-measured at
+  // 1.020 m on the polished GLB (c9071da) over a 0.88 m wheel
+  // (0.44R tires) -> 0.14 m of visual tuck.
+  sprinter_van: { stiffness: 60, compression: 5, relaxation: 7, travel: 0.26, archTravelM: 0.14, archTopM: 1.02, maxForceN: 26000 },
 };
 export function suspTuneFor(defId: string): SuspTune {
   return SUSP_TUNES[defId] ?? SUSP_TUNES.mustang;

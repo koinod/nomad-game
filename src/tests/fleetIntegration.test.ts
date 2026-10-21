@@ -136,6 +136,21 @@ describe('per-def diesel physics selection', () => {
     expect(suspTuneFor('mustang').maxForceN).toBeUndefined();
     expect(suspTuneFor('gt500').maxForceN).toBeUndefined();
   });
+
+  it('the Sprinter rig matches the POLISHED GLB (c9071da), re-measured', () => {
+    // wheel pivots unchanged (+2.32/-2.00 long, ±0.86 lat -> geom
+    // above), but the polish fitted 0.44R tires (pivot height 0.44)
+    // and tightened the flares: lip top 1.020, so visual tuck is
+    // 1.02 - 0.88 = 0.14 exactly at the invariant's edge
+    expect(SPRINTER_PARAMS.wheelRadiusM).toBe(0.44);
+    const tune = suspTuneFor('sprinter_van');
+    expect(tune.archTopM).toBe(1.02);
+    expect(tune.archTravelM).toBe(0.14);
+    // seat datum re-measured on the polished GLB: cushion top 0.98,
+    // cab floor top 0.63, driver_seat marker unmoved — CAR_SEATS
+    // (seatPose.test.ts) stands as-is
+    expect(SPRINTER_DEF.length).toBe(6.97);
+  });
 });
 
 // ------------------------------------------------------------ rigid body

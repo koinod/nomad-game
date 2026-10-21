@@ -457,8 +457,9 @@ export function attachPrimeGlb(v: Vehicle): void {
 
 /**
  * The V-04 Sprinter (public/models/sprinter.glb). Four beadlock
- * pivots direct; headlight seats measured from the lens meshes'
- * bounds (x 3.47, y 1.20, z ±0.70 in GLB space).
+ * pivots direct; headlight seats re-measured from the polished
+ * GLB's lens meshes' bounds (x 3.29..3.47, y 1.05..1.21,
+ * z ±0.48..0.92 -> centers x 3.38, y 1.13, z ±0.70 in GLB space).
  */
 export function attachSprinterGlb(v: Vehicle): void {
   attachVehicleGlb(v, {
@@ -466,7 +467,7 @@ export function attachSprinterGlb(v: Vehicle): void {
     logName: 'sprinter.glb',
     wheels: SPRINTER_WHEEL_RIG,
     headlights: () => [-0.7, 0.7].map((sz) => ({
-      pos: [3.47, 1.2, sz] as [number, number, number],
+      pos: [3.38, 1.13, sz] as [number, number, number],
       target: [15, 0, sz * 1.25] as [number, number, number],
     })),
   });

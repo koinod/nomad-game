@@ -69,7 +69,7 @@ export const SPRINTER_PARAMS: CarParams = {
   finalDrive: 3.92,
   tireMu: 0.95, // all-terrain beadlock fitment
   rearLoadFrac: 0.55,
-  wheelRadiusM: 0.42,
+  wheelRadiusM: 0.44, // polished GLB (c9071da): 0.44R tires, pivots sit at 0.44
   dragK: 2.3, // a tall van punches a bigger hole than the cars —
   // sized so the drag balance lands on the spec's 125 km/h
   rollingCoef: 0.012,
