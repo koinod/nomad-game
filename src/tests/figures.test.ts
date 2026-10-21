@@ -442,6 +442,7 @@ const AUTHORED2: { kind: HuskKind; file: string; skullY: number; hipY: number; l
   { kind: 'crawler', file: 'husk_crawler_authored.glb', skullY: 1.62, hipY: 0.864, legX: 0.0851, extra: [] },
   { kind: 'spitter', file: 'husk_spitter_authored.glb', skullY: 1.76, hipY: 0.888, legX: 0.0875, extra: ['sac'] },
   { kind: 'screamer', file: 'husk_screamer_authored.glb', skullY: 2.0, hipY: 1.008, legX: 0.0993, extra: [] },
+  { kind: 'bloater', file: 'husk_bloater_authored.glb', skullY: 1.76, hipY: 0.888, legX: 0.1201, extra: [] },
 ];
 
 describe('authored husk GLBs (wave 2)', () => {
@@ -528,5 +529,21 @@ describe('authored husk GLBs (wave 2)', () => {
     expect(rig.head.rotation.x).toBe(-0.25); // thrown back — the wind-up deepens it
     expect(rig.armL.rotation.x).toBe(-0.42);
     expect(rig.armR.rotation.x).toBe(-0.34);
+  });
+
+  it('bloater swap slumps, then rides the arms outboard of the mass', () => {
+    const bl = new Husk('auth2_bl', 'bloater', 0, 0, 'test', groundY);
+    const tmpl = syntheticAuthoredTemplate();
+    // record the authored arm pivots as bound (before the swap shifts them)
+    expect(bl.useAuthoredFigure(tmpl)).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rig = (bl as any).rig as FigureRig;
+    expect(rig.pose.torsoX).toBe(0.1); // the bloater's shallower slump
+    // pivots authored at x=0 in the template: the swap's ±0.17 outboard
+    // shift (around the sac) is directly readable
+    expect(rig.armL.position.x).toBeCloseTo(-0.17);
+    expect(rig.armR.position.x).toBeCloseTo(0.17);
+    expect(rig.armL.rotation.z).toBe(0.38);
+    expect(rig.armR.rotation.z).toBe(-0.38);
   });
 });

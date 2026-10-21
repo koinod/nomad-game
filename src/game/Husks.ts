@@ -887,6 +887,7 @@ const AUTHORED_GLB_BY_KIND: Partial<Record<HuskKind, string>> = {
   crawler: 'husk_crawler_authored',
   spitter: 'husk_spitter_authored',
   screamer: 'husk_screamer_authored',
+  bloater: 'husk_bloater_authored',
 };
 const authoredTemplates = new Map<HuskKind, THREE.Object3D>();
 const authoredLoading = new Set<HuskKind>();
