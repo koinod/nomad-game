@@ -422,11 +422,21 @@ export const HUSK_KIND_LOOT: Record<string, HuskLootEntry[]> = {
     { id: 'bandage', min: 1, max: 1, chance: 0.3 },
     { id: 'water_bottle', min: 1, max: 1, chance: 0.25 },
   ],
+  // military husks (Lane 4): what it was is what it carried — the
+  // armored pack's per-kind salvage, on top of the zone table
+  armored: [
+    { id: 'gun_parts', min: 1, max: 2, chance: 0.35 },
+    { id: 'armor_plate', min: 1, max: 1, chance: 0.22 },
+    { id: 'ammo_556', min: 3, max: 8, chance: 0.5 },
+  ],
 };
 
 export const HUSK_LOOT: Record<string, HuskLootEntry[]> = {
-  // the carrier's armored guard pack drops military salvage
-  carrier: [
+  // the armored guard pack drops military salvage. Post-purge the pack
+  // holds the AIRBASE zone (Lane 4's formalization) — this table was
+  // keyed 'carrier' for the deleted carrier zone and orphaned there;
+  // re-homed to 'airbase' so the zone stops falling back to default.
+  airbase: [
     { id: 'ammo_556', min: 3, max: 8, chance: 0.55 },
     { id: 'gun_parts', min: 1, max: 2, chance: 0.35 },
     { id: 'armor_plate', min: 1, max: 1, chance: 0.22 },
