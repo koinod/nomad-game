@@ -364,6 +364,63 @@ export const SKY_PALETTES: Record<SkyPhase, SkyPalette> = {
   night: { zenith: 0x05070f, horizon: 0x111a29, ground: 0x0a0c10, sun: 0x8fa8d8, envIntensity: 0.1, hemiIntensity: 0.2 },
 };
 
+/** The sky's colors CONTINUOUSLY, by sun elevation (Item 7): the
+ *  phase palettes are three stops; the visible dome blends between
+ *  them so dawn/dusk are gradients in time, not steps. Endpoints are
+ *  the palettes themselves (elev ≥ 0.25 = day, 0 = golden,
+ *  ≤ −0.06 = night — the skyPhase thresholds). */
+export function skyPaletteAt(elev: number): { zenith: number; horizon: number; ground: number; sun: number } {
+  const mix = (a: SkyPalette, b: SkyPalette, t: number) => {
+    const c = (x: number, y: number) => new THREE.Color(x).lerp(new THREE.Color(y), t).getHex();
+    return { zenith: c(a.zenith, b.zenith), horizon: c(a.horizon, b.horizon), ground: c(a.ground, b.ground), sun: c(a.sun, b.sun) };
+  };
+  const pick = (p: SkyPalette) => ({ zenith: p.zenith, horizon: p.horizon, ground: p.ground, sun: p.sun });
+  if (elev >= 0.25) return pick(SKY_PALETTES.day);
+  if (elev >= 0) return mix(SKY_PALETTES.golden, SKY_PALETTES.day, elev / 0.25);
+  if (elev >= -0.06) return mix(SKY_PALETTES.night, SKY_PALETTES.golden, (elev + 0.06) / 0.06);
+  return pick(SKY_PALETTES.night);
+}
+
+/** The sky shader — ONE factory for the PMREM environment dome and
+ *  the visible sky dome, so the light the surfaces drink and the sky
+ *  the player sees are the same sky. The sun term is a tight disc +
+ *  corona + wide halo (strengthened for Item 7: previously the disc
+ *  existed only inside the IBL bake — the visible sky was a flat
+ *  background color, which is why the sun never read as real). */
+export function makeSkyMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    depthWrite: false,
+    uniforms: {
+      zenith: { value: new THREE.Color(0x2f62a8) },
+      horizon: { value: new THREE.Color(0xc3d7e8) },
+      ground: { value: new THREE.Color(0x54503f) },
+      sunColor: { value: new THREE.Color(0xfff2dd) },
+      sunDir: { value: new THREE.Vector3(0, 1, 0) },
+      sunBoost: { value: 1 },
+    },
+    vertexShader: `
+      varying vec3 vDir;
+      void main() {
+        vDir = position;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: `
+      varying vec3 vDir;
+      uniform vec3 zenith; uniform vec3 horizon; uniform vec3 ground;
+      uniform vec3 sunColor; uniform vec3 sunDir; uniform float sunBoost;
+      void main() {
+        vec3 d = normalize(vDir);
+        float h = d.y;
+        vec3 col = mix(horizon, zenith, pow(max(h, 0.0), 0.55));
+        col = mix(col, ground, smoothstep(0.02, -0.3, h));
+        float s = max(dot(d, normalize(sunDir)), 0.0);
+        col += sunColor * sunBoost * (pow(s, 800.0) * 5.0 + pow(s, 240.0) * 2.2 + pow(s, 8.0) * 0.20);
+        gl_FragColor = vec4(col, 1.0);
+      }`,
+  });
+}
+
 export class World {
   readonly scene: THREE.Scene;
   readonly seed: number;
@@ -401,6 +458,8 @@ export class World {
   private envMat: THREE.ShaderMaterial | null = null;
   private envTex: THREE.Texture | null = null;
   private envPhase: SkyPhase | null = null;
+  private skyMat: THREE.ShaderMaterial | null = null;
+  private skyDome: THREE.Mesh | null = null;
   private water!: THREE.Mesh;
   private waterMat!: THREE.MeshStandardMaterial;
   private terrainMat!: THREE.MeshStandardMaterial;
@@ -418,40 +477,27 @@ export class World {
   setupEnvironment(renderer: THREE.WebGLRenderer): void {
     this.pmrem = new THREE.PMREMGenerator(renderer);
     this.envScene = new THREE.Scene();
-    this.envMat = new THREE.ShaderMaterial({
-      side: THREE.BackSide,
-      depthWrite: false,
-      uniforms: {
-        zenith: { value: new THREE.Color(0x2f62a8) },
-        horizon: { value: new THREE.Color(0xc3d7e8) },
-        ground: { value: new THREE.Color(0x54503f) },
-        sunColor: { value: new THREE.Color(0xfff2dd) },
-        sunDir: { value: new THREE.Vector3(0, 1, 0) },
-      },
-      vertexShader: `
-        varying vec3 vDir;
-        void main() {
-          vDir = position;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }`,
-      fragmentShader: `
-        varying vec3 vDir;
-        uniform vec3 zenith; uniform vec3 horizon; uniform vec3 ground;
-        uniform vec3 sunColor; uniform vec3 sunDir;
-        void main() {
-          vec3 d = normalize(vDir);
-          float h = d.y;
-          vec3 col = mix(horizon, zenith, pow(max(h, 0.0), 0.55));
-          col = mix(col, ground, smoothstep(0.02, -0.3, h));
-          float s = max(dot(d, normalize(sunDir)), 0.0);
-          col += sunColor * (pow(s, 240.0) * 3.0 + pow(s, 8.0) * 0.20);
-          gl_FragColor = vec4(col, 1.0);
-        }`,
-    });
+    this.envMat = makeSkyMaterial();
     const dome = new THREE.Mesh(new THREE.SphereGeometry(50, 32, 16), this.envMat);
     this.envScene.add(dome);
     this.envPhase = null;
     this.applyEnvironment(skyPhase(1), new THREE.Vector3(0.3, 1, 0.2));
+  }
+
+  /** The VISIBLE sky (Item 7): the same shader as the IBL dome, on a
+   *  world-scale sphere in the main scene. Before this, scene.background
+   *  was a flat color and the gradient/disc existed only inside the
+   *  PMREM bake — lit surfaces drank a real sky the player never saw.
+   *  Follows the player (World.update) so its edge is never reached;
+   *  radius sits inside the camera far plane (3200). */
+  private buildSkyDome(): void {
+    this.skyMat = makeSkyMaterial();
+    (this.skyMat.uniforms.sunBoost.value as number) = 1.6;
+    this.skyDome = new THREE.Mesh(new THREE.SphereGeometry(2400, 32, 16), this.skyMat);
+    this.skyDome.frustumCulled = false;
+    this.skyDome.renderOrder = -10;
+    this.skyDome.name = 'sky';
+    this.scene.add(this.skyDome);
   }
 
   private applyEnvironment(phase: SkyPhase, sunDir: THREE.Vector3): void {
@@ -482,6 +528,7 @@ export class World {
     this.buildTerrain();
     this.buildWater();
     this.buildLights();
+    this.buildSkyDome();
     this.buildStars();
     this.buildScatter();
     // TOTAL PURGE (2026-10-20): every building except the lighthouse is
@@ -1301,6 +1348,22 @@ export class World {
       (this.scene.fog as THREE.Fog).color.copy(NIGHT_FOG);
       this.starMat.opacity = clamp(-elev * 3, 0, 0.9);
     }
+    // the VISIBLE sky (Item 7): continuous palette + the disc tracks
+    // the sun (by day) or the moon fill (by night) — the sky the
+    // player sees is the sky the IBL is baked from
+    if (this.skyMat) {
+      const pal = skyPaletteAt(elev);
+      const u = this.skyMat.uniforms;
+      (u.zenith.value as THREE.Color).setHex(pal.zenith);
+      (u.horizon.value as THREE.Color).setHex(pal.horizon);
+      (u.ground.value as THREE.Color).setHex(pal.ground);
+      (u.sunColor.value as THREE.Color).setHex(pal.sun);
+      const discDir = elev > 0.02
+        ? this.sun.position.clone().normalize()
+        : this.moonFill.position.clone().normalize();
+      (u.sunDir.value as THREE.Vector3).copy(discDir);
+      (u.sunBoost.value as number) = elev > 0.02 ? 1.6 : 0.7;
+    }
     // lighting baseline: the environment follows the phase of day; the
     // hemisphere is the interior guarantee (shaded, never black)
     const phase = skyPhase(elev);
@@ -1345,6 +1408,8 @@ export class World {
 
   /** Per-frame world animation (beam rotation, water shimmer, rain). */
   update(dt: number, elapsed: number, focusX = 0, focusZ = 0): void {
+    // the sky dome rides with the player — its edge is never reached
+    if (this.skyDome) this.skyDome.position.set(focusX, 0, focusZ);
     this.beamPivot.rotation.y += dt * 0.5;
     this.updateRain(dt, focusX, focusZ);
     // cheap water shimmer
