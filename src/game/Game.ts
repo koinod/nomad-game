@@ -1138,6 +1138,7 @@ export class Game {
 
     // reach-type quest steps
     this.checkReachSteps(s, player.pos.x, player.pos.z, player.pos.y);
+    this.checkTollCrew(s, player.pos.x, player.pos.z);
 
     // battery
     if (s.phoneOpen) s.drainBattery(dt * 0.3);
@@ -1174,6 +1175,38 @@ export class Game {
         s.questEvent('reach', step.target, 1);
       }
     }
+  }
+
+  /**
+   * W5 (stage 7): the Skulls toll-crew hook on the relay→dune road
+   * (ROAD_GRAPH marks the stretch; Lane 9 specs a hook, not an
+   * encounter). Crossing the stretch's midpoint once lands a journal +
+   * toast beat, shaded by Skulls rep — no invented encounter.
+   */
+  private tollCrewT = 0;
+  private checkTollCrew(
+    s: ReturnType<typeof useGameStore.getState>,
+    px: number,
+    pz: number,
+  ): void {
+    if (s.flags['toll_crew_seen']) return;
+    this.tollCrewT += 1 / 60;
+    if (this.tollCrewT < 1) return;
+    this.tollCrewT = 0;
+    const a = s.poiPositions['relay_station'];
+    const b = s.poiPositions['dune_cache'];
+    if (!a || !b) return;
+    const mx = (a[0] + b[0]) / 2;
+    const mz = (a[1] + b[1]) / 2;
+    if (Math.hypot(px - mx, pz - mz) > 30) return;
+    s.setFlag('toll_crew_seen');
+    const friendly = (s.rep.skulls ?? 0) >= 25;
+    s.addJournal('The toll road', [
+      friendly
+        ? 'Skulls colors at the relay-road bend — a nod, not a stop. The toll crew lets you pass. Word travels on this road; today it traveled kindly.'
+        : 'Skulls colors at the relay-road bend: riders watching the stretch, counting what rolls through. Nobody stopped you. Not yet. The toll on this road isn\u2019t always money.',
+    ]);
+    s.addToast(friendly ? 'The Skulls toll crew waves you through.' : 'Skulls toll crew on this stretch — they\u2019re watching the road.');
   }
 
   /** Called by the store when a container's staged loot is fully taken. */

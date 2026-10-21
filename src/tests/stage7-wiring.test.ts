@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { useGameStore } from '../store/gameStore';
 import { ITEMS } from '../data/items';
 import { QUESTS } from '../data/quests';
-import { ENCLAVE_CACHES, ENCLAVE_RADIO_BURST } from '../data/worldWiring';
+import { ENCLAVE_CACHES, ENCLAVE_RADIO_BURST, ROAD_GRAPH } from '../data/worldWiring';
 import { buildContainerDefs } from '../game/Interact';
 import { POI_DEFS } from '../game/World';
 import { MAP_MARKERS, territoryAt } from '../data/territory';
@@ -77,6 +77,24 @@ describe('stage 7 item 1 — W1 POIs + W4 markers', () => {
     for (const id of ['tollgate', 'raider_fort', 'barn', 'warehouse', 'gas_station', 'strip_mall']) {
       expect(territoryAt(id)?.poiId).toBe(id);
     }
+  });
+});
+
+describe('stage 7 item 3 — W5 road graph', () => {
+  it('every road-mode edge resolves to real POIs; the doors stay off-island', () => {
+    const poiIds = new Set(POI_DEFS.map((p) => p.id));
+    for (const e of ROAD_GRAPH.edges) {
+      if (e.mode === 'road') {
+        expect(poiIds.has(e.from), `${e.from}->${e.to}`).toBe(true);
+        expect(poiIds.has(e.to), `${e.from}->${e.to}`).toBe(true);
+      } else {
+        // bridge/ferry doors: the far node is an OBX node that must NOT exist yet
+        expect(poiIds.has(e.to), e.to).toBe(false);
+        expect(e.pricedBy).toBeDefined();
+      }
+    }
+    const tollStretch = ROAD_GRAPH.edges.find((e) => e.from === 'relay_station' && e.to === 'dune_cache');
+    expect(tollStretch?.note).toContain('toll crews');
   });
 });
 

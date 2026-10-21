@@ -11,6 +11,7 @@ import type { BiomeId } from './Game';
 import type { StationId } from '../data/items';
 import type { Collider } from './Colliders';
 import { LightShafts, tightenFog } from './PostFX';
+import { ROAD_GRAPH } from '../data/worldWiring';
 import { applyWindSway } from './Clouds';
 
 export const WORLD = {
@@ -406,7 +407,59 @@ export class World {
     this.buildCampfires();
     this.buildLighthouse();
     this.buildRelayRuin();
+    this.buildRoads();
     this.buildDressing();
+  }
+
+  /**
+   * W5 (stage 7): Lane 9's ROAD_GRAPH drawn as dirt ribbons over the
+   * terrain — one merged strip mesh, sampled every ~5m, hugging the
+   * ground. 'road' edges only: the bridge/ferry doors lead off-island
+   * to OBX nodes that don't exist yet, so they draw nothing.
+   */
+  private buildRoads(): void {
+    const positions: number[] = [];
+    const indices: number[] = [];
+    let base = 0;
+    const HALF_W = 1.9;
+    for (const e of ROAD_GRAPH.edges) {
+      if (e.mode !== 'road') continue;
+      const a = this.poiPositions[e.from];
+      const b = this.poiPositions[e.to];
+      if (!a || !b) continue;
+      const dx = b[0] - a[0];
+      const dz = b[1] - a[1];
+      const len = Math.hypot(dx, dz);
+      if (len < 1) continue;
+      const pxn = -dz / len;
+      const pzn = dx / len;
+      const steps = Math.max(2, Math.ceil(len / 5));
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        const cx = a[0] + dx * t;
+        const cz = a[1] + dz * t;
+        for (const s of [-1, 1]) {
+          const x = cx + pxn * HALF_W * s;
+          const z = cz + pzn * HALF_W * s;
+          positions.push(x, this.groundY(x, z) + 0.07, z);
+        }
+        if (i > 0) {
+          const l0 = base + (i - 1) * 2;
+          indices.push(l0, l0 + 1, l0 + 2, l0 + 1, l0 + 3, l0 + 2);
+        }
+      }
+      base += (steps + 1) * 2;
+    }
+    if (positions.length === 0) return;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setIndex(indices);
+    geo.computeVertexNormals();
+    const mat = new THREE.MeshStandardMaterial({ color: 0x6e5c40, roughness: 1 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.name = 'roads';
+    mesh.receiveShadow = true;
+    this.scene.add(mesh);
   }
 
   /**
