@@ -214,7 +214,7 @@ export class Player {
   private figureSignature(): string {
     const s = useGameStore.getState();
     const a = s.appearance;
-    const packIt = s.equipped.pack ? s.inventory.find((i) => i.uid === s.equipped.pack) : undefined;
+    const packIt = s.equipped.backpack ? s.inventory.find((i) => i.uid === s.equipped.backpack) : undefined;
     const vest = s.inventory.some((i) => i.itemId === 'armored_vest' && i.qty > 0) ? 1 : 0;
     const helm = s.inventory.some((i) => i.itemId === 'riot_helmet' && i.qty > 0) ? 1 : 0;
     return [
@@ -285,7 +285,7 @@ export class Player {
     // code below poses it through the rig's joint pivots (head at the
     // neck, arms at the shoulders, legs at the hips), exactly the
     // contract the old hand-built figure used.
-    const packIt = s.equipped.pack ? s.inventory.find((i) => i.uid === s.equipped.pack) : undefined;
+    const packIt = s.equipped.backpack ? s.inventory.find((i) => i.uid === s.equipped.backpack) : undefined;
     const hasVest = s.inventory.some((i) => i.itemId === 'armored_vest' && i.qty > 0);
     const hasHelm = s.inventory.some((i) => i.itemId === 'riot_helmet' && i.qty > 0);
     this.rigH = female ? 1.73 : 1.8;
@@ -398,9 +398,13 @@ export class Player {
     const s = useGameStore.getState();
     const want = activeHandItemId(s.equipped, s.inventory);
     // wave 4: a refinished weapon rebuilds its mesh even when the item
-    // itself didn't change — the sync key carries the instance's finish
+    // itself didn't change — the sync key carries the instance's finish.
+    // Inventory v2: the instance is the HELD slot's weapon (the mesh
+    // reads its finish/mods), falling back to the projections.
+    const heldUid = s.equipped[s.equipped.activeWeapon];
     const activeInst = want
-      ? (s.equipped.melee ? s.inventory.find((i) => i.uid === s.equipped.melee) : undefined)
+      ? (heldUid ? s.inventory.find((i) => i.uid === heldUid) : undefined)
+        ?? (s.equipped.melee ? s.inventory.find((i) => i.uid === s.equipped.melee) : undefined)
         ?? (s.equipped.ranged ? s.inventory.find((i) => i.uid === s.equipped.ranged) : undefined)
       : undefined;
     // Lane 11: attached mods are part of the mesh too — a mod swap must

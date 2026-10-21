@@ -3,7 +3,8 @@
 
 import * as THREE from 'three';
 import { useGameStore } from '../store/gameStore';
-import type { DifficultyId, SaveSnapshot, VehicleSave, WorldDiff } from '../store/types';
+import type { DifficultyId, NearbyEntry, SaveSnapshot, VehicleSave, WorldDiff } from '../store/types';
+import { hasPhoneCarried, nearbyFromSources, walkCarried } from '../store/containers';
 import { DIFFICULTIES } from '../store/types';
 import { QUESTS } from '../data/quests';
 import { input, resetEdgeTriggers } from './input';
@@ -15,7 +16,7 @@ import { ProjectileManager } from './Projectiles';
 import { rangeFalloff, armorMult } from './gunMath';
 import { HuskManager } from './Husks';
 import type { Husk, SpawnZone } from './Husks';
-import { InteractSystem, buildContainerDefs } from './Interact';
+import { InteractSystem, buildContainerDefs, INTERACT_RADIUS_M, STORAGE_RADIUS_M } from './Interact';
 import { AnimalManager } from './Animals';
 import { VehicleManager, applyUpgradeVisuals, attachGt500Glb, attachPrimeGlb, attachSprinterGlb, placeSeahawk, applyGlbVisuals, itemsWeightKg, type Vehicle } from './Vehicles';
 import { CarPhysics } from './CarPhysics';
@@ -628,7 +629,9 @@ export class Game {
         st.closeBackpack();
       } else if (st.phoneOpen) {
         st.closePhone();
-      } else if (st.phoneUnlocked && st.battery > 0) {
+      } else if (hasPhoneCarried(st.inventory) && st.battery > 0) {
+        // the deck follows the phone ITEM (inventory v2) — carried or
+        // the plain pack opens instead
         st.openPhone('pack');
         if (useGameStore.getState().phoneOpen && document.pointerLockElement) {
           document.exitPointerLock();
@@ -1115,7 +1118,7 @@ export class Game {
           this.interact!.markSearched(q.id);
           const def = this.interact!.containerDef(q.id);
           if (def?.locked) {
-            const lp = s.inventory.find((i) => i.itemId === 'lockpick');
+            const lp = walkCarried(s.inventory).find((i) => i.itemId === 'lockpick');
             if (lp && !s.perks.includes('sc_locksmith')) {
               s.removeItem(lp.uid, 1);
               s.addToast('The lockpick turns. One less in the kit.');
@@ -1784,7 +1787,7 @@ export class Game {
       s.addToast('The tank is full.');
       return;
     }
-    const can = s.inventory.find((it) => it.itemId === 'fuel_can' && it.qty > 0);
+    const can = walkCarried(s.inventory).find((it) => it.itemId === 'fuel_can' && it.qty > 0);
     if (!can) {
       s.addToast('No fuel can in the pack.');
       sfx.play('ui', { volume: 0.3 });
@@ -1852,11 +1855,36 @@ export class Game {
   }
 
 
-  /** [T] storage target: the Mustang's trunk (the only storage left). */
+  /** [T] storage target: the nearest vehicle's storage in reach. */
   private openStorageNear(px: number, pz: number, s: ReturnType<typeof useGameStore.getState>): void {
-    const v = this.vehicles.nearest(px, pz, 3.6);
+    const v = this.vehicles.nearest(px, pz, STORAGE_RADIUS_M);
     if (v) s.openStorage('vehicle', v.uid, `${v.def.name} — trunk`);
     else s.addToast('Nothing with storage in reach.');
+  }
+
+  /** Inventory v2 NEARBY: vehicle storage + world containers within
+   *  the interact system's own radii of the player (one source — the
+   *  same ranges the world prompts use). The store's deck reads this
+   *  through refreshNearby; assembly is containers.nearbyFromSources. */
+  getNearbyStorage(): NearbyEntry[] {
+    if (!this.player || !this.interact || !this.vehicles) return [];
+    const p = this.player.pos;
+    const vehicles = this.vehicles.vehicles.map((v) => ({
+      uid: v.uid,
+      label: `${v.def.name} — storage`,
+      x: v.group.position.x,
+      z: v.group.position.z,
+      usedKg: itemsWeightKg(v.storage),
+      capKg: storageCapKg(v.def.storageKg, v.upgrades),
+    }));
+    const containers = this.interact.containersWithin(p.x, p.z, INTERACT_RADIUS_M);
+    return nearbyFromSources(p.x, p.z, vehicles, containers, STORAGE_RADIUS_M, INTERACT_RADIUS_M);
+  }
+
+  /** Run a world interactable's use() by id — the NEARBY list opens
+   *  world containers through their normal search/open flow. */
+  useInteractable(id: string): void {
+    this.interact?.useById(id);
   }
 
   // ---------------------------------------------------------------
