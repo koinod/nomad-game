@@ -1,0 +1,1 @@
+{"compilerOptions":{"esModuleInterop":true,"lib":["ES2022","DOM"],"module":"CommonJS","moduleResolution":"node","outDir":"dist","rootDir":"../..","skipLibCheck":true,"strict":false,"target":"ES2022","types":[]},"include":["export_figures.ts","node-shims.d.ts","../../src/game/figureKit.ts","../../src/game/rng.ts","../../src/data/survivors.ts","../../src/data/skills.ts"]}

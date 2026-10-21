@@ -144,6 +144,9 @@ export interface HumanSpec {
   /** Husk mutation: desaturate/stain handled by palette choice; this
    *  stretches the frame (screamer) without touching the proportions code. */
   gaunt?: number; // 0..1 — narrows limbs/torso, lengthens arms
+  /** 'glow' = husk eye pits (shared basic material, night readability +
+   *  screamer flare); 'dark' = plain bead eyes (people). Default 'dark'. */
+  eyes?: 'glow' | 'dark';
 }
 
 /**
@@ -256,12 +259,20 @@ export function buildHumanFigure(spec: HumanSpec & { headCenterY?: number }): Fi
   jawMesh.castShadow = true;
   jaw.add(jawMesh);
   head.add(jaw);
-  // eyes: pits on the face, one shared material (night readability +
-  // the screamer's flare reads through it)
-  const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffd76a });
-  mats.push(eyeMat);
+  // eyes: husks get glowing pits on ONE shared basic material (night
+  // readability + the screamer's flare reads through it); people get
+  // plain dark beads — a survivor with lamp eyes reads wrong.
+  let eyeMat: THREE.MeshBasicMaterial | null = null;
+  let eyeMeshMat: THREE.Material;
+  if ((spec.eyes ?? 'dark') === 'glow') {
+    eyeMat = new THREE.MeshBasicMaterial({ color: 0xffd76a });
+    mats.push(eyeMat);
+    eyeMeshMat = eyeMat;
+  } else {
+    eyeMeshMat = std(0x1a1512, 0.6);
+  }
   for (const sx of [-1, 1]) {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.016 * (H / 1.8) + 0.008, 6, 6), eyeMat);
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.016 * (H / 1.8) + 0.008, 6, 6), eyeMeshMat);
     eye.name = 'eye';
     eye.position.set(sx * skullR * 0.36, headCenterLocal + skullR * 0.12, skullR * 0.88);
     head.add(eye);
@@ -389,7 +400,7 @@ export function buildHuskFigure(kind: HuskFigureKind, o: HuskFigureOptions): Fig
     case 'spitter': return huskSpitter(o);
     case 'armored': {
       const rig = buildHumanFigure({
-        height: o.height, headCenterY: o.headCenterY, palette: o.palette, build: 'heavy',
+        height: o.height, headCenterY: o.headCenterY, palette: o.palette, eyes: 'glow', build: 'heavy',
         gear: { vest: true, helmet: true },
       });
       // shoulder pads ride the arm pivots (they swing with the arms)
@@ -405,14 +416,14 @@ export function buildHuskFigure(kind: HuskFigureKind, o: HuskFigureOptions): Fig
     }
     case 'stalker': {
       const rig = buildHumanFigure({
-        height: o.height, headCenterY: o.headCenterY, palette: o.palette, build: 'slim', gaunt: 0.35,
+        height: o.height, headCenterY: o.headCenterY, palette: o.palette, eyes: 'glow', build: 'slim', gaunt: 0.35,
       });
       poseSlump(rig, 0.2, vrnd);
       return rig;
     }
     default: { // shambler
       const rig = buildHumanFigure({
-        height: o.height, headCenterY: o.headCenterY, palette: o.palette,
+        height: o.height, headCenterY: o.headCenterY, palette: o.palette, eyes: 'glow',
         build: vrnd() < 0.3 ? 'heavy' : 'standard',
         gear: vrnd() < 0.3 ? { hat: o.palette.dark ?? 0x2c2c30 } : undefined,
       });
@@ -442,15 +453,15 @@ function poseSlump(rig: FigureRig, slump: number, vrnd: () => number): void {
  *  of the cage, long neck, elongated skull, arms nearly at the knees. */
 function huskScreamer(o: HuskFigureOptions): FigureRig {
   const rig = buildHumanFigure({
-    height: o.height, headCenterY: o.headCenterY, palette: o.palette, build: 'slim', gaunt: 0.85,
+    height: o.height, headCenterY: o.headCenterY, palette: o.palette, eyes: 'glow', build: 'slim', gaunt: 0.85,
   });
   const H = o.height;
   // exposed ribs: bone rings riding proud of the ribcage
   const bone = stdMat(rig.mats, 0xb8ab90, 0.9);
   for (let i = 0; i < 3; i++) {
-    const rib = new THREE.Mesh(new THREE.TorusGeometry(0.155 - i * 0.016, 0.02, 6, 18), bone);
+    const rib = new THREE.Mesh(new THREE.TorusGeometry(0.168 - i * 0.012, 0.02, 6, 18), bone);
     rib.rotation.x = Math.PI / 2;
-    rib.position.y = H * 0.31 + i * H * 0.032;
+    rib.position.y = H * (0.15 + i * 0.045); // the ribcage band, not the throat
     rib.castShadow = true;
     rig.torso.add(rib);
   }
@@ -484,7 +495,7 @@ function huskScreamer(o: HuskFigureOptions): FigureRig {
  *  low between the shoulders, arms like wrecking bars. */
 function huskBrute(o: HuskFigureOptions): FigureRig {
   const rig = buildHumanFigure({
-    height: o.height, headCenterY: o.headCenterY, palette: o.palette, build: 'heavy',
+    height: o.height, headCenterY: o.headCenterY, palette: o.palette, eyes: 'glow', build: 'heavy',
   });
   const H = o.height;
   rig.group.scale.x = 1.22; // broader than any human frame
@@ -521,7 +532,7 @@ function ball2(r: number, track: THREE.Material[], color: number): THREE.Mesh {
  *  low, head thrust forward at the front, limbs bent for scuttling. */
 function huskCrawler(o: HuskFigureOptions): FigureRig {
   const rig = buildHumanFigure({
-    height: 1.8, headCenterY: 1.62, palette: o.palette, build: 'slim', gaunt: 0.4,
+    height: 1.8, headCenterY: 1.62, palette: o.palette, eyes: 'glow', build: 'slim', gaunt: 0.4,
   });
   const g = rig.group;
   // pitch the whole upper body flat around the hip pivot and drop it low
@@ -562,7 +573,7 @@ function huskCrawler(o: HuskFigureOptions): FigureRig {
  *  weeping pustules across it, arms dangling useless at the mass. */
 function huskBloater(o: HuskFigureOptions): FigureRig {
   const rig = buildHumanFigure({
-    height: o.height, headCenterY: o.headCenterY, palette: o.palette, build: 'heavy',
+    height: o.height, headCenterY: o.headCenterY, palette: o.palette, eyes: 'glow', build: 'heavy',
   });
   const H = o.height;
   const u = H / 1.85; // torso-local unit (belly coords authored at kind height)
@@ -580,7 +591,7 @@ function huskBloater(o: HuskFigureOptions): FigureRig {
   const pus = stdMat(rig.mats, 0x9aa84e, 0.25, 0, { emissive: 0x2a3305, emissiveIntensity: 0.7 });
   const spots: [number, number, number, number][] = [
     [0.26, 0.14, 0.42, 0.075], [-0.3, 0.08, 0.36, 0.06], [0.08, 0.26, 0.44, 0.055],
-    [-0.18, 0.34, -0.3, 0.065], [0.34, 0.4, -0.08, 0.05], [0, -0.02, 0.46, 0.06],
+    [-0.13, 0.36, -0.13, 0.05], [0.17, 0.42, 0.02, 0.045], [0, -0.02, 0.46, 0.06],
   ];
   for (const [px, py, pz, pr] of spots) {
     const p = new THREE.Mesh(new THREE.SphereGeometry(pr * u, 8, 8), pus);
@@ -588,8 +599,12 @@ function huskBloater(o: HuskFigureOptions): FigureRig {
     rig.torso.add(p);
   }
   poseSlump(rig, 0.1, o.vrnd);
-  rig.armL.rotation.z = 0.3; // arms pushed out by the mass
-  rig.armR.rotation.z = -0.3;
+  // arms ride OUTBOARD of the sac and splay around it — from the front
+  // they must read as limbs dangling at the sides of the mass
+  rig.armL.position.x -= 0.17;
+  rig.armR.position.x += 0.17;
+  rig.armL.rotation.z = 0.38;
+  rig.armR.rotation.z = -0.38;
   return rig;
 }
 
@@ -597,15 +612,15 @@ function huskBloater(o: HuskFigureOptions): FigureRig {
  *  jaw — it swells bright on the telegraph (Husks.ts scales `sac`). */
 function huskSpitter(o: HuskFigureOptions): FigureRig {
   const rig = buildHumanFigure({
-    height: o.height, headCenterY: o.headCenterY, palette: o.palette, build: 'slim', gaunt: 0.3,
+    height: o.height, headCenterY: o.headCenterY, palette: o.palette, eyes: 'glow', build: 'slim', gaunt: 0.3,
   });
   const H = o.height;
   const sacMat = stdMat(rig.mats, 0x7d9b3a, 0.2, 0, {
     emissive: 0x33450a, emissiveIntensity: 0.8, transparent: true, opacity: 0.88,
   });
-  const sac = new THREE.Mesh(new THREE.SphereGeometry(0.19 * (H / 1.8), 12, 10), sacMat);
+  const sac = new THREE.Mesh(new THREE.SphereGeometry(0.145 * (H / 1.8), 12, 10), sacMat);
   sac.scale.set(0.9, 1.25, 0.9);
-  sac.position.set(0.02, H * 0.31, H * 0.075); // slung from jaw to chest (torso-local)
+  sac.position.set(0.02, H * 0.325, H * 0.085); // slung from jaw to chest (torso-local)
   sac.castShadow = true;
   rig.torso.add(sac);
   rig.sac = sac;
