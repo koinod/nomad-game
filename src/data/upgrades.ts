@@ -15,23 +15,15 @@ export interface UpgradeDef {
 
 export const UPGRADES: UpgradeDef[] = [
   { id: 'armor', name: 'Armor Plating', desc: 'Welded plate over the vitals. Collision and wear damage cut hard.', cost: [{ itemId: 'armor_plate', qty: 2 }, { itemId: 'scrap', qty: 4 }], kinds: ['car'], excludeIds: ['tank'] },
-  { id: 'engine_tune', name: 'Engine Tune', desc: 'Timing, injectors, a freer exhaust. +12% top speed, stronger pull.', cost: [{ itemId: 'gun_parts', qty: 4 }, { itemId: 'engine_part', qty: 1 }], kinds: ['car', 'atv'] },
-  { id: 'cargo_racks', name: 'Cargo Racks', desc: 'Roof rack, bed rails, tie-downs. Storage capacity +60%.', cost: [{ itemId: 'scrap', qty: 4 }, { itemId: 'wood', qty: 2 }], kinds: ['car', 'atv'] },
+  { id: 'engine_tune', name: 'Engine Tune', desc: 'Timing, injectors, a freer exhaust. +12% top speed, stronger pull.', cost: [{ itemId: 'gun_parts', qty: 4 }, { itemId: 'engine_part', qty: 1 }], kinds: ['car'] },
+  { id: 'cargo_racks', name: 'Cargo Racks', desc: 'Roof rack, bed rails, tie-downs. Storage capacity +60%.', cost: [{ itemId: 'scrap', qty: 4 }, { itemId: 'wood', qty: 2 }], kinds: ['car'] },
   { id: 'bullbar', name: 'Bullbar', desc: 'A welded push bar. Ramming hurts them a lot more than it hurts you.', cost: [{ itemId: 'scrap', qty: 5 }], kinds: ['car'], excludeIds: ['tank'] },
-  { id: 'lift_kit', name: 'Lift Kit', desc: 'Raised suspension and clearance. Sand barely slows you; body sits higher.', cost: [{ itemId: 'scrap', qty: 4 }, { itemId: 'engine_part', qty: 1 }], kinds: ['car', 'atv'], excludeIds: ['mustang', 'tank'] },
-  { id: 'run_flats', name: 'Run-Flat Tires', desc: 'Reinforced sidewalls. A blown tire stops being a thing that happens to you.', cost: [{ itemId: 'tire', qty: 2 }], kinds: ['car', 'atv'], excludeIds: ['tank'] },
+  { id: 'lift_kit', name: 'Lift Kit', desc: 'Raised suspension and clearance. Sand barely slows you; body sits higher.', cost: [{ itemId: 'scrap', qty: 4 }, { itemId: 'engine_part', qty: 1 }], kinds: ['car'], excludeIds: ['mustang', 'tank'] },
+  { id: 'run_flats', name: 'Run-Flat Tires', desc: 'Reinforced sidewalls. A blown tire stops being a thing that happens to you.', cost: [{ itemId: 'tire', qty: 2 }], kinds: ['car'], excludeIds: ['tank'] },
   // Goliath 6x6 weapon mounts (mutually exclusive — one ring, one weapon)
-  { id: 'mg_mount', name: 'MG Mount', desc: 'A ring-mounted machine gun on the Goliath. Fire it from the driver\u2019s seat.', cost: [{ itemId: 'gun_parts', qty: 6 }, { itemId: 'scrap', qty: 3 }], kinds: ['car'], onlyIds: ['goliath', 'mustang'], group: 'mount' },
-  { id: 'cannon_40', name: '40mm Cannon', desc: 'A turreted 40mm cannon for the Goliath. Slow, deafening, decisive.', cost: [{ itemId: 'gun_parts', qty: 10 }, { itemId: 'engine_part', qty: 1 }, { itemId: 'scrap', qty: 4 }], kinds: ['car'], onlyIds: ['goliath'], group: 'mount' },
-  // Tank tiers (its main cannon is integral; these extend it)
-  { id: 'tank_coax', name: 'Coax Machine Gun', desc: 'A coaxial MG beside the tank\u2019s main gun. For the small problems.', cost: [{ itemId: 'gun_parts', qty: 5 }, { itemId: 'scrap', qty: 2 }], kinds: ['car'], onlyIds: ['tank'] },
-  { id: 'tank_reactive', name: 'Reactive Armor + Ram Plow', desc: 'ERA blocks and a heavier plow for the tank. Ramming goes up a class.', cost: [{ itemId: 'armor_plate', qty: 3 }, { itemId: 'scrap', qty: 3 }], kinds: ['car'], onlyIds: ['tank'] },
-  // Helicopter line (wave 4 — effects live in game/heliMath.ts, visuals in
-  // Vehicles.applyUpgradeVisuals). kinds: ['heli'] gates the ground fleet out.
-  { id: 'heli_armor', name: 'Rotor & Airframe Armor', desc: 'Plate over the engine deck, rotor head, and cabin floor. Impacts and hard landings land at half strength.', cost: [{ itemId: 'armor_plate', qty: 2 }, { itemId: 'scrap', qty: 3 }], kinds: ['heli'] },
-  { id: 'heli_engine', name: 'Aviation Engine Tune', desc: 'Governors off, mixture rich. Rotor spools a third faster, +12% top speed, stronger climb.', cost: [{ itemId: 'gun_parts', qty: 3 }, { itemId: 'engine_part', qty: 1 }], kinds: ['heli'] },
-  { id: 'heli_racks', name: 'External Cargo Racks', desc: 'Skid racks and a belly sling frame. Storage capacity +60%.', cost: [{ itemId: 'scrap', qty: 4 }, { itemId: 'wood', qty: 2 }], kinds: ['heli'] },
-  { id: 'heli_light', name: 'Searchlight + Night Kit', desc: 'A chin searchlight with a real beam for night work, wired to the ship\u2019s battery.', cost: [{ itemId: 'wire', qty: 3 }, { itemId: 'car_battery', qty: 1 }], kinds: ['heli'] },
+  // VEHICLE RESET: the weapon mounts, tank tiers and helicopter line are
+  // deleted with their vehicles. What remains fits the one Mustang;
+  // Piece 3 re-bases these on real physics parameters (mass, power, grip).
 ];
 
 function clamp(v: number, lo: number, hi: number): number {
@@ -80,7 +72,7 @@ export function sandFactor(owned: readonly string[]): number {
 }
 
 export function storageCapKg(baseKg: number, owned: readonly string[]): number {
-  const racked = owned.includes('cargo_racks') || owned.includes('heli_racks');
+  const racked = owned.includes('cargo_racks');
   return Math.round(baseKg * (racked ? 1.6 : 1));
 }
 
@@ -92,7 +84,6 @@ export function collisionLossFactor(owned: readonly string[]): number {
 }
 
 export function ramDamageFactor(owned: readonly string[]): number {
-  if (owned.includes('tank_reactive')) return 2.2;
   return owned.includes('bullbar') ? 1.8 : 1;
 }
 

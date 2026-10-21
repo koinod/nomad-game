@@ -79,7 +79,7 @@ function VehiclePanel() {
       </div>
       <Bar value={vehicle.condPct} max={1} fill={vehicle.condPct < 0.3 ? 'bg-[#d9534f]' : 'bg-[#5aa469]'} bg="bg-[#232b36]" />
       <div className="mt-2 text-[11px] text-[#8a94a3]">
-        {vehicle.kind === 'heli' ? 'WASD cyclic · SPACE climb · C dive · Q/E yaw · F exit' : 'W/S drive · A/D steer · F exit'}
+        {'W/S drive · A/D steer · F exit'}
       </div>
     </div>
   );

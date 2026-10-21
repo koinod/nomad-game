@@ -3,7 +3,6 @@ import { ITEMS, FIELD_RECIPES, STATION_RECIPES, STATION_LABEL } from '../data/it
 import { PERKS as PERKS_ALL } from '../data/skills';
 import { FINISHES, MODS as MODS_ALL, magSizeOf } from '../data/mods';
 import { UPGRADES as UPGRADE_DEFS } from '../data/upgrades';
-import { MODULE_DEFS } from '../data/trailerData';
 import { FACILITIES as FACILITY_DEFS, baseHeat, buildMinutes } from '../data/base';
 import { dispatchDurationMin, poiName, resolveDispatch } from '../data/dispatch';
 import { TRAITS as TRAIT_DEFS } from '../data/survivors';
@@ -21,6 +20,7 @@ import { arrangeItems as arrangeGridItems, packGridDims } from './gridUtils';
 import { deleteSaveSlot, listSaveSlots, loadGameFromSlot, saveGameToSlot } from '../systems/save';
 import { sfx } from '../systems/audio';
 import { getGame } from '../game/instance';
+import { sanitizeBase } from '../game/saveMigration';
 import { input } from '../game/input';
 
 let uidCounter = 1;
@@ -184,9 +184,6 @@ interface GameState {
   atWorkshop: () => boolean;
   repairVehicle: (uid: string, kind: 'tire' | 'engine' | 'battery' | 'scrap') => void;
   installUpgrade: (uid: string, upgradeId: string) => void;
-  installModule: (trailerUid: string, moduleId: string) => void;
-  setBeaconMode: (trailerUid: string, mode: 'off' | 'sat' | 'horde') => void;
-  callSupplyDrop: (trailerUid: string) => void;
   healPlayer: (amount: number) => void;
   advanceTime: (minutes: number) => void;
 
@@ -280,10 +277,7 @@ export const useGameStore = create<GameState>()((set, get) => {
       const vehName = st.fleet.find((f) => f.defId === d.vehicleDefId)?.name ?? d.vehicleDefId;
       const heat = st.base ? baseHeat(st.base.facilities, st.survivors.length, st.daysElapsed) : 0;
       const veh = st.fleet.find((f) => f.defId === d.vehicleDefId);
-      const trl = d.trailerDefId ? st.trailerFleet.find((t) => t.defId === d.trailerDefId) : undefined;
-      const freeKg =
-        Math.max(0, (veh?.storageCapKg ?? 60) - (veh?.storageUsedKg ?? 0)) +
-        (trl ? Math.max(0, trl.storageCapKg - trl.storageUsedKg) : 0);
+      const freeKg = Math.max(0, (veh?.storageCapKg ?? 60) - (veh?.storageUsedKg ?? 0));
       const out = resolveDispatch({
         task: d.task,
         destPoiId: d.destPoiId,
@@ -322,9 +316,6 @@ export const useGameStore = create<GameState>()((set, get) => {
         let placed = false;
         if (eng) {
           placed = !eng.storagePutItem('vehicle', d.vehicleDefId, { uid: newUid(), itemId: stack.itemId, qty: stack.qty });
-          if (!placed && d.trailerDefId) {
-            placed = !eng.storagePutItem('trailer', d.trailerDefId, { uid: newUid(), itemId: stack.itemId, qty: stack.qty });
-          }
         }
         if (!placed) placed = st.addItem(stack.itemId, stack.qty, true);
         if (placed) brought.push(`${stack.qty}× ${ITEMS[stack.itemId]?.name ?? stack.itemId}`);
@@ -632,43 +623,8 @@ export const useGameStore = create<GameState>()((set, get) => {
       sfx.play('craft', { volume: 0.7 });
     },
 
-    installModule: (trailerUid, moduleId) => {
-      const s = get();
-      const eng = getGame();
-      if (!eng) return;
-      if (!s.atWorkshop()) { s.addToast('Buildouts need the marina Machine Shop or a base Garage Bay.'); return; }
-      const row = s.trailerFleet.find((t) => t.defId === trailerUid);
-      if (!row || row.dist > 30) { s.addToast('The trailer has to be nearby.'); return; }
-      const def = MODULE_DEFS.find((m) => m.id === moduleId);
-      if (!def) return;
-      for (const c of def.cost) {
-        if (s.countItem(c.itemId) < c.qty) {
-          s.addToast(`Needs ${c.qty}× ${ITEMS[c.itemId]?.name ?? c.itemId}.`);
-          return;
-        }
-      }
-      if (!eng.applyModule(trailerUid, moduleId)) { s.addToast('That trailer can\u2019t take a buildout.'); return; }
-      for (const c of def.cost) {
-        const it = s.inventory.find((i) => i.itemId === c.itemId);
-        if (it) s.removeItem(it.uid, c.qty);
-      }
-      s.addToast(`${def.name} built out.`);
-      sfx.play('craft', { volume: 0.7 });
-    },
 
-    setBeaconMode: (trailerUid, mode) => {
-      const eng = getGame();
-      if (!eng) return;
-      const msg = eng.applyBeaconMode(trailerUid, mode);
-      if (msg) get().addToast(msg);
-    },
 
-    callSupplyDrop: (trailerUid) => {
-      const eng = getGame();
-      if (!eng) return;
-      const msg = eng.callSupplyDrop(trailerUid);
-      get().addToast(msg);
-    },
 
     atWorkshop: () => {
       const s = get();
@@ -1271,6 +1227,12 @@ export const useGameStore = create<GameState>()((set, get) => {
     base: null,
     claimBase: (poiId) => {
       const s = get();
+      // TOTAL PURGE: only the lighthouse grounds can be claimed — every
+      // other claim site was demolished with its buildings.
+      if (poiId !== 'lighthouse_base') {
+        s.addToast('That ground can\u2019t be claimed — the buildings are gone. The lighthouse grounds are home now.');
+        return;
+      }
       if (s.base) {
         s.addToast('You already hold a home base. (Relocating comes later.)');
         return;
@@ -1731,7 +1693,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         perkPoints: snap.perkPoints,
         perks: snap.perks,
         survivors: snap.survivors,
-        base: snap.base,
+        base: sanitizeBase(snap.base),
         // wave 3 fields: absent on older v3 saves — default them here
         dispatches: snap.dispatches ?? [],
         journal: snap.journal ?? [],

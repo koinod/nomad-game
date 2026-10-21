@@ -169,7 +169,7 @@ export function buildStallion(g: THREE.Group, def: VehicleDef, v: Vehicle): void
 /**
  * Convoy Combat Edition — installed upgrades made visible on a Stallion.
  * Called from Vehicles.applyUpgradeVisuals; `g` is the (rebuilt) upgrade
- * group. The roof MG creates v.turret so Game aims + fires it.
+ * group.
  */
 export function applyStallionUpgrades(v: Vehicle, g: THREE.Group): void {
   const L = v.def.length;
@@ -260,22 +260,5 @@ export function applyStallionUpgrades(v: Vehicle, g: THREE.Group): void {
     for (let i = 0; i < 3; i++) box(g, 0.78, 0.03, 0.07, dark, 0, 0.97, -L * 0.40 + (i - 1) * 0.26);
   }
   if (v.upgrades.includes('mg_mount')) {
-    // roof pintle gun — a real turret so Game's aim/fire path drives it
-    box(g, 0.07, 0.24, 0.07, dark, 0, 1.84, -0.25); // pintle post (static)
-    const turret = new THREE.Group();
-    turret.position.set(0, 1.97, -0.25);
-    const w = new THREE.Group();
-    w.name = 'weaponMount';
-    box(w, 0.2, 0.2, 0.62, dark, 0, 0.04, 0.22); // receiver
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.85, 8), mat(0x1c1f24, 0.5, 0.5));
-    barrel.rotation.x = Math.PI / 2;
-    barrel.position.set(0, 0.1, 0.85);
-    barrel.castShadow = true;
-    w.add(barrel);
-    box(w, 0.46, 0.3, 0.04, steel, 0, 0.04, 0.48); // gun shield
-    box(w, 0.15, 0.18, 0.28, mat(0x5c5648, 0.8, 0.1), 0.22, -0.02, 0.08); // ammo can
-    turret.add(w);
-    v.group.add(turret);
-    v.turret = turret;
   }
 }

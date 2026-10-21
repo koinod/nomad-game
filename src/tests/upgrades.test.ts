@@ -15,10 +15,10 @@ import {
 import { FURNITURE_LOOT, HUSK_LOOT, ITEMS, STATION_RECIPES } from '../data/items';
 
 describe('UPGRADES data', () => {
-  it('has 14 unique ids', () => {
-    expect(UPGRADES).toHaveLength(14);
+  it('has 6 unique ids (VEHICLE RESET: mounts, tank tiers, heli line deleted)', () => {
+    expect(UPGRADES).toHaveLength(6);
     const ids = UPGRADES.map((u) => u.id);
-    expect(new Set(ids).size).toBe(14);
+    expect(new Set(ids).size).toBe(6);
   });
 
   it('every cost itemId exists as a key in ITEMS', () => {
@@ -76,8 +76,9 @@ describe('canInstallUpgrade', () => {
     expect(canInstallUpgrade({ kind: 'car', id: 'pickup' }, 'armor', ['armor'])).toBe(false);
   });
 
-  it('cargo_racks ok for atv', () => {
-    expect(canInstallUpgrade({ kind: 'atv', id: 'atv' }, 'cargo_racks', [])).toBe(true);
+  it('cargo_racks ok for the mustang (the atv is deleted)', () => {
+    expect(canInstallUpgrade({ kind: 'car', id: 'mustang' }, 'cargo_racks', [])).toBe(true);
+    expect(canInstallUpgrade({ kind: 'atv', id: 'atv' }, 'cargo_racks', [])).toBe(false);
   });
 
   it('unknown upgrade -> false', () => {
@@ -175,52 +176,19 @@ describe('wearFactor', () => {
   });
 });
 
-describe('weapon mounts (Ian correction: Goliath 6x6 + tank tiers)', () => {
-  it('mg_mount installs on the goliath + the Stallion (roof pintle gun)', () => {
-    expect(canInstallUpgrade({ kind: 'car', id: 'goliath' }, 'mg_mount', [])).toBe(true);
-    expect(canInstallUpgrade({ kind: 'car', id: 'mustang' }, 'mg_mount', [])).toBe(true);
-    expect(canInstallUpgrade({ kind: 'car', id: 'pickup' }, 'mg_mount', [])).toBe(false);
-    expect(canInstallUpgrade({ kind: 'car', id: 'tank' }, 'mg_mount', [])).toBe(false);
-  });
-
-  it('mount group is mutually exclusive', () => {
-    expect(canInstallUpgrade({ kind: 'car', id: 'goliath' }, 'cannon_40', ['mg_mount'])).toBe(false);
-    expect(canInstallUpgrade({ kind: 'car', id: 'goliath' }, 'mg_mount', ['cannon_40'])).toBe(false);
-    expect(canInstallUpgrade({ kind: 'car', id: 'goliath' }, 'cannon_40', ['armor'])).toBe(true);
-  });
-
-  it('tank tiers are tank-only', () => {
-    expect(canInstallUpgrade({ kind: 'car', id: 'tank' }, 'tank_coax', [])).toBe(true);
-    expect(canInstallUpgrade({ kind: 'car', id: 'tank' }, 'tank_reactive', [])).toBe(true);
-    expect(canInstallUpgrade({ kind: 'car', id: 'goliath' }, 'tank_coax', [])).toBe(false);
-  });
-
-  it('tank_reactive ram factor is 2.2', () => {
-    expect(ramDamageFactor(['tank_reactive'])).toBe(2.2);
-  });
-});
-
-describe('helicopter line (wave 4)', () => {
-  const heli = { kind: 'heli', id: 'seahawk' };
-  const car = { kind: 'car', id: 'pickup' };
-
-  it('all four heli upgrades install on a helicopter', () => {
-    for (const id of ['heli_armor', 'heli_engine', 'heli_racks', 'heli_light']) {
-      expect(canInstallUpgrade(heli, id, []), id).toBe(true);
+describe('VEHICLE RESET deletions', () => {
+  it('weapon mounts, tank tiers and the heli line are gone', () => {
+    for (const id of ['mg_mount', 'cannon_40', 'tank_coax', 'tank_reactive', 'heli_armor', 'heli_engine', 'heli_racks', 'heli_light']) {
+      expect(upgradeDef(id), id).toBeUndefined();
+      expect(canInstallUpgrade({ kind: 'car', id: 'mustang' }, id, []), id).toBe(false);
     }
   });
 
-  it('the two fleets cannot take each other\u2019s line', () => {
-    expect(canInstallUpgrade(car, 'heli_armor', [])).toBe(false);
-    expect(canInstallUpgrade(car, 'heli_light', [])).toBe(false);
-    expect(canInstallUpgrade(heli, 'armor', [])).toBe(false);
-    expect(canInstallUpgrade(heli, 'engine_tune', [])).toBe(false);
-    expect(canInstallUpgrade(heli, 'cargo_racks', [])).toBe(false);
-  });
-
-  it('heli_racks raise storage through the shared capacity helper', () => {
-    expect(storageCapKg(300, ['heli_racks'])).toBe(480);
-    expect(storageCapKg(300, [])).toBe(300);
-    expect(storageCapKg(300, ['cargo_racks'])).toBe(480);
+  it('the surviving six all fit the one Mustang', () => {
+    for (const id of ['armor', 'engine_tune', 'cargo_racks', 'bullbar', 'run_flats']) {
+      expect(canInstallUpgrade({ kind: 'car', id: 'mustang' }, id, []), id).toBe(true);
+    }
+    // lift kit stays excluded from the Mustang (it was never a lift candidate)
+    expect(canInstallUpgrade({ kind: 'car', id: 'mustang' }, 'lift_kit', [])).toBe(false);
   });
 });

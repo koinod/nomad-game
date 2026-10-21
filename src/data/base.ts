@@ -76,9 +76,7 @@ export function heatBand(heat: number): 'Quiet' | 'Exposed' | 'Hot' {
 }
 
 export const CLAIMABLE: { poiId: string; name: string }[] = [
-  { poiId: 'shore_camp', name: 'Shore Camp' },
-  { poiId: 'jonah_camp', name: 'Jonah\u2019s Camp' },
+  // TOTAL PURGE (2026-10-20): every other claim site was demolished with
+  // its buildings. The lighthouse grounds are the one claimable home.
   { poiId: 'lighthouse_base', name: 'Lighthouse Grounds' },
-  // the carrier is a base of sorts: clear its guard pack, plant the flag
-  { poiId: 'carrier', name: 'Heavy Logistics Carrier' },
 ];

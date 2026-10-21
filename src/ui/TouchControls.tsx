@@ -157,7 +157,6 @@ function FullscreenButton() {
  * Bottom-center: weapon slots. Renders only on touch devices.
  */
 export default function TouchControls() {
-  const vehicle = useGameStore((s) => s.vehicle);
   const [isTouch] = useState(
     () => typeof window !== 'undefined' && 'ontouchstart' in window,
   );
@@ -309,24 +308,7 @@ export default function TouchControls() {
         />
       </div>
 
-      {/* helicopter collective: hold to climb / sink (the joystick is the
-          cyclic; the lean buttons double as yaw) */}
-      {vehicle?.kind === 'heli' && (
-        <div className="absolute bottom-64 right-6 flex gap-2">
-          <ControlButton
-            label="LIFT"
-            ariaLabel="Hold to climb"
-            onPress={() => { input.ascend = true; }}
-            onRelease={() => { input.ascend = false; }}
-          />
-          <ControlButton
-            label="SINK"
-            ariaLabel="Hold to descend"
-            onPress={() => { input.crouch = true; }}
-            onRelease={() => { input.crouch = false; }}
-          />
-        </div>
-      )}
+      
 
       {/* combat cluster: right side, PUBG-style big FIRE */}
       <div className="absolute bottom-28 right-6 flex items-end gap-3">
@@ -359,7 +341,7 @@ export default function TouchControls() {
             onRelease={() => { input.blocking = false; }}
           />
           <ControlButton label="USE" ariaLabel="Interact" onPress={() => { input.interact = true; }} />
-          <ControlButton label="BOX" ariaLabel="Open vehicle or trailer storage" onPress={() => { input.storage = true; }} />
+          <ControlButton label="BOX" ariaLabel="Open vehicle storage" onPress={() => { input.storage = true; }} />
         </div>
         <div className="flex flex-col items-center gap-3">
           <ControlButton

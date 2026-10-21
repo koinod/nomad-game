@@ -4,7 +4,6 @@ import {
   cgHeightM, cornerRoll, effectiveSteerAngle, impactBounce, impactDamage,
   understeerK, vehicleMassKg, weightTransferPitch,
 } from '../game/drivePhysics';
-import { swayDampedHeading } from '../game/trailerPhysics';
 
 const car = (id: string) => ({ id, kind: 'car' });
 
@@ -79,19 +78,3 @@ describe('weight transfer', () => {
   });
 });
 
-describe('swayDampedHeading', () => {
-  it('follows small corrections fully', () => {
-    expect(swayDampedHeading(0, 0.02, 5, 1 / 60)).toBeCloseTo(0.02, 6);
-  });
-  it('rate-limits a snap, tighter at speed', () => {
-    const lowSpeed = Math.abs(swayDampedHeading(0, 1.0, 2, 1 / 60));
-    const highSpeed = Math.abs(swayDampedHeading(0, 1.0, 22, 1 / 60));
-    expect(lowSpeed).toBeLessThan(1.0);
-    expect(highSpeed).toBeLessThan(lowSpeed);
-    expect(highSpeed).toBeCloseTo(0.9 / 60, 4);
-  });
-  it('takes the short way around the wrap', () => {
-    const out = swayDampedHeading(Math.PI - 0.01, -Math.PI + 0.01, 0, 1);
-    expect(Math.abs(out - Math.PI)).toBeLessThan(0.05);
-  });
-});

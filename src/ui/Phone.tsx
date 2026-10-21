@@ -7,10 +7,8 @@ import { FACTIONS, repTier } from '../data/factions';
 import { SKILLS, TREES, PERKS, xpToNext } from '../data/skills';
 import { traitName, moraleBand, type SurvivorJob } from '../data/survivors';
 import { FACILITIES, baseHeat, heatBand, buildMinutes } from '../data/base';
-import { DISPATCH_POIS, DISPATCH_TASKS, dispatchDurationMin, poiName, riskChance } from '../data/dispatch';
-import type { DispatchTask } from '../store/types';
+import { poiName } from '../data/dispatch';
 import { UPGRADES, canInstallUpgrade } from '../data/upgrades';
-import { MODULE_DEFS } from '../data/trailerData';
 import { VEHICLE_DEFS } from '../game/Vehicles';
 import { carryLimitKg, encumbranceTier, totalWeightKg } from '../store/inventoryUtils';
 import { packGridDims, canPlace, layoutItems } from '../store/gridUtils';
@@ -359,8 +357,7 @@ function WorldMap() {
       ctx.fillText(id.replace(/_/g, ' '), px + 4, py + 3);
     }
 
-    // SAT UPLINK: a deployed beacon trailer feeds live fleet tracking —
-    // vehicles as amber diamonds, trailers as cyan marks
+    // SAT UPLINK: the relay feeds live tracking — the car as an amber diamond
     if (st.flags['sat_uplink']) {
       ctx.font = '7px sans-serif';
       for (const v of g.vehicles.vehicles) {
@@ -376,14 +373,9 @@ function WorldMap() {
         ctx.fillStyle = 'rgba(232,179,75,0.85)';
         ctx.fillText(v.def.name, px + 4, py + 2);
       }
-      for (const t of g.trailers.trailers) {
-        const [px, py] = toPx(t.group.position.x, t.group.position.z);
-        ctx.fillStyle = '#57c7d4';
-        ctx.fillRect(px - 2, py - 2, 4, 4);
-        ctx.fillStyle = 'rgba(87,199,212,0.85)';
-        ctx.fillText(t.def.name, px + 4, py + 2);
-      }
     }
+
+    // quest target marker    }
 
     // quest target marker
     const q = st.quests[0];
@@ -435,7 +427,7 @@ function WorldMap() {
         Amber ring marks your current objective. The triangle is you. Scouted places get a ring too:
         gold is rich, orange is picked over, gray is picked clean.
         {useGameStore((s) => s.flags)['sat_uplink'] && (
-          <span className="text-[#57c7d4]"> SAT UPLINK LIVE — fleet tracked: amber diamonds are vehicles, cyan squares are trailers.</span>
+          <span className="text-[#57c7d4]"> SAT UPLINK LIVE — the car is tracked as an amber diamond.</span>
         )}
       </p>
     </div>
@@ -454,15 +446,14 @@ function BaseSection() {
   const daysElapsed = useGameStore((s) => s.daysElapsed);
   const timeMinutes = useGameStore((s) => s.timeMinutes);
   const fleet = useGameStore((s) => s.fleet);
-  const trailerFleet = useGameStore((s) => s.trailerFleet);
 
   if (!base) {
     return (
       <section>
         <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Base</h3>
         <p className="text-sm text-[#8a94a3]">
-          No home base. Clear a camp and use its gold claim post — Shore Camp, Jonah's Camp, or the
-          Lighthouse Grounds. A base produces daily and gives your crew somewhere to be.
+          No home base. The island's other camps are rubble now — the one claim post still standing
+          is at the Lighthouse Grounds. A base produces daily and gives your crew somewhere to be.
         </p>
       </section>
     );
@@ -470,10 +461,7 @@ function BaseSection() {
   const heat = baseHeat(base.facilities, survivors.length, daysElapsed);
   const count = (id: string) => inventory.filter((i) => i.itemId === id).reduce((a, i) => a + i.qty, 0);
   const now = daysElapsed * 1440 + timeMinutes;
-  const stockRows = [
-    ...fleet.map((f) => ({ name: f.name, used: f.storageUsedKg, cap: f.storageCapKg, where: f.loc })),
-    ...trailerFleet.map((t) => ({ name: t.name, used: t.storageUsedKg, cap: t.storageCapKg, where: t.hitchedTo ? 'in tow' : 'parked' })),
-  ];
+  const stockRows = fleet.map((f) => ({ name: f.name, used: f.storageUsedKg, cap: f.storageCapKg, where: f.loc }));
   const stockUsed = stockRows.reduce((a, r) => a + r.used, 0);
   const stockCap = stockRows.reduce((a, r) => a + r.cap, 0);
   return (
@@ -537,9 +525,9 @@ function BaseSection() {
       {/* stockpile overview: the base has no shelves of its own yet — its
           stockpile is everything riding in the fleet, wherever it's parked */}
       <h4 className="mb-1.5 mt-4 text-xs font-semibold text-[#8a94a3]">
-        Stockpile — base + fleet ({stockUsed.toFixed(0)}/{stockCap} kg riding)
+        Stockpile — the car\u2019s trunk ({stockUsed.toFixed(0)}/{stockCap} kg riding)
       </h4>
-      {stockRows.length === 0 && <p className="text-[11px] text-[#8a94a3]">No vehicles or trailers yet — the stockpile is your own back.</p>}
+      {stockRows.length === 0 && <p className="text-[11px] text-[#8a94a3]">Nothing stashed — the stockpile is the Mustang\u2019s trunk, wherever it\u2019s parked.</p>}
       <div className="flex flex-col gap-1">
         {stockRows.map((r, i) => (
           <div key={i} className="flex items-center justify-between gap-2 text-[11px]">
@@ -548,7 +536,7 @@ function BaseSection() {
           </div>
         ))}
       </div>
-      <p className="mt-1 text-[10px] text-[#5a6472]">The base keeps no shelves of its own yet — what the fleet carries is the stockpile, and heat counts it.</p>
+      <p className="mt-1 text-[10px] text-[#5a6472]">The base keeps no shelves of its own yet — what the Mustang carries is the stockpile, and heat counts it.</p>
     </section>
   );
 }
@@ -1003,62 +991,27 @@ function CharacterTab() {
 
 function DispatchSection() {
   const survivors = useGameStore((s) => s.survivors);
-  const fleet = useGameStore((s) => s.fleet);
-  const trailerFleet = useGameStore((s) => s.trailerFleet);
   const dispatches = useGameStore((s) => s.dispatches);
-  const scouted = useGameStore((s) => s.scouted);
-  const poiPositions = useGameStore((s) => s.poiPositions);
-  const base = useGameStore((s) => s.base);
-  const pos = useGameStore((s) => s.pos);
+  const recallDispatch = useGameStore((s) => s.recallDispatch);
   const daysElapsed = useGameStore((s) => s.daysElapsed);
   const timeMinutes = useGameStore((s) => s.timeMinutes);
-  const startDispatch = useGameStore((s) => s.startDispatch);
-  const recallDispatch = useGameStore((s) => s.recallDispatch);
-  const [selSv, setSelSv] = useState<string | null>(null);
-  const [selVeh, setSelVeh] = useState<string | null>(null);
-  const [selTrl, setSelTrl] = useState<string | null>(null);
-  const [selTask, setSelTask] = useState<DispatchTask>('scavenge');
-  const [selDest, setSelDest] = useState<string | null>(null);
-
   const now = daysElapsed * 1440 + timeMinutes;
-  const outSv = new Set(dispatches.map((d) => d.survivorId));
-  const outVeh = new Set(dispatches.map((d) => d.vehicleDefId));
-  const outTrl = new Set(dispatches.map((d) => d.trailerDefId).filter(Boolean));
-  const availSv = survivors.filter((sv) => !outSv.has(sv.id));
-  const availVeh = fleet.filter((f) => !outVeh.has(f.defId));
-  const sv = availSv.find((x) => x.id === selSv) ?? availSv[0];
-  const veh = availVeh.find((f) => f.defId === selVeh) ?? availVeh[0];
-  const towable = veh ? trailerFleet.filter((t) => t.hitchedTo === veh.defId && !outTrl.has(t.defId)) : [];
-  const trl = towable.find((t) => t.defId === selTrl) ?? null;
-  const dests = DISPATCH_POIS.filter((p) => poiPositions[p.id]);
-  const dest = dests.find((p) => p.id === selDest) ?? null;
-
-  const origin = (base && poiPositions[base.poiId]) || [pos[0], pos[2]];
-  const distM = dest && poiPositions[dest.id]
-    ? Math.round(Math.hypot(poiPositions[dest.id][0] - origin[0], poiPositions[dest.id][1] - origin[1]))
-    : 0;
-  const heat = base ? baseHeat(base.facilities, survivors.length, daysElapsed) : 0;
-  const eta = sv && dest ? dispatchDurationMin(distM, sv.skills.driver ?? 0, selTask) : 0;
-  const risk = dest ? Math.round(riskChance(distM, heat, selTask) * 100) : 0;
-  const canGo = !!sv && !!veh && !!dest && sv.hp >= 30;
-
-  const pick = (active: boolean) =>
-    `rounded border px-2 py-1 text-left text-[11px] transition-colors ${
-      active ? 'border-[#e8b34b] text-[#e8b34b]' : 'border-[#232b36] text-[#d7dde5] hover:border-[#8a94a3]'
-    }`;
 
   return (
     <section className="rounded border border-[#232b36] bg-[#0b0e12] p-3">
-      <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Dispatch — send crew out (P5)</h3>
-
+      <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Dispatch — crew runs</h3>
+      <p className="text-sm text-[#8a94a3]">
+        Dispatch is offline. There is exactly one car left on the island — the Stallion FX — and it
+        goes where its driver takes it. Crew runs return when there's a fleet to send.
+      </p>
       {dispatches.map((d) => {
         const who = survivors.find((x) => x.id === d.survivorId);
         const pct = Math.max(0, Math.min(100, Math.round(((now - d.departMin) / Math.max(1, d.etaMin - d.departMin)) * 100)));
         return (
-          <div key={d.id} className="mb-2 rounded border border-[#232b36] bg-[#12161c] p-2.5">
+          <div key={d.id} className="mb-2 mt-2 rounded border border-[#232b36] bg-[#12161c] p-2.5">
             <div className="flex items-center justify-between gap-2">
               <span className="text-sm text-[#d7dde5]">
-                {who?.name ?? 'Crew'} — {d.task} · {poiName(d.destPoiId)}
+                {who?.name ?? 'Crew'} — {d.task} · {poiName(d.destPoiId)} (sent before the purge)
               </span>
               <button
                 onClick={() => { sfx.play('ui'); recallDispatch(d.id); }}
@@ -1074,102 +1027,6 @@ function DispatchSection() {
           </div>
         );
       })}
-
-      {survivors.length === 0 ? (
-        <p className="text-sm text-[#8a94a3]">No crew to send. Recruit someone first — people are waiting out there.</p>
-      ) : availSv.length === 0 ? (
-        <p className="text-sm text-[#8a94a3]">Everyone is out already.</p>
-      ) : (
-        <div className="flex flex-col gap-2.5">
-          <div>
-            <div className="mb-1 text-[11px] text-[#8a94a3]">Survivor</div>
-            <div className="flex flex-wrap gap-1">
-              {availSv.map((x) => (
-                <button key={x.id} onClick={() => { sfx.play('ui'); setSelSv(x.id); }} className={pick(sv?.id === x.id)}>
-                  {x.name} <span className="text-[#8a94a3]">· scav {x.skills.scavenging ?? 0} · drv {x.skills.driver ?? 0}{x.hp < 30 ? ' · too hurt' : ''}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <div className="mb-1 text-[11px] text-[#8a94a3]">Vehicle</div>
-            <div className="flex flex-wrap gap-1">
-              {availVeh.length === 0 && <span className="text-[11px] text-[#8a94a3]">No vehicles available.</span>}
-              {availVeh.map((f) => (
-                <button key={f.defId} onClick={() => { sfx.play('ui'); setSelVeh(f.defId); setSelTrl(null); }} className={pick(veh?.defId === f.defId)}>
-                  {f.name} <span className="text-[#8a94a3]">· {f.storageCapKg} kg · cond {f.condPct}%</span>
-                </button>
-              ))}
-            </div>
-          </div>
-          {towable.length > 0 && (
-            <div>
-              <div className="mb-1 text-[11px] text-[#8a94a3]">Trailer (hitched to it now)</div>
-              <div className="flex flex-wrap gap-1">
-                <button onClick={() => { sfx.play('ui'); setSelTrl(null); }} className={pick(!trl)}>None</button>
-                {towable.map((t) => (
-                  <button key={t.defId} onClick={() => { sfx.play('ui'); setSelTrl(t.defId); }} className={pick(trl?.defId === t.defId)}>
-                    {t.name} <span className="text-[#8a94a3]">· +{t.storageCapKg} kg</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          <div>
-            <div className="mb-1 text-[11px] text-[#8a94a3]">Task</div>
-            <div className="flex flex-col gap-1">
-              {DISPATCH_TASKS.map((t) => (
-                <button key={t.id} onClick={() => { sfx.play('ui'); setSelTask(t.id); }} className={pick(selTask === t.id)}>
-                  <span className="font-medium">{t.name}</span>
-                  <span className="block text-[10px] text-[#8a94a3]">{t.blurb}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <div className="mb-1 text-[11px] text-[#8a94a3]">Destination</div>
-            <div className="flex flex-wrap gap-1">
-              {dests.map((p) => (
-                <button key={p.id} onClick={() => { sfx.play('ui'); setSelDest(p.id); }} className={pick(dest?.id === p.id)}>
-                  {p.name}
-                </button>
-              ))}
-            </div>
-          </div>
-          {sv && veh && dest && (
-            <p className="text-[11px] leading-relaxed text-[#8a94a3]">
-              {sv.name} takes the {veh.name}{trl ? ` + ${trl.name}` : ''} to {dest.name}: {distM} m each way,
-              back around {fmtAbs(now + eta)}. Husk-risk ≈{risk}% — a bad run comes home hurt, with the
-              vehicle worse for it. Loot rides in the vehicle{trl ? ' and trailer' : ''}; what doesn't fit stays behind.
-            </p>
-          )}
-          <button
-            disabled={!canGo}
-            onClick={() => {
-              if (!sv || !veh || !dest) return;
-              sfx.play('quest');
-              startDispatch(sv.id, veh.defId, trl?.defId ?? null, selTask, dest.id);
-            }}
-            className="rounded border border-[#e8b34b] bg-[#e8b34b]/10 px-3 py-2 text-sm font-medium text-[#e8b34b] transition-colors disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Send {sv ? sv.name : 'crew'} out
-          </button>
-        </div>
-      )}
-
-      {Object.values(scouted).length > 0 && (
-        <div className="mt-3 border-t border-[#232b36] pt-2">
-          <div className="mb-1 text-[11px] font-semibold text-[#8a94a3]">Scout intel</div>
-          {Object.values(scouted).map((r) => (
-            <div key={r.poiId} className="flex justify-between text-[11px] text-[#8a94a3]">
-              <span className="text-[#d7dde5]">{poiName(r.poiId)}</span>
-              <span>
-                {r.looted}/{r.containers} emptied · {fmtAbs(r.atMin)}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
     </section>
   );
 }
@@ -1372,15 +1229,11 @@ function CraftTab() {
 function VehiclesTab() {
   const vehicle = useGameStore((s) => s.vehicle);
   const fleet = useGameStore((s) => s.fleet);
-  const trailerFleet = useGameStore((s) => s.trailerFleet);
   const dispatches = useGameStore((s) => s.dispatches);
   const survivors = useGameStore((s) => s.survivors);
   const inventory = useGameStore((s) => s.inventory);
   const repairVehicle = useGameStore((s) => s.repairVehicle);
   const installUpgrade = useGameStore((s) => s.installUpgrade);
-  const installModule = useGameStore((s) => s.installModule);
-  const setBeaconMode = useGameStore((s) => s.setBeaconMode);
-  const callSupplyDrop = useGameStore((s) => s.callSupplyDrop);
   const atWorkshopFn = useGameStore((s) => s.atWorkshop);
   const [selId, setSelId] = useState<string | null>(null);
   const atShop = atWorkshopFn();
@@ -1432,12 +1285,12 @@ function VehiclesTab() {
               <p className="text-xs text-[#d9534f]">⚠ {vehicle.tiresFlat} flat tire{vehicle.tiresFlat > 1 ? 's' : ''} — she pulls and drags. Repair below.</p>
             )}
             <p className="mt-1 text-[11px] text-[#8a94a3]">
-              [T] opens its storage. Trailers hitch by backing up to the tongue, or [F] at the tongue with a truck close.
+              [T] opens the trunk.
               {vehicle.upgrades.length > 0 && <> Fitted: {vehicle.upgrades.map((u) => UPGRADES.find((x) => x.id === u)?.name ?? u).join(', ')}.</>}
             </p>
           </div>
         ) : (
-          <p className="text-sm text-[#8a94a3]">On foot. Your fleet is listed below — walk up to one and drive.</p>
+          <p className="text-sm text-[#8a94a3]">On foot. The car is listed below — walk up to it and drive.</p>
         )}
       </section>
 
@@ -1475,7 +1328,7 @@ function VehiclesTab() {
       )}
 
       <section>
-        <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Fleet ({fleet.length}) — tap one to work on it</h3>
+        <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">The car — tap it to work on it</h3>
         <div className="flex flex-col gap-1.5">
           {fleet.map((f) => {
             const out = dispatches.find((d) => d.vehicleDefId === f.defId);
@@ -1494,7 +1347,6 @@ function VehiclesTab() {
                 fuel {f.fuelPct}% · cond {f.condPct}% · cargo {f.storageUsedKg}/{f.storageCapKg}kg
                 {f.tiresFlat > 0 && <span className="text-[#d9534f]"> · ⚠ {f.tiresFlat} flat</span>}
                 {f.upgrades.length > 0 && <> · {f.upgrades.length} upgrade{f.upgrades.length > 1 ? 's' : ''}</>}
-                {f.hitchedTrailer && <> · towing {TRAILER_NAME[f.hitchedTrailer] ?? f.hitchedTrailer}</>}
                 {' '}· {f.loc}
               </div>
               {out && (
@@ -1505,7 +1357,7 @@ function VehiclesTab() {
             </button>
             );
           })}
-          {fleet.length === 0 && <p className="text-sm text-[#8a94a3]">No vehicles found yet.</p>}
+          {fleet.length === 0 && <p className="text-sm text-[#8a94a3]">No car found — it should be parked by the lighthouse.</p>}
         </div>
       </section>
 
@@ -1553,76 +1405,10 @@ function VehiclesTab() {
         </section>
       )}
 
-      <section>
-        <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Trailers ({trailerFleet.length})</h3>
-        <div className="flex flex-col gap-1.5">
-          {trailerFleet.map((t) => (
-            <div key={t.defId} className="rounded border border-[#232b36] bg-[#0b0e12] px-2.5 py-2 text-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-[#d7dde5]">{t.name}</span>
-                <span className="font-mono text-[11px] text-[#8a94a3]">{t.dist}m</span>
-              </div>
-              <div className="mt-0.5 font-mono text-[11px] text-[#8a94a3]">
-                {t.hitchedTo ? `hitched to the ${fleet.find((f) => f.defId === t.hitchedTo)?.name ?? t.hitchedTo}` : 'parked'}
-                {' · '}cargo {t.storageUsedKg}/{t.storageCapKg}kg
-                {t.defId === 't_tanker' && <> · {t.fuelLiters}L fuel aboard</>}
-                {t.loadedVehicle && <> · hauling a {t.loadedVehicle}</>}
-                {t.module !== 'none' && <> · {MODULE_DEFS.find((m) => m.id === t.module)?.name}</>}
-              </div>
-              {t.defId === 't_box' && (
-                <div className="mt-2 flex flex-col gap-1.5">
-                  {MODULE_DEFS.map((m) => (
-                    <div key={m.id} className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <span className="text-xs text-[#d7dde5]">{m.name}</span>{' '}
-                        {t.module === m.id
-                          ? <span className="text-[11px] text-[#5aa469]">BUILT</span>
-                          : costLine(m.cost)}
-                      </div>
-                      {t.module !== m.id && (
-                        <button className={btn} disabled={!atShop || t.dist > 30 || !afford(m.cost)} onClick={() => installModule(t.defId, m.id)}>
-                          Build
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                  {!atShop && <p className="text-[11px] text-[#8a94a3]">Buildouts happen at the marina Machine Shop or a base Garage Bay, trailer within 30m.</p>}
-                </div>
-              )}
-              {t.module === 'beacon' && (
-                <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                  <span className="text-[11px] text-[#8a94a3]">Beacon:</span>
-                  {(['off', 'sat', 'horde'] as const).map((mode) => (
-                    <button
-                      key={mode}
-                      className={btn}
-                      disabled={t.beaconMode === mode}
-                      onClick={() => setBeaconMode(t.defId, mode)}
-                    >
-                      {mode.toUpperCase()}
-                    </button>
-                  ))}
-                  <button className={btn} disabled={t.beaconMode !== 'sat'} onClick={() => callSupplyDrop(t.defId)}>
-                    Call supply drop
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
-          {trailerFleet.length === 0 && <p className="text-sm text-[#8a94a3]">No trailers found yet.</p>}
-        </div>
-      </section>
     </div>
   );
 }
 
-const TRAILER_NAME: Record<string, string> = {
-  t_utility: 'Utility Trailer',
-  t_flatbed: 'Flatbed Trailer',
-  t_box: 'Box Trailer',
-  t_tanker: 'Tanker Trailer',
-  t_carrier: 'Car Carrier',
-};
 
 /* ---------------- HOME: the app grid ---------------- */
 
