@@ -443,6 +443,7 @@ const AUTHORED2: { kind: HuskKind; file: string; skullY: number; hipY: number; l
   { kind: 'spitter', file: 'husk_spitter_authored.glb', skullY: 1.76, hipY: 0.888, legX: 0.0875, extra: ['sac'] },
   { kind: 'screamer', file: 'husk_screamer_authored.glb', skullY: 2.0, hipY: 1.008, legX: 0.0993, extra: [] },
   { kind: 'bloater', file: 'husk_bloater_authored.glb', skullY: 1.76, hipY: 0.888, legX: 0.1201, extra: [] },
+  { kind: 'stalker', file: 'husk_stalker_authored.glb', skullY: 1.85, hipY: 0.936, legX: 0.0922, extra: [] },
 ];
 
 describe('authored husk GLBs (wave 2)', () => {
@@ -545,5 +546,14 @@ describe('authored husk GLBs (wave 2)', () => {
     expect(rig.armR.position.x).toBeCloseTo(0.17);
     expect(rig.armL.rotation.z).toBe(0.38);
     expect(rig.armR.rotation.z).toBe(-0.38);
+  });
+
+  it('stalker swap applies its deeper 0.2 slump', () => {
+    const st = new Husk('auth2_st', 'stalker', 0, 0, 'test', groundY);
+    expect(st.useAuthoredFigure(syntheticAuthoredTemplate())).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rig = (st as any).rig as FigureRig;
+    expect(rig.pose.torsoX).toBe(0.2);
+    expect(rig.torso.rotation.x).toBe(0.2);
   });
 });
