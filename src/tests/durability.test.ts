@@ -3,12 +3,13 @@
 // and condition surviving the save migration path untouched.
 import { beforeEach, describe, expect, it } from 'vitest';
 import { useGameStore } from '../store/gameStore';
+import { emptyEquipped } from '../store/equipment';
 import { migrate, type RawSaveRecord } from '../systems/save';
 
 function resetStore() {
   useGameStore.setState({
     inventory: [],
-    equipped: { melee: null, ranged: null, pack: null },
+    equipped: emptyEquipped(),
     nearStation: null,
     toasts: [],
   });

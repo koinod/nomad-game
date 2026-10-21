@@ -1,5 +1,6 @@
 // Pure unit tests for the save migration path (no DOM / no IndexedDB).
 import { describe, expect, it } from 'vitest';
+import { emptyEquipped } from '../store/equipment';
 import { migrate, type RawSaveRecord } from '../systems/save';
 import type { SaveSnapshot } from '../store/types';
 
@@ -32,7 +33,7 @@ function fullV2Snapshot(): SaveSnapshot {
     playSeconds: 7200,
     player: { pos: [600, 10, 30], hp: 100 },
     inventory: [{ uid: 'b2', itemId: 'bandage', qty: 2 }],
-    equipped: { melee: 'b2', ranged: null, pack: null },
+    equipped: { ...emptyEquipped(), melee: 'b2' },
     hotbar: ['b2', null, null],
     quests: [],
     doneQuests: ['q_prologue'],
@@ -69,7 +70,11 @@ describe('migrate()', () => {
     expect(out.battery).toBe(100);
     expect(out.phoneUnlocked).toBe(false);
     expect(out.hotbar).toEqual([null, null, null]);
-    expect(out.equipped).toEqual({ melee: null, ranged: null, pack: null });
+    expect(out.equipped).toEqual({
+      primary: null, secondary: null, tertiary: null, activeWeapon: 'primary',
+      head: null, jacket: null, vest: null, pants: null, backpack: null,
+      melee: null, ranged: null,
+    });
     expect(out.seed).toBe(0);
     expect(out.trailers).toEqual([]);
   });

@@ -7,8 +7,9 @@ import {
 } from '../store/inventoryUtils';
 import { BASE_CARRY_KG } from '../data/items';
 import type { Equipped, InvItem } from '../store/types';
+import { emptyEquipped } from '../store/equipment';
 
-const noPack: Equipped = { melee: null, ranged: null, pack: null };
+const noPack: Equipped = emptyEquipped();
 
 describe('encumbranceTier boundaries', () => {
   const limit = 20;
@@ -38,18 +39,18 @@ describe('carryLimitKg', () => {
 
   it('adds pack carryBonus on top of the difficulty bonus', () => {
     const inv: InvItem[] = [{ uid: 'p1', itemId: 'pack_t1', qty: 1 }]; // carryBonus 8
-    const equipped: Equipped = { melee: null, ranged: null, pack: 'p1' };
+    const equipped: Equipped = { ...emptyEquipped(), backpack: 'p1' };
     expect(carryLimitKg(equipped, inv, 'story')).toBeCloseTo(BASE_CARRY_KG * 1.2 + 8, 6);
   });
 
   it('rigger pack adds 15kg on survivor', () => {
     const inv: InvItem[] = [{ uid: 'p2', itemId: 'pack_t2', qty: 1 }];
-    const equipped: Equipped = { melee: null, ranged: null, pack: 'p2' };
+    const equipped: Equipped = { ...emptyEquipped(), backpack: 'p2' };
     expect(carryLimitKg(equipped, inv, 'survivor')).toBeCloseTo(BASE_CARRY_KG + 15, 6);
   });
 
   it('ignores a pack uid that is not in the inventory', () => {
-    const equipped: Equipped = { melee: null, ranged: null, pack: 'missing' };
+    const equipped: Equipped = { ...emptyEquipped(), backpack: 'missing' };
     expect(carryLimitKg(equipped, [], 'survivor')).toBeCloseTo(BASE_CARRY_KG, 6);
   });
 });

@@ -9,6 +9,7 @@ import { migrate, type RawSaveRecord } from '../systems/save';
 import {
   STARTING_REP, claimsFromLegacyBase, craftQueueBridge, foldLegacyRep, useGameStore,
 } from '../store/gameStore';
+import { emptyEquipped } from '../store/equipment';
 import type { ClaimsState, CraftJob, SaveSnapshot } from '../store/types';
 
 function baseV3(): RawSaveRecord {
@@ -22,7 +23,7 @@ function baseV3(): RawSaveRecord {
     playSeconds: 1200,
     player: { pos: [10, 3, -20], hp: 90 },
     inventory: [{ uid: 'x1', itemId: 'bandage', qty: 1 }],
-    equipped: { melee: null, ranged: null, pack: null },
+    equipped: emptyEquipped(),
     hotbar: [null, null, null, null],
     quests: [],
     doneQuests: [],

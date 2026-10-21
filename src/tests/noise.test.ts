@@ -13,6 +13,7 @@ import {
   NOISE_CLASSES, gunshotRadius, meterLevel, noiseClassRadius,
 } from '../game/noise';
 import { useGameStore } from '../store/gameStore';
+import { emptyEquipped } from '../store/equipment';
 import type { InvItem } from '../store/types';
 
 describe('the 11-class table', () => {
@@ -108,14 +109,14 @@ function equipPistol(mods: string[]): void {
   };
   useGameStore.setState({
     inventory: [inst],
-    equipped: { melee: null, ranged: 'gun1', pack: null },
+    equipped: { ...emptyEquipped(), primary: 'gun1', ranged: 'gun1', activeWeapon: 'primary' as const },
     perks: [],
   });
 }
 
 describe('Combat emits by the table (integration)', () => {
   beforeEach(() => {
-    useGameStore.setState({ inventory: [], equipped: { melee: null, ranged: null, pack: null }, perks: [] });
+    useGameStore.setState({ inventory: [], equipped: emptyEquipped(), perks: [] });
   });
 
   it('an unsuppressed pistol shot emits the 80m class radius', () => {

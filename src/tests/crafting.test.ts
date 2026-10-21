@@ -33,6 +33,7 @@ import {
   type CraftContext,
 } from '../systems/crafting';
 import { useGameStore } from '../store/gameStore';
+import { emptyEquipped } from '../store/equipment';
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -258,7 +259,7 @@ describe('craft queue store', () => {
   beforeEach(() => {
     useGameStore.setState({
       inventory: [],
-      equipped: { melee: null, ranged: null, pack: null },
+      equipped: emptyEquipped(),
       nearStation: null,
       toasts: [],
       daysElapsed: 0,
