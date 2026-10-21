@@ -353,6 +353,13 @@ export const ITEMS: Record<string, ItemDef> = {
     id: 'bp_turret', name: 'Blueprint — Automated Turret', category: 'key', weight: 0.1, slots: 1, stack: 1,
     desc: 'Sodgame-era schematics, grease-pencil annotations. Unlocks the turret craft: gun parts, boards, an engine part, and a bench that can read.',
   },
+  turret: {
+    // the blueprint craft's product (SYSTEMS_SPEC §4.3): a deployable
+    // defense for claim ground — placement/ghost logic is Lane 7 + 10's,
+    // the item and its economy live here. Feeds on 9mm once deployed.
+    id: 'turret', name: 'Automated turret', category: 'tool', weight: 12, slots: 3, stack: 1,
+    desc: 'A bench-built sentry gun: 20 damage out to 30m, drinks 9mm from the stockpile. Deploy inside a claim radius.',
+  },
 };
 
 // Husk corpse loot, keyed by spawn zone — Skyrim-style: what they were is
@@ -466,6 +473,11 @@ export interface FieldRecipe {
   resultId: string;
   resultQty: number;
   station?: StationId; // undefined = craftable anywhere from the phone
+  /** Crafting gate (SYSTEMS_SPEC §6.1): Lane 7's engine feature-detects
+   *  Lane 8's skill state — inert until both land, live after. */
+  skillReq?: { skill: string; level: number };
+  /** Item that must be in the pack to unlock the recipe (blueprints). */
+  requiresItem?: string;
 }
 
 export const FIELD_RECIPES: Record<string, FieldRecipe> = {
@@ -495,10 +507,18 @@ export const FIELD_RECIPES: Record<string, FieldRecipe> = {
     resultId: 'cooked_meat', resultQty: 1,
   },
   r_rock_lure: {
-    // SYSTEMS_SPEC §4.2: rocks are free — pick up a handful anywhere
+    // SYSTEMS_SPEC §4.2: rocks are free — pick up a handful anywhere.
+    // (Spec id 'rock_lure' = the shipped 'rock' item; ids stay code-canonical.)
     id: 'r_rock_lure', name: 'Gather throwing rocks',
     components: [],
     resultId: 'rock', resultQty: 5,
+  },
+  r_produce_meal: {
+    // SYSTEMS_SPEC §4.1: field cooking with actual yield — two produce
+    // and a cut of meat come back as two real meals
+    id: 'r_produce_meal', name: 'Field meal',
+    components: [{ itemId: 'produce', qty: 2 }, { itemId: 'raw_meat', qty: 1 }],
+    resultId: 'cooked_meat', resultQty: 2,
   },
 };
 
@@ -536,6 +556,38 @@ export const STATION_RECIPES: Record<string, FieldRecipe> = {
     id: 'r_shin_guards', name: 'Shin guards', station: 'workbench',
     components: [{ itemId: 'scrap', qty: 2 }, { itemId: 'cloth', qty: 2 }],
     resultId: 'shin_guards', resultQty: 1,
+  },
+  r_spear: {
+    // SYSTEMS_SPEC §2.1: the forest_cache spear is also a bench craft
+    id: 'r_spear', name: 'Boar spear', station: 'workbench',
+    components: [{ itemId: 'wood', qty: 2 }, { itemId: 'scrap', qty: 1 }],
+    resultId: 'spear', resultQty: 1,
+  },
+  r_revolver: {
+    // SYSTEMS_SPEC §3.3 sink table: the honest gun — simple, no growth path
+    id: 'r_revolver', name: 'Revolver', station: 'workbench',
+    components: [{ itemId: 'gun_parts', qty: 2 }, { itemId: 'scrap', qty: 3 }],
+    resultId: 'revolver', resultQty: 1,
+    skillReq: { skill: 'mechanics', level: 1 },
+  },
+  r_smg: {
+    id: 'r_smg', name: 'SMG', station: 'workbench',
+    components: [{ itemId: 'gun_parts', qty: 3 }, { itemId: 'scrap', qty: 5 }, { itemId: 'wire', qty: 2 }],
+    resultId: 'smg', resultQty: 1,
+    skillReq: { skill: 'mechanics', level: 2 },
+  },
+  r_carbine: {
+    // SYSTEMS_SPEC §3.3: the carbine isn't bought, it's earned
+    id: 'r_carbine', name: 'Carbine', station: 'workbench',
+    components: [{ itemId: 'gun_parts', qty: 4 }, { itemId: 'scrap', qty: 6 }, { itemId: 'wire', qty: 3 }],
+    resultId: 'carbine', resultQty: 1,
+    skillReq: { skill: 'mechanics', level: 3 },
+  },
+  r_reload_shells_t2: {
+    // Lane 7's proposed T2 shell load, same component ladder as 9mm
+    id: 'r_reload_shells_t2', name: 'Reload shells (components)', station: 'workbench',
+    components: [{ itemId: 'gunpowder', qty: 1 }, { itemId: 'brass', qty: 1 }, { itemId: 'lead', qty: 1 }],
+    resultId: 'shells', resultQty: 8,
   },
   r_reflex: {
     id: 'r_reflex', name: 'Reflex sight', station: 'workbench',
@@ -579,6 +631,19 @@ export const STATION_RECIPES: Record<string, FieldRecipe> = {
     components: [{ itemId: 'chemicals', qty: 2 }],
     resultId: 'gunpowder', resultQty: 2,
   },
+  r_molotov: {
+    id: 'r_molotov', name: 'Molotov', station: 'chemistry',
+    components: [{ itemId: 'chemicals', qty: 1 }, { itemId: 'cloth', qty: 1 }],
+    resultId: 'molotov', resultQty: 1,
+  },
+  r_smoke_grenade: {
+    // result is the shipped 'smoke' item — the spec's 'smoke_grenade' id
+    // (ids stay code-canonical; components/yield are spec-exact)
+    id: 'r_smoke_grenade', name: 'Smoke grenade', station: 'chemistry',
+    components: [{ itemId: 'chemicals', qty: 2 }, { itemId: 'scrap', qty: 1 }],
+    resultId: 'smoke', resultQty: 1,
+    skillReq: { skill: 'mechanics', level: 1 },
+  },
   // --- Machine Shop ---
   r_tire: {
     id: 'r_tire', name: 'Tire', station: 'industrial',
@@ -599,6 +664,21 @@ export const STATION_RECIPES: Record<string, FieldRecipe> = {
     id: 'r_armor_plate', name: 'Armor plate', station: 'industrial',
     components: [{ itemId: 'scrap', qty: 3 }, { itemId: 'gun_parts', qty: 1 }],
     resultId: 'armor_plate', resultQty: 1,
+  },
+  r_circuit_board: {
+    // SYSTEMS_SPEC §4.1: the Machine Shop prints the island's electronics
+    id: 'r_circuit_board', name: 'Circuit board', station: 'industrial',
+    components: [{ itemId: 'wire', qty: 3 }, { itemId: 'chemicals', qty: 1 }],
+    resultId: 'circuit_board', resultQty: 1,
+  },
+  r_turret: {
+    // SYSTEMS_SPEC §4.3: the only blueprint-gated craft in the game —
+    // sodgame's rule, kept. Needs the bp_turret drop in the pack.
+    id: 'r_turret', name: 'Automated turret', station: 'industrial',
+    components: [{ itemId: 'gun_parts', qty: 6 }, { itemId: 'circuit_board', qty: 2 }, { itemId: 'engine_part', qty: 1 }],
+    resultId: 'turret', resultQty: 1,
+    skillReq: { skill: 'mechanics', level: 5 },
+    requiresItem: 'bp_turret',
   },
 };
 
@@ -775,7 +855,7 @@ const FOOTPRINTS: Record<string, [number, number]> = {
   ammo_9mm: [1, 1], shells: [1, 1], ammo_rifle: [1, 1], ammo_556: [1, 1], bolts: [1, 1],
   scrap: [1, 1], wire: [1, 1], cloth: [1, 1], chemicals: [1, 1], gun_parts: [1, 1],
   gunpowder: [1, 1], brass: [1, 1], lead: [1, 1], circuit_board: [1, 1], bp_turret: [1, 1],
-  plate_carrier: [2, 2], shin_guards: [1, 1],
+  plate_carrier: [2, 2], shin_guards: [1, 1], turret: [3, 2],
   valuables: [1, 1], lockpick: [1, 1], phone: [1, 1], relay_part: [1, 1], beacon_cell: [1, 1],
   flare: [1, 1], fire_starter: [1, 1], gun_oil: [1, 1], cleaning_kit: [1, 1],
   reflex_sight: [1, 1], suppressor: [1, 1], extended_mag: [1, 1], foregrip: [1, 1], laser_sight: [1, 1],
