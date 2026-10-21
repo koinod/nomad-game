@@ -23,17 +23,17 @@ describe('registration', () => {
     expect(VEHICLE_DEFS[1]).toBe(GT500_DEF);
   });
 
-  it('the GT500 spawns FIRST, at the lighthouse (Ian 2026-10-21: the FX stand-in is deleted)', () => {
+  it('the GT500 spawns FIRST, on its airbase pad (Ian 2026-10-21: FX stand-in deleted; fleet respawns at the revamped airbase)', () => {
     // The mustang DEF stays registered (above) — its data feeds the
     // build sheet and the Dark Horse — but nothing spawns it. The
-    // fleet spawns (Prime at the airbase, Sprinter at the marina)
+    // fleet spawns (Prime + Sprinter on their own airbase pads)
     // follow the GT500 in VEHICLE_SPAWNS; fleetIntegration.test.ts
-    // pins those.
+    // pins those, airbase.test.ts pins spawn == pad exactly.
     expect(VEHICLE_SPAWNS.map((s) => s.id)).toEqual(['gt500', 'nomad_prime', 'sprinter_van']);
     expect(VEHICLE_SPAWNS[0]).toBe(GT500_SPAWN);
-    expect(GT500_SPAWN.poi).toBe('lighthouse_base');
-    expect(GT500_SPAWN.dx).toBe(12);
-    expect(GT500_SPAWN.dz).toBe(20);
+    expect(GT500_SPAWN.poi).toBe('airbase');
+    expect(GT500_SPAWN.dx).toBe(7);
+    expect(GT500_SPAWN.dz).toBe(-9);
   });
 });
 

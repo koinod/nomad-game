@@ -412,6 +412,69 @@ export function auditReachability(b: KitBuilding, groundY: GroundY, out: QaFailu
   }
 }
 
+// ------------------------------------------------------------------ daylight
+
+/**
+ * Daylight audit (airbase revamp, 2026-10-21) — the pitch-black-depot
+ * class, made unshippable. A proxy over the recorded apertures, NOT a
+ * renderer: it proves every room point sits within the throw of a real
+ * opening and that the building's glazed + open aperture is a sane
+ * fraction of its floor plate. The in-game light floor itself is the
+ * lighting law's job (real sun + hemisphere/IBL); this audit guards the
+ * CONSTRUCTION side — a sealed box fails here no matter the sky.
+ *
+ * Throw model: effective distance = plan distance from the room point
+ * to the opening's segment x (2.1 / opening height). A 2.1 m door
+ * throws at face value; a tall hangar mouth (5.5 m clear) throws ~2.6x
+ * deeper; a 1.0 m clerestory band throws at half value. Limit 9 m.
+ * Windows count on any story (plan proxy — a glazed band lights the
+ * column under it). NOT wired into auditBuilding: the airbase gate
+ * applies it explicitly; the lighthouse joins when its gate is re-run.
+ */
+export function auditDaylight(b: KitBuilding, out: QaFailure[]): void {
+  if (b.roomPoints.length === 0) return;
+  interface Aperture { axis: 'x' | 'z'; fixed: number; a0: number; a1: number; h: number; area: number }
+  const apertures: Aperture[] = [];
+  for (const w of b.windows ?? []) {
+    const h = w.headY - w.sillY;
+    apertures.push({ axis: w.axis, fixed: w.fixed, a0: w.a0, a1: w.a1, h, area: (w.a1 - w.a0) * h });
+  }
+  for (const d of b.doors) {
+    if (d.interior) continue;
+    const c = d.axis === 'x' ? d.cx : d.cz;
+    apertures.push({ axis: d.axis, fixed: d.fixed, a0: c - d.w / 2, a1: c + d.w / 2, h: d.h, area: d.w * d.h });
+  }
+  if (apertures.length === 0) {
+    fail(out, 'daylight', b, 'enclosed rooms but NO window or door aperture recorded — a sealed box');
+    return;
+  }
+  if (b.floors.length > 0) {
+    const area = apertures.reduce((s, a) => s + a.area, 0);
+    const floorArea = b.w * b.d;
+    if (area / floorArea < 0.03) {
+      fail(out, 'daylight', b,
+        `aperture ratio ${(area / floorArea).toFixed(3)} < 0.03 (${area.toFixed(1)} m² of openings over ${floorArea.toFixed(0)} m² of floor) — the pitch-black-interior class`);
+    }
+  }
+  const segDist = (px: number, pz: number, a: Aperture): number => {
+    const along = a.axis === 'x' ? px : pz;
+    const perp = a.axis === 'x' ? pz : px;
+    const over = along < a.a0 ? a.a0 - along : along > a.a1 ? along - a.a1 : 0;
+    return Math.hypot(over, Math.abs(perp - a.fixed));
+  };
+  for (const rp of b.roomPoints) {
+    let best = Infinity;
+    for (const a of apertures) {
+      const eff = segDist(rp.x, rp.z, a) * (2.1 / Math.max(a.h, 0.3));
+      if (eff < best) best = eff;
+    }
+    if (best > 9) {
+      fail(out, 'daylight', b,
+        `room point "${rp.label}" at (${rp.x.toFixed(1)}, ${rp.z.toFixed(1)}) is beyond daylight throw (effective ${best.toFixed(1)}m > 9m) — no opening lights it`);
+    }
+  }
+}
+
 // ------------------------------------------------------------------ the gate
 
 export function auditBuilding(b: KitBuilding, groundY: GroundY): QaFailure[] {

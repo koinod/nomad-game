@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { makeFbm, makeNoise2D, mulberry32, clamp, lerp, smoothstep } from './rng';
 import { buildLighthouse } from './Lighthouse';
+import { buildAirbaseSite } from './airbase';
 import { decalPlane } from './modelKit';
 import type { KitBuilding, KitResult } from './kit';
 import type { BiomeId } from './Game';
@@ -432,6 +433,13 @@ export class World {
   lighthouseKit!: KitResult;
   lighthouseBuilding?: KitBuilding;
   lampRoomY = 0;
+  /** The REVAMPED AIRBASE (Ian, 2026-10-21 — un-parked for the airbase
+   *  only): the portable kit sited at AIRBASE_SITE (airbaseSite.ts —
+   *  today the plateau; the Beta Island map wave re-sites it in one
+   *  move). Game merges these like the lighthouse's. */
+  airfieldKits: KitResult[] = [];
+  /** Apron prop colliders (floodlight poles, windsock). */
+  airfieldPropColliders: Collider[] = [];
   // physical crafting stations: { station, x, z } + their colliders
   stations: { station: StationId; x: number; z: number }[] = [];
   stationColliders: Collider[] = [];
@@ -536,9 +544,13 @@ export class World {
     // the airbase complex and the carrier structure are gone. What
     // stands now: terrain, water, the relay mast, stations, campfires,
     // region signs — and the lighthouse.
+    // EXCEPTION (Ian, 2026-10-21): the AIRBASE returns — rebuilt
+    // properly on the kit (hangar / ops / tower / fuel point, airbase.ts)
+    // as the fleet's home. Everything else stays demolished.
     this.buildStations();
     this.buildCampfires();
     this.buildLighthouse();
+    this.buildAirbase();
     this.buildRelayRuin();
     this.buildRoads();
     this.buildDressing();
@@ -1151,6 +1163,18 @@ export class World {
     place('chemistry', rx + 5, rz + 6, 'chem');
     const [mx, mz] = this.poi('marina');
     place('industrial', mx + 8, mz - 4, 'shop');
+  }
+
+  /** The revamped airbase: portable kit structures + ground works at
+   *  AIRBASE_SITE. Groups join the scene here; colliders/floors/
+   *  containers ride the fields Game merges (same pattern as the
+   *  lighthouse kit). */
+  private buildAirbase(): void {
+    const built = buildAirbaseSite((px, pz) => this.groundY(px, pz));
+    this.airfieldKits = built.kits;
+    this.airfieldPropColliders = built.propColliders;
+    for (const r of built.kits) this.scene.add(r.group);
+    this.scene.add(built.groundGroup);
   }
 
   private buildLighthouse(): void {

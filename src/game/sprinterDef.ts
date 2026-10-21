@@ -24,6 +24,7 @@
 import type { CarParams } from './carSpec';
 import { DRIVER_KG } from './carSpec';
 import type { GlbWheelSpec, SpawnDef, VehicleDef } from './Vehicles';
+import { FLEET_HOME_POI, padSpawn } from './airbaseSite';
 
 export const SPRINTER_GLB_PATH = '/models/sprinter.glb';
 
@@ -80,14 +81,14 @@ export const SPRINTER_PARAMS: CarParams = {
 };
 
 /**
- * Spawn: the marina, parked clear of the two NPC anchors (Boudreaux
- * at +10/+6, Vesper at -12/-8) — an expedition van at the harbor,
- * nose swung toward the shore road.
+ * Spawn: the Sprinter's marked pad on the airbase apron — FLEET
+ * RESPAWN (Ian, 2026-10-21). The van camped at the marina through the
+ * integration wave and Ian never found it there; it homes with the
+ * rest of the fleet now, nose east on the pads row. Position derives
+ * from the pad (airbaseSite.ts AIRBASE_PADS).
  */
 export const SPRINTER_SPAWN: SpawnDef = {
   id: 'sprinter_van',
-  poi: 'marina',
-  dx: -20,
-  dz: 14,
-  heading: -Math.PI * 0.25,
+  poi: FLEET_HOME_POI,
+  ...padSpawn('pad_sprinter'),
 };

@@ -188,21 +188,29 @@ export class Game {
     this.fx = new Fx(this.scene);
     this.projectiles = new ProjectileManager(this.scene);
 
-    // FX DELETED (Ian, 2026-10-21): the sole vehicle is the GT500 at
-    // the lighthouse — see VEHICLE_SPAWNS / saveMigration
+    // FLEET RESPAWN (Ian, 2026-10-21): the whole fleet — GT500, Prime,
+    // Sprinter — spawns on its marked pads at the revamped airbase;
+    // saved positions restore over these (see VEHICLE_SPAWNS /
+    // saveMigration). The FX stand-in stays deleted.
     this.vehicles = new VehicleManager();
     this.vehicles.spawn(this.scene!, this.world.poiPositions, (x, z) => heightAt(x, z));
 
     // register POIs (contract)
     useGameStore.getState().setPoiPositions(this.world.poiPositions);
 
-    // TOTAL PURGE: the lighthouse is the only building left standing —
-    // its kit colliders/floors/containers are the whole built world now.
+    // Built-world collision: the lighthouse kit + the REVAMPED AIRBASE
+    // kits (Ian un-parked the airbase 2026-10-21) + its apron props +
+    // stations. Walls collide, doorways don't — the kits record both.
     this.houseColliders = [
       ...this.world.lighthouseKit.colliders,
+      ...this.world.airfieldKits.flatMap((k) => k.colliders),
+      ...this.world.airfieldPropColliders,
       ...this.world.stationColliders,
     ];
-    this.houseFloors = [...this.world.lighthouseKit.floors];
+    this.houseFloors = [
+      ...this.world.lighthouseKit.floors,
+      ...this.world.airfieldKits.flatMap((k) => k.floors),
+    ];
     // snapshot world diff
     const snap = opts.snapshot ?? null;
     let savedLootedAt: Record<string, number> = {};
@@ -268,7 +276,12 @@ export class Game {
     this.carPhysics = await CarPhysics.create(
       { onImpact: (dv) => this.onCarImpact(dv) },
       (x, z) => heightAt(x, z),
-      [...this.world.lighthouseKit.colliders, ...this.world.stationColliders],
+      [
+        ...this.world.lighthouseKit.colliders,
+        ...this.world.airfieldKits.flatMap((k) => k.colliders),
+        ...this.world.airfieldPropColliders,
+        ...this.world.stationColliders,
+      ],
     );
     if (firstCar) {
       this.carPhysics.spawnCar(firstCar, firstCar.upgrades, itemsWeightKg(firstCar.storage));
@@ -349,6 +362,7 @@ export class Game {
       [
         ...buildContainerDefs(this.world.poiPositions),
         ...this.world.lighthouseKit.containers,
+        ...this.world.airfieldKits.flatMap((k) => k.containers),
       ],
       savedLootedAt,
     );

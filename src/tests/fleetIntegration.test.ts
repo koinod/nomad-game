@@ -37,7 +37,7 @@ describe('registration', () => {
     expect(SPRINTER_DEF.storageKg).toBeGreaterThan(0);
   });
 
-  it('spawns: the Prime works the airbase apron, the Sprinter camps the marina', () => {
+  it('spawns: the whole fleet works the airbase pads (fleet respawn, Ian 2026-10-21)', () => {
     expect(VEHICLE_SPAWNS[1]).toBe(PRIME_SPAWN);
     expect(PRIME_SPAWN.poi).toBe('airbase');
     // east of the Seahawk pad (462,-118) on the same graded line,
@@ -45,10 +45,11 @@ describe('registration', () => {
     expect(PRIME_SPAWN.dx).toBe(36);
     expect(PRIME_SPAWN.dz).toBe(-12);
     expect(VEHICLE_SPAWNS[2]).toBe(SPRINTER_SPAWN);
-    expect(SPRINTER_SPAWN.poi).toBe('marina');
-    // clear of both marina NPC anchors (Boudreaux +10/+6, Vesper -12/-8)
-    expect(Math.hypot(SPRINTER_SPAWN.dx - 10, SPRINTER_SPAWN.dz - 6)).toBeGreaterThan(15);
-    expect(Math.hypot(SPRINTER_SPAWN.dx + 12, SPRINTER_SPAWN.dz + 8)).toBeGreaterThan(15);
+    expect(SPRINTER_SPAWN.poi).toBe('airbase');
+    // on the pads row, west of the Prime: clear of the tower (+52/+18)
+    // and of the Quartermaster's counter in the ops building (-25/+22.6)
+    expect(Math.hypot(SPRINTER_SPAWN.dx - 52, SPRINTER_SPAWN.dz - 18)).toBeGreaterThan(15);
+    expect(Math.hypot(SPRINTER_SPAWN.dx + 25, SPRINTER_SPAWN.dz - 22.6)).toBeGreaterThan(15);
   });
 });
 

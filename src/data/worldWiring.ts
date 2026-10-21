@@ -44,9 +44,9 @@ export const NPC_PLACEMENTS: NpcPlacement[] = [
   // — canonical faction presences —
   {
     key: 'quartermaster', name: 'Remnant Quartermaster', faction: 'remnants',
-    poiId: 'airbase', dx: 12, dz: -6, role: 'The armory counter',
+    poiId: 'airbase', dx: -25, dz: 22.6, role: 'The armory counter',
     traderId: 'quartermaster',
-    note: 'Behind the HESCO line. Will not trade below rep 75 (Allied-deep). Patrol NPCs around the airbase read Remnant.',
+    note: 'Behind the armory counter inside the ops building (airbase revamp, 2026-10-21 — the placement matches the kit npcPoint at the counter). Will not trade below rep 75 (Allied-deep). Patrol NPCs around the airbase read Remnant.',
   },
   {
     key: 'relay_post_guard', name: 'Remnant Listener', faction: 'remnants',

@@ -189,16 +189,17 @@ export interface SpawnDef {
 
 export const VEHICLE_SPAWNS: SpawnDef[] = [
   // FX STAND-IN DELETED (Ian, 2026-10-21): "the FX teal version —
-  // delete that." The procedural Stallion no longer spawns; the
-  // GT500 is the sole car at the lighthouse until the Dark Horse
-  // lands (separate asset wave). The mustang DEF + carSpec data stay
-  // (build sheet, Dark Horse) — only the spawn/visual is gone. A
-  // saved Stallion instance is stripped by saveMigration like other
-  // deleted content. (Dispatch's >=2-car unlock now waits for the
-  // Dark Horse — the roster is honestly one car.)
+  // delete that." The procedural Stallion no longer spawns. The
+  // mustang DEF + carSpec data stay (build sheet, Dark Horse) — only
+  // the spawn/visual is gone. A saved Stallion instance is stripped
+  // by saveMigration like other deleted content.
   GT500_SPAWN,
-  // The fleet takes the field (2026-10-21): the Prime works the
-  // airbase apron, the Sprinter camps the marina.
+  // FLEET RESPAWN (Ian, 2026-10-21): every vehicle homes at the
+  // REVAMPED AIRBASE, on its own marked pad (airbaseSite.ts) — the
+  // GT500 and the Sprinter join the Prime there. A fresh start or a
+  // reset puts the fleet on the pads; saved positions still restore
+  // (vehicle persistence is law). The Dark Horse joins this roster
+  // when it lands — its pad is already painted.
   PRIME_SPAWN,
   SPRINTER_SPAWN,
 ];
