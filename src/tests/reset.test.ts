@@ -32,26 +32,38 @@ import type { VehicleSave } from '../store/types';
  *
  * SUPERSESSION (2026-10-21, Vehicle Truth Wave): Ian ordered the
  * procedural Stallion FX deleted ("the FX teal version — delete
- * that"). The GT500 is the sole spawned car; the mustang DEF data
+ * that"). The GT500 was the sole spawned car; the mustang DEF data
  * stays (build sheet + Dark Horse). A saved Stallion is deleted
  * content: restorableVehicleSave matches strictly by def id, so it
  * strips and can never be stamped onto the GT500. The migration
  * assertions below were rewritten for the new roster deliberately.
+ *
+ * FLEET (2026-10-21, later): the Nomad Prime + V-04 Sprinter joined
+ * the roster from Ian's dropped specs (approved as-is) — defs and
+ * spawns below pin the four-def / three-spawn roster.
  */
 
 describe('the reset fleet', () => {
-  it('defs: the Stallion data plus the one gate-approved return', () => {
-    expect(VEHICLE_DEFS).toHaveLength(2);
+  it('defs: the Stallion data, the GT500 return, and the spec fleet', () => {
+    expect(VEHICLE_DEFS).toHaveLength(4);
     expect(VEHICLE_DEFS[0].id).toBe('mustang');
     expect(VEHICLE_DEFS[0].kind).toBe('car');
     expect(VEHICLE_DEFS[1].id).toBe('gt500');
     expect(VEHICLE_DEFS[1].kind).toBe('car');
+    expect(VEHICLE_DEFS[2].id).toBe('nomad_prime');
+    expect(VEHICLE_DEFS[2].kind).toBe('car');
+    expect(VEHICLE_DEFS[3].id).toBe('sprinter_van');
+    expect(VEHICLE_DEFS[3].kind).toBe('car');
   });
 
-  it('spawns: the GT500 alone at the lighthouse (the FX stand-in is deleted)', () => {
-    expect(VEHICLE_SPAWNS).toHaveLength(1);
+  it('spawns: the GT500 at the lighthouse, the Prime at the airbase, the Sprinter at the marina', () => {
+    expect(VEHICLE_SPAWNS).toHaveLength(3);
     expect(VEHICLE_SPAWNS[0].id).toBe('gt500');
     expect(VEHICLE_SPAWNS[0].poi).toBe('lighthouse_base');
+    expect(VEHICLE_SPAWNS[1].id).toBe('nomad_prime');
+    expect(VEHICLE_SPAWNS[1].poi).toBe('airbase');
+    expect(VEHICLE_SPAWNS[2].id).toBe('sprinter_van');
+    expect(VEHICLE_SPAWNS[2].poi).toBe('marina');
     expect(DELETED_VEHICLE_IDS).toContain('mustang');
   });
 

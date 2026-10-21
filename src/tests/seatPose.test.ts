@@ -25,9 +25,12 @@ describe('carSeatPose — solved from the interior, not sunk by hand', () => {
         // eyes inside the cabin, above the dash line
         expect(p.eyeY).toBeLessThan(spec.roofY);
         expect(p.eyeY).toBeGreaterThan(spec.cushionY + 0.5);
-        // a believable seated thigh angle
+        // a believable seated thigh angle — the cars solve ~-1.25;
+        // the Nomad Prime's high cab solves steeper (~-1.43): legs
+        // drop from a captain's chair to a floorboard 0.26 m under
+        // the cushion, so the band runs to -1.5, not the cars' -1.4
         expect(p.thighX).toBeLessThan(-1.0);
-        expect(p.thighX).toBeGreaterThan(-1.4);
+        expect(p.thighX).toBeGreaterThan(-1.5);
       });
     }
   }

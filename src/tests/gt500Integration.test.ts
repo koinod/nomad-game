@@ -18,14 +18,19 @@ import {
 
 describe('registration', () => {
   it('the GT500 def is in VEHICLE_DEFS (as itself, after the Mustang)', () => {
-    expect(VEHICLE_DEFS.map((d) => d.id)).toEqual(['mustang', 'gt500']);
+    // The fleet appended after it (2026-10-21): nomad_prime, sprinter_van.
+    expect(VEHICLE_DEFS.map((d) => d.id)).toEqual(['mustang', 'gt500', 'nomad_prime', 'sprinter_van']);
     expect(VEHICLE_DEFS[1]).toBe(GT500_DEF);
   });
 
-  it('the GT500 is the SOLE spawn (Ian 2026-10-21: the FX stand-in is deleted)', () => {
+  it('the GT500 spawns FIRST, at the lighthouse (Ian 2026-10-21: the FX stand-in is deleted)', () => {
     // The mustang DEF stays registered (above) — its data feeds the
-    // build sheet and the Dark Horse — but nothing spawns it.
-    expect(VEHICLE_SPAWNS).toEqual([GT500_SPAWN]);
+    // build sheet and the Dark Horse — but nothing spawns it. The
+    // fleet spawns (Prime at the airbase, Sprinter at the marina)
+    // follow the GT500 in VEHICLE_SPAWNS; fleetIntegration.test.ts
+    // pins those.
+    expect(VEHICLE_SPAWNS.map((s) => s.id)).toEqual(['gt500', 'nomad_prime', 'sprinter_van']);
+    expect(VEHICLE_SPAWNS[0]).toBe(GT500_SPAWN);
     expect(GT500_SPAWN.poi).toBe('lighthouse_base');
     expect(GT500_SPAWN.dx).toBe(12);
     expect(GT500_SPAWN.dz).toBe(20);
