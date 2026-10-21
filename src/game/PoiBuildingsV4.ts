@@ -13,7 +13,7 @@ import { FURNITURE_LOOT, type HuskLootEntry } from '../data/items';
 import { FURNITURE_HALF, FURNITURE_LABEL, type FurnitureKind } from './furnitureMeshes';
 import { type Collider, type FloorRect } from './Colliders';
 import type { ContainerDef } from './Interact';
-import { Kit, type KitBuilding } from './kit';
+import { Kit, KIT, type KitBuilding } from './kit';
 import { decalPlane } from './modelKit';
 
 export interface PoiBuildResult {
@@ -282,6 +282,12 @@ function boathouse(cx: number, cz: number, groundY: GroundY): Kit {
 // garage bay, and a canopy on posts over two pump islands. Parts-cache
 // loot stays (gas_kiosk_cabinets, the bay caches, c_parts_gas outside).
 
+/** Real-world fuel-canopy clearance: ~4.7 m of open air above the pad
+ *  (production stations run 14–16 ft; a semi stands ~4.1 m tall). The
+ *  soffit is the canopy slab's underside in kit-local height. */
+export const GAS_CANOPY_CLEARANCE_M = 4.7;
+export const GAS_CANOPY_SOFFIT_LOCAL = KIT.FLOOR_LIFT + GAS_CANOPY_CLEARANCE_M;
+
 function gasStation(cx: number, cz: number, groundY: GroundY): Kit[] {
   // --- the store + bay block (11x6), front faces the canopy (+Z)
   const store = kitAt('gas_store', cx, cz + 1, 11, 6, 1, groundY);
@@ -327,13 +333,14 @@ function gasStation(cx: number, cz: number, groundY: GroundY): Kit[] {
   store.roomPoint(-3.2, 0, 'gas store');
   store.roomPoint(3.8, 0, 'garage bay');
 
-  // --- the canopy (13x9): pad slab, four posts, red fascia roof
+  // --- the canopy (13x9): pad slab, four tall posts, raised roof slab.
+  // Clearance is REAL (see GAS_CANOPY_CLEARANCE_M): a semi rolls through.
   const canopy = kitAt('gas_canopy', cx, cz + 9, 13, 9, 1, groundY);
   canopy.floorSlab(0);
   for (const [px, pz] of [[-5.5, -3.5], [5.5, -3.5], [-5.5, 3.5], [5.5, 3.5]] as [number, number][]) {
-    canopy.post(px, pz, -0.1, 3.0, 0xd8d8d0, 0.35);
+    canopy.post(px, pz, -0.1, GAS_CANOPY_SOFFIT_LOCAL, 0xd8d8d0, 0.38);
   }
-  canopy.roofFlat(0xb03a2e, 0xd8d8d0);
+  canopy.roofCanopy(0xe8e6df, 0xb03a2e, GAS_CANOPY_SOFFIT_LOCAL);
   canopy.openEntrance('S', 0, 12);
   // pump island: curb, two pumps (visual + obstacle), the legacy pump loot
   canopy.box(7.5, 0.12, 1.1, 0x8a8578, 0, 0.2, 0);

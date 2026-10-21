@@ -89,6 +89,7 @@ export interface KitBuilding {
   cx: number; cz: number; baseY: number;
   w: number; d: number; stories: number;
   topPlateY: number; // world y of the top wall plate (roof seat)
+  roofSeatY?: number; // world y of a raised roof's support seat (canopies)
   roofKind: 'gable' | 'shed' | 'flat' | 'pyramid' | 'none';
   pieces: Piece[];
   doors: DoorRecord[];
@@ -144,6 +145,7 @@ export class Kit {
   private npcPoints: { x: number; z: number }[] = [];
   private mats = new Map<string, THREE.Material>();
   private roofKind: KitBuilding['roofKind'] = 'none';
+  private roofSeatLocal?: number;
   private padHW: number;
   private padHD: number;
 
@@ -863,6 +865,39 @@ export class Kit {
     this.roofGroupAdd(roofGroup);
   }
 
+  /**
+   * Raised service-canopy roof: a thin slab whose UNDERSIDE sits at
+   * `soffitY` (local), carried by posts that must reach the same height.
+   * Real fuel canopies clear roughly 4.3–4.9 m; the seat is recorded so
+   * the QA roof audit judges hover against the posts, not a story plate.
+   */
+  roofCanopy(color: number, fasciaColor: number, soffitY: number): void {
+    this.roofKind = 'flat';
+    this.roofSeatLocal = soffitY;
+    const hw = this.w / 2;
+    const hd = this.d / 2;
+    const roofGroup = new THREE.Group();
+    const slabT = 0.18;
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(this.w + 0.6, slabT, this.d + 0.6), this.mat(color));
+    slab.position.set(0, soffitY + slabT / 2, 0);
+    slab.castShadow = true;
+    roofGroup.add(slab);
+    // fascia band on all four edges, sitting on the slab
+    const fh = 0.55;
+    for (const [pw, pd, px, pz] of [
+      [this.w + 0.6, 0.14, 0, hd + 0.23], [this.w + 0.6, 0.14, 0, -hd - 0.23],
+      [0.14, this.d + 0.6, -hw - 0.23, 0], [0.14, this.d + 0.6, hw + 0.23, 0],
+    ] as [number, number, number, number][]) {
+      const f = new THREE.Mesh(new THREE.BoxGeometry(pw, fh, pd), this.mat(fasciaColor));
+      f.position.set(px, soffitY + slabT + fh / 2 - 0.06, pz);
+      f.castShadow = true;
+      roofGroup.add(f);
+    }
+    this.record('roof', -hw - 0.3, soffitY, -hd - 0.3, hw + 0.3, soffitY + slabT, hd + 0.3);
+    this.record('wall', -hw - 0.3, soffitY + slabT, -hd - 0.3, hw + 0.3, soffitY + slabT + fh, hd + 0.3, false);
+    this.roofGroupAdd(roofGroup);
+  }
+
   private roofGroupAdd(g: THREE.Group): void {
     this.roofLocal.add(g);
   }
@@ -1071,6 +1106,7 @@ export class Kit {
       padHW: this.padHW,
       padHD: this.padHD,
     };
+    if (this.roofSeatLocal !== undefined) building.roofSeatY = this.wy(this.roofSeatLocal);
     const roofBounds = this.aabb(-this.w / 2, -this.d / 2, this.w / 2, this.d / 2);
     return {
       group: this.group,

@@ -266,9 +266,10 @@ export function auditRoof(b: KitBuilding, out: QaFailure[]): void {
     fail(out, 'roofs', b, `roofKind is ${b.roofKind} but no roof pieces recorded`);
     return;
   }
+  const seatY = b.roofSeatY ?? b.topPlateY;
   for (const r of roofs) {
-    if (r.y0 > b.topPlateY + 0.3) {
-      fail(out, 'roofs', b, `roof hovers: its underside (y=${r.y0.toFixed(2)}) floats above the top plate (y=${b.topPlateY.toFixed(2)})`);
+    if (r.y0 > seatY + 0.3) {
+      fail(out, 'roofs', b, `roof hovers: its underside (y=${r.y0.toFixed(2)}) floats above the roof seat (y=${seatY.toFixed(2)})`);
     }
   }
   if (found) {

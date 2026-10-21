@@ -60,6 +60,33 @@ describe('the building QA gate', () => {
     expectGate(world.poiBuildings.buildings, 'poi buildings');
   });
 
+  it('gas canopy clears a semi — real fuel-canopy height over the pump lanes', () => {
+    const world = buildWorld();
+    const canopy = world.poiBuildings.buildings.find((b) => b.id === 'gas_canopy');
+    expect(canopy).toBeDefined();
+    const floorY = canopy!.baseY + 0.14; // kit slab top (KIT.FLOOR_LIFT)
+    const roofs = canopy!.pieces.filter((p) => p.kind === 'roof');
+    expect(roofs.length).toBeGreaterThan(0);
+    const soffit = Math.min(...roofs.map((p) => p.y0));
+    // >= 4.5 m of open air, and comfortably over a ~4.1 m semi
+    expect(soffit - floorY).toBeGreaterThanOrEqual(4.5);
+    expect(soffit - floorY).toBeGreaterThan(4.1 + 0.4);
+    // the support posts actually reach the seat they carry (the short
+    // price-sign post elsewhere in the building is not a support)
+    expect(canopy!.roofSeatY).toBeDefined();
+    const supports = canopy!.pieces.filter((p) => p.kind === 'post' && p.y1 >= soffit - 0.01);
+    expect(supports.length).toBeGreaterThanOrEqual(4);
+    // nothing structural hangs into the drive lanes below the soffit
+    // except the posts themselves and the pump-island strip at center
+    const intruders = canopy!.pieces.filter((p) => {
+      if (p.kind === 'floor' || p.kind === 'roof' || p.kind === 'post') return false;
+      const pcx = (p.x0 + p.x1) / 2 - canopy!.cx;
+      const pcz = (p.z0 + p.z1) / 2 - canopy!.cz;
+      return p.y0 < soffit - 0.05 && Math.abs(pcx) < 4.8 && Math.abs(pcz) > 0.8 && Math.abs(pcz) < 3.2;
+    });
+    expect(intruders).toEqual([]);
+  });
+
   it('passes the rebuilt lighthouse — watch room and lamp room reachable', () => {
     const world = buildWorld();
     expect(world.lighthouseBuilding).toBeDefined();
