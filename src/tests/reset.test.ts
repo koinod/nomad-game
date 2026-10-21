@@ -25,7 +25,7 @@ describe('the reset fleet', () => {
   it('spawns exactly one vehicle, at the lighthouse', () => {
     expect(VEHICLE_SPAWNS).toHaveLength(1);
     expect(VEHICLE_SPAWNS[0].id).toBe('mustang');
-    expect(VEHICLE_SPAWNS[0].poi).toBe('lighthouse');
+    expect(VEHICLE_SPAWNS[0].poi).toBe('lighthouse_base');
     expect(VEHICLE_SPAWNS[0].variant).toBe('fx');
   });
 

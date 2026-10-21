@@ -4,12 +4,9 @@
 
 import * as THREE from 'three';
 import { makeFbm, makeNoise2D, mulberry32, clamp, lerp, smoothstep } from './rng';
-import { buildHouses, houseFootprints, type HouseResult } from './HousesV4';
-import { buildPoiBuildings, poiFootprints, type PoiBuildResult } from './PoiBuildingsV4';
 import { buildLighthouse } from './Lighthouse';
 import { decalPlane } from './modelKit';
 import type { KitBuilding, KitResult } from './kit';
-import { airbaseFootprints, buildAirbase, buildCarrier, CARRIER_DECK_Y } from './Airbase';
 import type { BiomeId } from './Game';
 import type { StationId } from '../data/items';
 import type { Collider } from './Colliders';
@@ -202,8 +199,6 @@ export class World {
   readonly seed: number;
   readonly rng: () => number;
   poiPositions: Record<string, [number, number]> = {};
-  houses!: HouseResult;
-  poiBuildings!: PoiBuildResult;
   /** The rebuilt lighthouse (kit): colliders/floors/containers/roofs for
    *  Game to merge, the gate-audited building record, and the lamp room
    *  floor height the beacon/reach gates read. */
@@ -241,35 +236,13 @@ export class World {
     this.buildLights();
     this.buildStars();
     this.buildScatter();
-    // enterable houses with loot, collision, and floor rects
-    this.houses = buildHouses(this.scene, this.seed, this.poiPositions, (x, z) => heightAt(x, z));
-    // POI-scale buildings: strip mall, gas station, warehouse, school, barn, boathouse
-    this.poiBuildings = buildPoiBuildings(
-      this.scene,
-      this.poiPositions,
-      (x, z) => heightAt(x, z),
-    );
-    // AIRBASE wave: the depot + airbase complex (and the carrier) merge
-    // into the same result — Game consumes one collider/floor/loot set
-    {
-      const ab = buildAirbase(this.scene, this.poiPositions, (x, z) => heightAt(x, z));
-      this.poiBuildings.group.add(ab.group);
-      this.poiBuildings.colliders.push(...ab.colliders);
-      this.poiBuildings.floors.push(...ab.floors);
-      this.poiBuildings.containers.push(...ab.containers);
-      this.poiBuildings.roofs.push(...ab.roofs);
-    }
-    {
-      const cr = buildCarrier(this.scene, this.poiPositions);
-      this.poiBuildings.group.add(cr.group);
-      this.poiBuildings.colliders.push(...cr.colliders);
-      this.poiBuildings.floors.push(...cr.floors);
-      this.poiBuildings.containers.push(...cr.containers);
-      this.poiBuildings.roofs.push(...cr.roofs);
-    }
+    // TOTAL PURGE (2026-10-20): every building except the lighthouse is
+    // demolished — V4 houses, all POI buildings (incl. the gas station),
+    // the airbase complex and the carrier structure are gone. What
+    // stands now: terrain, water, the relay mast, stations, campfires,
+    // region signs — and the lighthouse.
     this.buildStations();
     this.buildCampfires();
-    this.buildWreck();
     this.buildLighthouse();
     this.buildRelayRuin();
     this.buildDressing();
@@ -394,21 +367,16 @@ export class World {
   /** Flatten a terrain pad under each house footprint (corners measured on
    *  raw terrain before any pad exists). */
   private setupHousePads(): void {
-    const footprints = [
-      ...houseFootprints(this.poiPositions),
-      ...poiFootprints(this.poiPositions),
-      ...airbaseFootprints(this.poiPositions),
+    // TOTAL PURGE: the only building pad left is the lighthouse grounds.
+    const [cx, cz] = this.poiPositions['lighthouse_base'] ?? [0, 0];
+    const f = { cx, cz, hw: 9, hd: 9 };
+    const corners = [
+      heightAt(f.cx - f.hw, f.cz - f.hd),
+      heightAt(f.cx + f.hw, f.cz - f.hd),
+      heightAt(f.cx - f.hw, f.cz + f.hd),
+      heightAt(f.cx + f.hw, f.cz + f.hd),
     ];
-    const pads = footprints.map((f) => {
-      const corners = [
-        heightAt(f.cx - f.hw, f.cz - f.hd),
-        heightAt(f.cx + f.hw, f.cz - f.hd),
-        heightAt(f.cx - f.hw, f.cz + f.hd),
-        heightAt(f.cx + f.hw, f.cz + f.hd),
-      ];
-      return { ...f, y: Math.min(...corners) - 0.08 };
-    });
-    setTerrainPads(pads);
+    setTerrainPads([{ ...f, y: Math.min(...corners) - 0.08 }]);
   }
 
   private resolvePois(): void {
@@ -750,31 +718,6 @@ export class World {
     place('chemistry', rx + 5, rz + 6, 'chem');
     const [mx, mz] = this.poi('marina');
     place('industrial', mx + 8, mz - 4, 'shop');
-    // the depot's Machine Shop: the fleet's home bay gets the real station
-    const [ax, az] = this.poi('airbase');
-    place('industrial', ax - 38, az + 24, 'shop');
-    // a workbench aboard the carrier, in the bunk room (deck height, not terrain)
-    const [kx, kz] = this.poi('carrier');
-    place('workbench', kx - 38.5, kz + 3.2, 'bench', CARRIER_DECK_Y + 0.06);
-  }
-
-  private buildWreck(): void {
-    const [x, z] = this.poi('wreck');
-    const y = this.groundY(x, z);
-    const g = new THREE.Group();
-    const hullMat = new THREE.MeshStandardMaterial({ color: 0x4d5a63, roughness: 0.9 });
-    const hull = new THREE.Mesh(new THREE.BoxGeometry(9, 2.2, 3.2), hullMat);
-    hull.position.y = 1.1;
-    hull.rotation.z = 0.12;
-    g.add(hull);
-    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 7, 6), hullMat);
-    mast.position.set(1, 4.5, 0);
-    mast.rotation.z = 0.5;
-    g.add(mast);
-    g.position.set(x, y - 0.4, z);
-    g.rotation.y = 0.7;
-    g.name = 'wreck';
-    this.scene.add(g);
   }
 
   private buildLighthouse(): void {
@@ -809,9 +752,9 @@ export class World {
   }
 
   /**
-   * Map-phase dressing: region signage at the POI approaches (the island
-   * should tell you where you are) and burnt-out wreck shells along the
-   * spine road. Pure scenery — no colliders, no loot.
+   * Map dressing: region signage at the POI approaches (the island
+   * should tell you where you are). Pure scenery — no colliders, no
+   * loot. (The spine-road wreck shells were purged with the old models.)
    */
   private buildDressing(): void {
     const postMat = new THREE.MeshStandardMaterial({ color: 0x4a3826, roughness: 1 });
@@ -846,43 +789,6 @@ export class World {
     sign('lighthouse_base', -16, 9, 'LIGHTHOUSE POINT', 0.55);
     sign('airbase', -42, 58, 'AIRBASE — RESTRICTED', 0.9);
 
-    // wreck shells: burnt hull + cab + wheels, one tipped on its side
-    const shellMat = new THREE.MeshStandardMaterial({ color: 0x35322e, roughness: 1 });
-    const rustMat = new THREE.MeshStandardMaterial({ color: 0x5a3a28, roughness: 1 });
-    const tireMat = new THREE.MeshStandardMaterial({ color: 0x1c1c1e, roughness: 1 });
-    const wreck = (x: number, z: number, ry: number, tipped: boolean): void => {
-      const y = this.groundY(x, z);
-      const g = new THREE.Group();
-      const hull = new THREE.Mesh(new THREE.BoxGeometry(4.3, 0.62, 1.78), shellMat);
-      hull.position.y = 0.55;
-      hull.castShadow = true;
-      g.add(hull);
-      const cab = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.58, 1.62), rustMat);
-      cab.position.set(-0.2, 1.12, 0);
-      cab.castShadow = true;
-      g.add(cab);
-      for (const [wx, wz] of [[-1.45, 0.92], [1.45, 0.92], [-1.45, -0.92], [1.45, -0.92]] as [number, number][]) {
-        const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.22, 10), tireMat);
-        wheel.rotation.x = Math.PI / 2;
-        wheel.position.set(wx, 0.34, wz);
-        g.add(wheel);
-      }
-      if (tipped) {
-        g.rotation.z = Math.PI / 2.15;
-        g.position.set(x, y + 0.85, z);
-      } else {
-        g.position.set(x, y, z);
-      }
-      g.rotation.y = ry;
-      g.name = 'wreck-shell';
-      this.scene.add(g);
-    };
-    const wreckSpots: [number, number, number, boolean][] = [
-      [-300, 96, 0.4, false], // west of the wreck POI, on the shore road
-      [120, 62, -0.3, true], // tipped, east of town
-      [415, 120, 0.9, false], // the dunes approach
-    ];
-    for (const [x, z, ry, tipped] of wreckSpots) wreck(x, z, ry, tipped);
   }
 
   private buildRelayRuin(): void {

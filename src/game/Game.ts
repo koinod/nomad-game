@@ -152,18 +152,13 @@ export class Game {
     // register POIs (contract)
     useGameStore.getState().setPoiPositions(this.world.poiPositions);
 
-    // houses + POI buildings: colliders, floor rects, containers
+    // TOTAL PURGE: the lighthouse is the only building left standing —
+    // its kit colliders/floors/containers are the whole built world now.
     this.houseColliders = [
-      ...this.world.houses.colliders,
-      ...this.world.poiBuildings.colliders,
       ...this.world.lighthouseKit.colliders,
       ...this.world.stationColliders,
     ];
-    this.houseFloors = [
-      ...this.world.houses.floors,
-      ...this.world.poiBuildings.floors,
-      ...this.world.lighthouseKit.floors,
-    ];
+    this.houseFloors = [...this.world.lighthouseKit.floors];
     // snapshot world diff
     const snap = opts.snapshot ?? null;
     if (snap) {
@@ -193,14 +188,15 @@ export class Game {
     this.player = new Player(this.scene);
     const s0 = useGameStore.getState();
     // New games start at the DEPOT MOTOR POOL (Ian's beta-test logic):
-    // you wake at base with the whole fleet in front of you. The shore
-    // camp is a short drive now — q_prologue step 2 ('Reach the shore
-    // camp') is earned on the road; Jonah and his camp don't move.
-    // Loaded games keep their saved position; only the fresh spawn and
-    // the default respawn point (lastSafe) live at the motor pool.
-    const [ax, az] = this.world.poi('airbase');
-    const spawnX = ax + 13; // apron, ~8m clear of the nearest row car
-    const spawnZ = az + 44; // car row at dz 52, heavy row at dz 64
+    // TOTAL PURGE: you wake on the lighthouse grounds, the one Mustang
+    // parked beside you on open ground. The shore camp is a drive west —
+    // q_prologue step 2 ('Reach the shore camp') is earned on the road;
+    // Jonah and his camp don't move. Loaded games keep their saved
+    // position; only the fresh spawn and the default respawn point
+    // (lastSafe) live at the lighthouse.
+    const [ax, az] = this.world.poi('lighthouse_base');
+    const spawnX = ax - 9; // a few meters from the car (parked at -14, +16)
+    const spawnZ = az + 11;
     this.lastSafe = [spawnX, spawnZ];
     if (snap) {
       const [px, , pz] = snap.player.pos;
@@ -209,8 +205,8 @@ export class Game {
       this.player.camYaw = Math.PI * 0.9;
     } else {
       this.player.setPosition(spawnX, heightAt(spawnX, spawnZ) + 0.5, spawnZ);
-      // face the fleet: rows ahead at +Z, noses pointing back at you
-      this.player.camYaw = 0;
+      // face the tower and the car
+      this.player.camYaw = Math.PI * 0.75;
     }
 
     // husks
@@ -266,13 +262,11 @@ export class Game {
       this.world.poiPositions,
       [
         ...buildContainerDefs(this.world.poiPositions),
-        ...this.world.houses.containers,
-        ...this.world.poiBuildings.containers,
         ...this.world.lighthouseKit.containers,
       ],
     );
 
-    // shadow flags for world + husk + interactable meshes (idempotent)    // shadow flags for world + husk + interactable meshes (idempotent)
+    // shadow flags for world + husk + interactable meshes (idempotent)
     this.world.applyShadowFlags();
 
     // listeners

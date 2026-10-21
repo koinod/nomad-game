@@ -140,19 +140,15 @@ export interface SpawnDef {
   dx: number;
   dz: number;
   heading: number;
-  /** Absolute deck height for vehicles parked aboard a structure (the
-   *  carrier) — terrain height does not apply there. */
+  /** Absolute height override for spawns not on terrain. */
   y?: number;
   /** Model variant (the Stallion FX hero car). */
   variant?: string;
 }
 
-// AIRBASE wave: the fleet consolidates at the depot motor pool — two
-// apron rows south of the MAINT-BAY, heavies behind. The carrier keeps a
-// pickup + bronco aboard as deck spawns; boats stay at the marina.
 export const VEHICLE_SPAWNS: SpawnDef[] = [
   // VEHICLE RESET: the one Mustang on open ground beside the lighthouse.
-  { id: 'mustang', poi: 'lighthouse', dx: -14, dz: 16, heading: Math.PI * 0.75, variant: 'fx' },
+  { id: 'mustang', poi: 'lighthouse_base', dx: -14, dz: 16, heading: Math.PI * 0.75, variant: 'fx' },
 ];
 
 export class VehicleManager {
