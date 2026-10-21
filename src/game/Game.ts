@@ -668,10 +668,12 @@ export class Game {
       const before = s.timeMinutes;
       s.advanceTime(this.timeT);
       this.timeT = 0;
-      // a new day (clock wrapped past midnight): crew morale settles
+      // a new day (clock wrapped past midnight): crew morale settles —
+      // Lane 10's upkeep + morale pass when a tiered home is claimed,
+      // the legacy morale abstraction otherwise (baseDailyTick decides)
       if (s.timeMinutes < before) {
         s.advanceDay();
-        s.moraleTick();
+        s.baseDailyTick();
         s.baseTick();
       }
     }

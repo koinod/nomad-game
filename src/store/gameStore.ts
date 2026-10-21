@@ -9,6 +9,8 @@ import { TRAITS as TRAIT_DEFS } from '../data/survivors';
 import { QUESTS } from '../data/quests';
 import { FACTIONS, STARTING_REP, LEGACY_REP_ALIAS } from '../data/factions';
 import { ENCLAVE_RADIO_BURST } from '../data/worldWiring';
+import { applyUpkeep, dailyMoraleTick, FOOD_ITEMS, WATER_ITEMS } from '../systems/morale';
+import { comfortScore } from '../systems/baseClaims';
 import { DEFAULT_APPEARANCE, DIFFICULTIES } from './types';
 import type {
   Appearance, DifficultyId, Equipped, FleetEntry, InvItem, PhoneTab, QuestProgress, QuestStepType,
@@ -129,6 +131,8 @@ interface GameState {
   recruitSurvivor: (def: import('../data/survivors').SurvivorDef) => void;
   assignJob: (id: string, job: import('../data/survivors').SurvivorJob) => void;
   moraleTick: () => void;
+  /** Lane 10's daily upkeep + morale pass (Stage 4 step 4b). */
+  baseDailyTick: () => void;
 
   // base management (BASE_DESIGN)
   base: { poiId: string; facilities: string[] } | null;
@@ -1390,6 +1394,65 @@ export const useGameStore = create<GameState>()((set, get) => {
         return { ...x, morale: Math.max(0, Math.min(100, x.morale + d)) };
       });
       set({ survivors: next });
+    },
+    baseDailyTick: () => {
+      const s = get();
+      const home = s.claims.home;
+      // No tiered home claimed: the legacy abstraction settles morale
+      // (Lane 10's engine runs on a real stockpile; without a home there
+      // is no pile to eat from and no crew economy to simulate).
+      if (!home || s.survivors.length === 0) {
+        get().moraleTick();
+        return;
+      }
+      // Upkeep (§3.5): the crew eats from the home stockpile first. Until
+      // a stockpile-deposit path exists in the world, the player's pack
+      // is the fallback larder — anyone the pile couldn't feed eats from
+      // the pack (consumed via the store's removeItem, uid stacks).
+      const upkeep = applyUpkeep(home.stockpile, s.survivors);
+      const fed = new Set(upkeep.fedIds);
+      const unfed = s.survivors.filter((x) => !fed.has(x.id));
+      let packConsumed: { itemId: string; qty: number }[] = [];
+      if (unfed.length > 0) {
+        const packStock = s.inventory
+          .filter((i) => FOOD_ITEMS.includes(i.itemId) || WATER_ITEMS.includes(i.itemId))
+          .map((i) => ({ itemId: i.itemId, qty: i.qty }));
+        const packUpkeep = applyUpkeep(packStock, unfed);
+        packConsumed = packUpkeep.consumed;
+        for (const id of packUpkeep.fedIds) fed.add(id);
+        for (const c of packUpkeep.consumed) {
+          let remaining = c.qty;
+          while (remaining > 0) {
+            const stack = get().inventory.find((i) => i.itemId === c.itemId);
+            if (!stack) break;
+            const take = Math.min(remaining, stack.qty);
+            if (!get().removeItem(stack.uid, take)) break;
+            remaining -= take;
+          }
+        }
+      }
+      const tick = dailyMoraleTick(s.survivors, s.moraleRuntime, {
+        fedIds: [...fed],
+        comfort: comfortScore(home),
+      });
+      set({
+        claims: { ...s.claims, home: { ...home, stockpile: upkeep.stockpile } },
+        survivors: tick.survivors,
+        moraleRuntime: tick.runtime,
+      });
+      const nameOf = (id: string) => s.survivors.find((x) => x.id === id)?.name ?? id;
+      const lines: string[] = [];
+      const eaten = [...upkeep.consumed, ...packConsumed];
+      if (eaten.length > 0) {
+        lines.push(`Upkeep: ${eaten.map((c) => `${c.qty}× ${ITEMS[c.itemId]?.name ?? c.itemId}`).join(', ')} eaten by the crew.`);
+      }
+      const hungry = s.survivors.filter((x) => !fed.has(x.id)).map((x) => x.name);
+      if (hungry.length > 0) lines.push(`Went hungry: ${hungry.join(', ')}. Morale suffers — stock the base.`);
+      for (const id of tick.leftIds) {
+        lines.push(`${nameOf(id)} walked away. Three days Breaking was enough — they're alive out there, and bitter.`);
+        get().addToast(`${nameOf(id)} has left the base.`);
+      }
+      if (lines.length > 0) get().addJournal('Base upkeep', lines);
     },
 
     base: null,
