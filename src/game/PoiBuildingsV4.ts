@@ -298,7 +298,9 @@ function gasStation(cx: number, cz: number, groundY: GroundY): Kit[] {
     axis: 'x', at: 3 - 0.15, from: -5.5, to: 5.5, story: 0, color: col, exterior: true,
     openings: [
       { at: -2.2, w: 0.95, type: 'door', h: 2.1, leafColor: 0xb03a2e },
-      { at: -4.3, w: 1.4, type: 'window' },
+      // contemporary storefront glass: low-sill, full-height panes
+      { at: -4.2, w: 2.0, type: 'window', sill: 0.3, head: 2.5 },
+      { at: 0.3, w: 1.9, type: 'window', sill: 0.3, head: 2.5 },
       { at: 3.6, w: 3.2, type: 'bay', h: 2.9 },
     ],
   });
@@ -314,6 +316,14 @@ function gasStation(cx: number, cz: number, groundY: GroundY): Kit[] {
   const sign = decalPlane('GAS · MART', 7, 'rgba(245,242,235,0.97)', 54);
   sign.position.set(-1.5, 2.62, 3.12);
   store.addDetail(sign);
+  // LED strip under the fascia band + bollards guarding the storefront
+  const strip = store.box(10.6, 0.07, 0.06, 0xd6e6f2, 0, 2.28, 3.08);
+  (strip.material as THREE.MeshStandardMaterial).emissive = new THREE.Color(0xd6e6f2);
+  (strip.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.55;
+  for (const bx of [-3.3, -1.1]) {
+    store.box(0.16, 0.85, 0.16, 0xd8a022, bx, 0.45, 3.5);
+    store.obstacle(bx, 3.5, 0.1, 0.1);
+  }
   // store interior: shelves, the register counter, the legacy kiosk cabinets
   store.furnish({ kind: 'bookshelf', lx: -4.5, lz: -2.2, id: 'gas_shelf_1', loot: GROCERY, label: 'Search grocery shelf' });
   store.furnish({ kind: 'bookshelf', lx: -1.5, lz: -2.2, id: 'gas_shelf_2', loot: GROCERY, label: 'Search grocery shelf' });
@@ -342,12 +352,42 @@ function gasStation(cx: number, cz: number, groundY: GroundY): Kit[] {
   }
   canopy.roofCanopy(0xe8e6df, 0xb03a2e, GAS_CANOPY_SOFFIT_LOCAL);
   canopy.openEntrance('S', 0, 12);
-  // pump island: curb, two pumps (visual + obstacle), the legacy pump loot
+  // LED light band under the raised soffit: perimeter strip + flat
+  // panels over the lanes (emissive — the station glows like a 2020s one)
+  const ledY = GAS_CANOPY_SOFFIT_LOCAL - 0.05;
+  const led = canopy.box(12.6, 0.05, 0.16, 0xcfe0ee, 0, ledY, 4.32);
+  (led.material as THREE.MeshStandardMaterial).emissive = new THREE.Color(0xcfe0ee);
+  (led.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.9;
+  canopy.box(12.6, 0.05, 0.16, 0xcfe0ee, 0, ledY, -4.32);
+  canopy.box(0.16, 0.05, 8.6, 0xcfe0ee, -6.42, ledY, 0);
+  canopy.box(0.16, 0.05, 8.6, 0xcfe0ee, 6.42, ledY, 0);
+  for (const px of [-3.4, 0, 3.4]) canopy.box(2.0, 0.05, 0.7, 0xcfe0ee, px, ledY, 0);
+  // pump island: curb, two MODERN dispensers (light body, glass screen
+  // both faces, card reader, brand cap, nozzle holster + hose loop),
+  // bollards on the island corners, the legacy pump loot
   canopy.box(7.5, 0.12, 1.1, 0x8a8578, 0, 0.2, 0);
   for (const px of [-3, 3]) {
-    canopy.box(0.7, 1.3, 0.5, 0xc23b2e, px, 0.79, 0);
-    canopy.box(0.5, 0.4, 0.06, 0x2a3540, px, 1.05, 0.26);
-    canopy.obstacle(px, 0, 0.35, 0.25);
+    canopy.box(0.72, 1.35, 0.52, 0xdcd8d0, px, 0.82, 0);
+    canopy.box(0.56, 0.5, 0.05, 0x11161c, px, 1.14, 0.27);
+    canopy.box(0.56, 0.5, 0.05, 0x11161c, px, 1.14, -0.27);
+    canopy.box(0.18, 0.3, 0.05, 0x2a3540, px + 0.17, 0.68, 0.27); // card reader
+    canopy.box(0.3, 0.09, 0.34, 0xb03a2e, px, 1.56, 0); // brand cap
+    canopy.box(0.1, 0.5, 0.14, 0x23272c, px - 0.42, 0.72, 0); // nozzle holster
+    const hose = new THREE.Mesh(
+      new THREE.TorusGeometry(0.26, 0.032, 8, 18, Math.PI),
+      new THREE.MeshStandardMaterial({ color: 0x17181a, roughness: 0.95 }),
+    );
+    hose.position.set(px - 0.44, 0.78, 0);
+    hose.rotation.y = Math.PI / 2;
+    hose.rotation.z = Math.PI;
+    canopy.addDetail(hose);
+    canopy.obstacle(px, 0, 0.36, 0.26);
+  }
+  for (const bx of [-3.8, 3.8]) {
+    for (const bz of [-0.62, 0.62]) {
+      canopy.box(0.16, 0.85, 0.16, 0xd8a022, bx, 0.55, bz);
+      canopy.obstacle(bx, bz, 0.1, 0.1);
+    }
   }
   canopy.container({
     lx: 0, lz: 0, id: 'gas_pump_loot',
@@ -357,12 +397,18 @@ function gasStation(cx: number, cz: number, groundY: GroundY): Kit[] {
     ],
     label: 'Search pump island', searchTime: 2.5,
   });
-  // price sign on a post at the pad corner
-  canopy.post(5.9, 3.9, -0.1, 3.0, 0x3a3f45, 0.18);
-  canopy.box(2.6, 0.9, 0.14, 0x2e4a6e, 5.9, 2.45, 3.9);
-  const price = decalPlane('FUEL', 2.2, 'rgba(245,242,235,0.97)', 64);
-  price.position.set(5.9, 2.45, 3.99);
+  // modern price totem at the pad corner: twin posts, tall dark panel,
+  // FUEL header over a big price readout (flavor digits, pre-Static)
+  canopy.post(5.5, 3.9, -0.1, 4.3, 0x3a3f45, 0.16);
+  canopy.post(6.3, 3.9, -0.1, 4.3, 0x3a3f45, 0.16);
+  canopy.box(1.9, 2.3, 0.16, 0x1d2733, 5.9, 3.05, 3.9);
+  canopy.box(1.9, 0.1, 0.18, 0xb03a2e, 5.9, 4.22, 3.9);
+  const price = decalPlane('FUEL', 1.5, 'rgba(245,242,235,0.97)', 64);
+  price.position.set(5.9, 3.72, 4.0);
   canopy.addDetail(price);
+  const digits = decalPlane('4.09', 1.4, 'rgba(232,179,75,0.97)', 72);
+  digits.position.set(5.9, 2.85, 4.0);
+  canopy.addDetail(digits);
   return [store, canopy];
 }
 
