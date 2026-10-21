@@ -894,3 +894,48 @@ for (const [id, [w, h]] of Object.entries(FOOTPRINTS)) {
     ITEMS[id].h = h;
   }
 }
+
+// ---------- barter (SYSTEMS_SPEC §1.2; the §3.5 anchors) ----------
+// Trader prices in "value" units. The anchor is `valuables` = 100: one
+// unit of pre-Static shine is the island's hundred-dollar bill, and every
+// other price is scarcity + craft cost measured against it (a medkit is a
+// third of a valuables unit; a carbine is two and change). Traders
+// (Lane 9) key on barterValueOf(); an item with no entry is not tradable
+// (barterValueOf returns 0). Key/quest items are deliberately absent.
+// FIELD REQUEST (Lane 5): promote to ItemDef.barterValue when the type
+// opens up; this table folds into it 1:1.
+export const BARTER_VALUES: Record<string, number> = {
+  valuables: 100, // the anchor
+  // raw + worked materials
+  scrap: 3, wood: 2, cloth: 3, wire: 4, chemicals: 8, gun_parts: 12,
+  gunpowder: 8, brass: 3, lead: 4, circuit_board: 25,
+  tire: 15, engine_part: 30, car_battery: 25, armor_plate: 20, fuel_can: 20,
+  // food + medical
+  canned_food: 6, raw_meat: 3, cooked_meat: 10, water_bottle: 4, produce: 4,
+  bandage: 8, medkit: 35,
+  // ammo (per round/shell)
+  ammo_9mm: 2, shells: 3, ammo_rifle: 4, ammo_556: 3, bolts: 3,
+  // tools + stealth
+  flare: 5, torch: 4, fire_starter: 5, lockpick: 10, tool_kit: 40,
+  cleaning_kit: 12, gun_oil: 8, rock: 1, boombox: 30,
+  // melee
+  pipe: 8, baseball_bat: 10, combat_knife: 15, crowbar: 15, hatchet: 18,
+  spear: 20, machete: 25, riot_baton: 30, fire_axe: 35, sledgehammer: 35,
+  // ranged
+  flare_gun: 40, pistol: 60, revolver: 75, crossbow: 90, shotgun: 110,
+  hunting_rifle: 130, smg: 160, carbine: 220, dmr: 260,
+  // throwables
+  molotov: 20, smoke: 25, flashbang: 40, frag: 45,
+  // mods + finishes
+  reflex_sight: 45, suppressor: 60, extended_mag: 40, foregrip: 35, laser_sight: 45,
+  finish_matte: 15, finish_camo: 15, finish_rust: 15, finish_worn: 15,
+  // armor (interim while-carried pieces price like the gear they are)
+  armored_vest: 90, riot_helmet: 55, shin_guards: 30, plate_carrier: 180,
+  // packs + the blueprint economy
+  pack_t1: 35, pack_t2: 70, bp_turret: 150, turret: 400,
+};
+
+/** Trader price for one unit; 0 = not tradable. */
+export function barterValueOf(itemId: string): number {
+  return BARTER_VALUES[itemId] ?? 0;
+}
