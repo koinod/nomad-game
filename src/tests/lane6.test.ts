@@ -12,6 +12,7 @@ import {
 import { respawnDaysFor, respawnEligible } from '../game/Interact';
 import { buildFurnitureMesh, applyDisturbed, applyRestored } from '../game/furnitureMeshes';
 import { AlarmRegistry, DISARM_SECONDS, DISARM_SKILL_LEVEL } from '../game/alarm';
+import { buildItemModel, ITEM_MODEL_IDS } from '../game/itemModels';
 
 const has = (id: string) => Object.prototype.hasOwnProperty.call(ITEMS, id);
 
@@ -233,5 +234,33 @@ describe('alarm engine (§4.4)', () => {
     expect(r.state('outpost')).toBe('armed');
     r.trip('outpost', 'container_trip');
     expect(r.disarm('outpost')).toBe(false); // a blown alarm can't be un-blown
+  });
+});
+
+describe('item models (order item 4 — structural QA pending the render gate)', () => {
+  it('every modeled id is a real catalog item and builds a multi-part mesh', () => {
+    for (const id of ITEM_MODEL_IDS) {
+      expect(has(id), `${id} in catalog`).toBe(true);
+      const m = buildItemModel(id);
+      expect(m, id).not.toBeNull();
+      let meshes = 0;
+      m!.traverse((o) => { if (o instanceof THREE.Mesh) meshes++; });
+      expect(meshes, `${id} part count`).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('models sit at sane scale (nothing over 2m, nothing degenerate)', () => {
+    for (const id of ITEM_MODEL_IDS) {
+      const m = buildItemModel(id)!;
+      const bb = new THREE.Box3().setFromObject(m);
+      const size = bb.getSize(new THREE.Vector3());
+      expect(Math.max(size.x, size.y, size.z), `${id} max dim`).toBeLessThan(2);
+      expect(Math.max(size.x, size.y, size.z), `${id} max dim`).toBeGreaterThan(0.05);
+    }
+  });
+
+  it('weapons and unknowns are not this module\u2019s surface', () => {
+    expect(buildItemModel('pistol')).toBeNull(); // weaponMeshes owns it
+    expect(buildItemModel('not_a_real_item')).toBeNull();
   });
 });
