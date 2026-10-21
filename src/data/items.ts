@@ -355,21 +355,22 @@ export const ITEMS: Record<string, ItemDef> = {
     id: 'riot_helmet', name: 'Riot helmet', category: 'material', weight: 1.1, slots: 1, stack: 1,
     desc: 'Hard shell, cracked visor. Mitigates 15% of damage while carried.', armor: 0.15,
   },
-  // armor completion (SYSTEMS_SPEC §2.5): torso T3 + the legs slot. These
-  // ride the interim while-carried rule like the vest/helmet until Lane 5
-  // lands the 'armor' category + Equipped slots (FIELD REQUEST filed).
+  // armor completion (SYSTEMS_SPEC §2.5): torso T3 + the legs slot.
+  // RE-CATEGORIZED at merge (Lane 5 field contract landed: 'armor'
+  // category + armorSlot are real; mitigation still runs while-carried
+  // until the armor equip path wires — see Lane 5 merge notes).
   plate_carrier: {
-    id: 'plate_carrier', name: 'Plate carrier', category: 'material', weight: 3.4, slots: 2, stack: 1,
+    id: 'plate_carrier', name: 'Plate carrier', category: 'armor', armorSlot: 'torso', weight: 3.4, slots: 2, stack: 1,
     desc: 'Ceramic plates in a real carrier. Mitigates 40% of damage while carried.', armor: 0.40,
   },
   shin_guards: {
-    id: 'shin_guards', name: 'Shin guards', category: 'material', weight: 0.7, slots: 1, stack: 1,
+    id: 'shin_guards', name: 'Shin guards', category: 'armor', armorSlot: 'legs', weight: 0.7, slots: 1, stack: 1,
     desc: 'Molded guards, straps still good. Mitigates 10% of damage while carried.', armor: 0.10,
   },
-  // the only blueprint in the game (SYSTEMS_SPEC §4.3): rides category
-  // 'key' until Lane 5 adds 'blueprint' to ItemCategory (FIELD REQUEST).
+  // the only blueprint in the game (SYSTEMS_SPEC §4.3). RE-CATEGORIZED
+  // at merge: Lane 5 landed 'blueprint' in ItemCategory.
   bp_turret: {
-    id: 'bp_turret', name: 'Blueprint — Automated Turret', category: 'key', weight: 0.1, slots: 1, stack: 1,
+    id: 'bp_turret', name: 'Blueprint — Automated Turret', category: 'blueprint', weight: 0.1, slots: 1, stack: 1,
     desc: 'Sodgame-era schematics, grease-pencil annotations. Unlocks the turret craft: gun parts, boards, an engine part, and a bench that can read.',
   },
   turret: {
