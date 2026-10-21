@@ -391,7 +391,7 @@ export function buildSprinter(g: THREE.Group, def: VehicleDef, v: Vehicle): void
   box(g, 0.07, 1.62, cd, body, -(W / 2 - 0.035), 1.37, cz);
   box(g, 0.07, 1.62, cd, body, W / 2 - 0.035, 1.37, cz);
   const roofS = box(g, W, 0.07, cd, body, 0, 2.21, cz);
-  v.roofObj = roofS; // hidden while the player is inside, camera outside
+  v.roofObj = roofS; // named handle only — roofs always render (Ian's law)
   box(g, W, 1.62, 0.07, body, 0, 1.37, cz + cd / 2); // front wall (behind cab)
   box(g, W, 0.26, 0.07, body, 0, 2.05, cz - cd / 2); // header over the doors
   // interior ribs + a work light so the inside reads as a space (old)

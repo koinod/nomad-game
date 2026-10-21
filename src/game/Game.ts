@@ -80,7 +80,6 @@ export class Game {
   private fleetT = 0;
   private houseColliders: Collider[] = [];
   private houseFloors: FloorRect[] = [];
-  private houseRoofs: { bounds: Collider; group: THREE.Group }[] = [];
 
   private raf = 0;
   private running = false;
@@ -167,7 +166,7 @@ export class Game {
     // register POIs (contract)
     useGameStore.getState().setPoiPositions(this.world.poiPositions);
 
-    // houses + POI buildings: colliders, floor rects, roofs, containers
+    // houses + POI buildings: colliders, floor rects, containers
     this.houseColliders = [
       ...this.world.houses.colliders,
       ...this.world.poiBuildings.colliders,
@@ -179,12 +178,6 @@ export class Game {
       ...this.world.poiBuildings.floors,
       ...this.world.lighthouseKit.floors,
     ];
-    this.houseRoofs = [
-      ...this.world.houses.roofs,
-      ...this.world.poiBuildings.roofs,
-      ...this.world.lighthouseKit.roofs,
-    ];
-
     // snapshot world diff
     const snap = opts.snapshot ?? null;
     if (snap) {
@@ -887,21 +880,11 @@ export class Game {
     // driving onto a deck: roll up the ramp, stop, and you're cargo
     if (this.driving && !this.driving.loadedOn) this.checkDeckLock(s);
 
-    // hide the roof of whatever house the player is inside (see your own rooms)
-    for (const r of this.houseRoofs) {
-      const b = r.bounds;
-      const playerIn =
-        player.pos.x > b.x0 - 0.5 && player.pos.x < b.x1 + 0.5 &&
-        player.pos.z > b.z0 - 0.5 && player.pos.z < b.z1 + 0.5;
-      // if the CAMERA is inside the building, the building stays whole —
-      // you're indoors, you should see the room and its ceiling. The roof
-      // only lifts when you're inside and the camera is outside/above.
-      const cam = this.camera?.position ?? player.pos;
-      const camIn =
-        cam.x > b.x0 - 0.3 && cam.x < b.x1 + 0.3 &&
-        cam.z > b.z0 - 0.3 && cam.z < b.z1 + 0.3;
-      r.group.visible = !(playerIn && !camIn);
-    }
+    // ROOFS NEVER DISAPPEAR (Ian's law, 2026-10-20): the old roof-lift
+    // rule that hid a building's roof while the player was inside is
+    // REMOVED outright. Roof meshes always render in every camera
+    // state; interior views are the camera's problem (push-in /
+    // collision), never the geometry's. Guarded by tests/roofs.test.ts.
 
     const night = this.isNight();
     husks.update(
@@ -1615,30 +1598,25 @@ export class Game {
     }
   }
 
-  /** Interior walls for walk-in spaces (box trailer, sprinter) + the
-   *  houses' camera-inside roof rule applied to trailer/vehicle roofs. */
+  /** Interior walls for walk-in spaces (box trailer, sprinter): clamp
+   *  the player inside the shell. Roofs are NOT touched here — they
+   *  always render (Ian's law; see the note in simulate()). */
   private resolveInteriors(): void {
     const player = this.player!;
     if (this.driving) return;
-    const cam = this.camera!.position;
-    type Ent = { pos: THREE.Vector3; heading: number; interior: import('./Vehicles').InteriorSpec; open: boolean; roof?: THREE.Object3D };
+    type Ent = { pos: THREE.Vector3; heading: number; interior: import('./Vehicles').InteriorSpec; open: boolean };
     const ents: Ent[] = [];
     for (const t of this.trailers.trailers) {
-      if (t.interior) ents.push({ pos: t.group.position, heading: t.heading, interior: t.interior, open: t.doorOpen, roof: t.roofObj });
+      if (t.interior) ents.push({ pos: t.group.position, heading: t.heading, interior: t.interior, open: t.doorOpen });
     }
     for (const v of this.vehicles.vehicles) {
-      if (v.interior) ents.push({ pos: v.group.position, heading: v.heading, interior: v.interior, open: v.doors.some((d) => d.t > 0.5), roof: v.roofObj });
+      if (v.interior) ents.push({ pos: v.group.position, heading: v.heading, interior: v.interior, open: v.doors.some((d) => d.t > 0.5) });
     }
     for (const e of ents) {
       const spec = e.interior;
       const pl = this.entityLocal(e.pos, e.heading, player.pos.x, player.pos.z);
       const playerIn = Math.abs(pl.lx) <= spec.halfW + 0.3 && pl.lz >= spec.zRear - 0.3 && pl.lz <= spec.zFront + 0.3
         && player.pos.y > e.pos.y + spec.floorY - 0.5;
-      if (e.roof) {
-        const cl = this.entityLocal(e.pos, e.heading, cam.x, cam.z);
-        const camIn = Math.abs(cl.lx) <= spec.halfW + 0.4 && cl.lz >= spec.zRear - 0.4 && cl.lz <= spec.zFront + 0.4;
-        e.roof.visible = !(playerIn && !camIn);
-      }
       if (!playerIn) continue;
       const R = 0.35;
       let { lx, lz } = pl;

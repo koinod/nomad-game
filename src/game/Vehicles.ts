@@ -145,7 +145,7 @@ export interface Vehicle {
   cargoCrates: number; // physical crates loaded (visual + mass)
   doors: DoorAnim[];
   interior?: InteriorSpec; // walk-in cargo space (sprinter)
-  roofObj?: THREE.Object3D; // hidden while the player is inside, camera outside
+  roofObj?: THREE.Object3D; // the roof mesh — always renders (roofs never hide, Ian's law)
   loadedOn: string | null; // trailer uid this vehicle is locked onto, if any
   /** Helicopters: spinning assemblies (main/tail rotors), spun by the
    *  drive loop from the live rotor spool. */
