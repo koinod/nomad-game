@@ -8,8 +8,10 @@ import * as THREE from 'three';
 import { ITEMS } from '../data/items';
 import type { InvItem } from '../store/types';
 import { buildStallion, applyStallionUpgrades } from './carModels';
+import { GT500_DEF, GT500_GLB_PATH, GT500_SPAWN, GT500_WHEEL_RIG } from './gt500Def';
 
 export { glassTint } from './modelKit';
+export { GT500_DEF, GT500_SPAWN } from './gt500Def';
 
 export interface VehicleDef {
   id: string;
@@ -61,6 +63,9 @@ export const VEHICLE_DEFS: VehicleDef[] = [
   // build (1769 kg, ~500 hp, 267 km/h). Real performance lives in
   // carSpec.ts — this def carries identity + tank + storage only.
   { id: 'mustang', name: 'Stallion FX', kind: 'car', length: 4.79, width: 1.92, fuelMax: 61, burnClass: 1.1, noiseDrive: 55, color: 0x1e4a7a, storageKg: 45 },
+  // FLEET RETURN (gate-approved, one at a time): the 2007 Shelby GT500 —
+  // the benchmark model. Full def lives in gt500Def.ts.
+  GT500_DEF,
 ];
 
 /** Semi tractor paint rotation — the Stitch charcoal leads, fleets vary. */
@@ -149,6 +154,9 @@ export interface SpawnDef {
 export const VEHICLE_SPAWNS: SpawnDef[] = [
   // VEHICLE RESET: the one Mustang on open ground beside the lighthouse.
   { id: 'mustang', poi: 'lighthouse_base', dx: -14, dz: 16, heading: Math.PI * 0.75, variant: 'fx' },
+  // The GT500 parks on the same grounds, clear of the Stallion's spot —
+  // the island's first two-car moment (fleet >= 2 unlocks dispatch).
+  GT500_SPAWN,
 ];
 
 export class VehicleManager {
@@ -274,6 +282,73 @@ export function attachMustangGlb(v: Vehicle): void {
     })
     .catch((err) => {
       console.warn('[Vehicles] mustang.glb failed to load; procedural body stands:', err);
+    });
+}
+
+/**
+ * The gate-approved Shelby GT500 (public/gt500.glb, built by
+ * tools/gt500/build_gt500.py at real S197 dimensions). Same rig
+ * contract as the Stallion GLB: nose +X, wheels as WheelFL/FR/RL/RR
+ * objects with axle-centre origins. Loads async; the procedural
+ * stand-in stays if it fails. No upgrade morphs exist for this body —
+ * applyStallionUpgrades is Stallion sheet-metal and is NOT applied.
+ */
+export function attachGt500Glb(v: Vehicle): void {
+  import('three/addons/loaders/GLTFLoader.js')
+    .then(({ GLTFLoader }) => new GLTFLoader().loadAsync(GT500_GLB_PATH))
+    .then((gltf) => {
+      const model = gltf.scene;
+      const wrapper = new THREE.Group();
+      wrapper.rotation.y = -Math.PI / 2;
+      wrapper.add(model);
+      // clear the procedural stand-in
+      while (v.group.children.length) v.group.remove(v.group.children[0]);
+      v.wheelSpin = [];
+      v.wheelPivots = [];
+      v.group.add(wrapper);
+      model.traverse((o) => {
+        if ((o as THREE.Mesh).isMesh) {
+          o.castShadow = true;
+          o.receiveShadow = true;
+        }
+      });
+      // wheel rig: GT500_WHEEL_RIG is already in CarPhysics suspension
+      // order [FR, FL, RR, RL] (see gt500Def.ts)
+      const steerPivots: THREE.Object3D[] = [];
+      const spinPivots: THREE.Object3D[] = [];
+      const suspPivots: { obj: THREE.Object3D; baseY: number; wheelIdx: number }[] = [];
+      for (const [name, wheelIdx] of GT500_WHEEL_RIG) {
+        const wheel = model.getObjectByName(name);
+        if (!wheel || !wheel.parent) continue;
+        const susp = new THREE.Group();
+        susp.position.copy(wheel.position);
+        wheel.parent.add(susp);
+        susp.add(wheel);
+        wheel.position.set(0, 0, 0);
+        const spin = new THREE.Group();
+        spin.position.copy(wheel.position);
+        susp.add(spin);
+        spin.add(wheel);
+        wheel.position.set(0, 0, 0);
+        suspPivots.push({ obj: susp, baseY: susp.position.y, wheelIdx });
+        spinPivots.push(spin);
+        if (wheelIdx <= 1) steerPivots.push(susp);
+      }
+      // headlights: real spotlights seated at the S197 lenses (glTF
+      // space: nose +X, up +Y, width on Z) — light only, no glow shell
+      const headLights: THREE.SpotLight[] = [];
+      for (const sz of [-0.62, 0.62]) {
+        const spot = new THREE.SpotLight(0xffeec4, 0, 60, 0.46, 0.55, 1.2);
+        spot.position.set(2.38, 0.66, sz);
+        spot.target.position.set(14, 0, sz * 1.25);
+        wrapper.add(spot);
+        wrapper.add(spot.target);
+        headLights.push(spot);
+      }
+      v.glb = { wrapper, steerPivots, spinPivots, suspPivots, headLights };
+    })
+    .catch((err) => {
+      console.warn('[Vehicles] gt500.glb failed to load; procedural body stands:', err);
     });
 }
 

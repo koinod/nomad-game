@@ -13,20 +13,30 @@ import type { VehicleSave } from '../store/types';
  * VEHICLE RESET + TOTAL PURGE (2026-10-20): the fleet is one Mustang,
  * every other vehicle/building is gone, and pre-reset saves must load
  * stripped — never crash, never resurrect deleted content.
+ *
+ * SUPERSESSION (2026-10-21, merge stage 2b): the reset law always said
+ * vehicles return ONE AT A TIME through the visual gate. The Shelby
+ * GT500 passed that gate (Lane 1, the benchmark model), so the fleet
+ * is now exactly two — the one-car assertions below were updated
+ * deliberately to pin the new roster, not loosened.
  */
 
 describe('the reset fleet', () => {
-  it('has exactly one vehicle def: the Stallion FX Mustang', () => {
-    expect(VEHICLE_DEFS).toHaveLength(1);
+  it('is the Stallion FX Mustang plus the one gate-approved return', () => {
+    expect(VEHICLE_DEFS).toHaveLength(2);
     expect(VEHICLE_DEFS[0].id).toBe('mustang');
     expect(VEHICLE_DEFS[0].kind).toBe('car');
+    expect(VEHICLE_DEFS[1].id).toBe('gt500');
+    expect(VEHICLE_DEFS[1].kind).toBe('car');
   });
 
-  it('spawns exactly one vehicle, at the lighthouse', () => {
-    expect(VEHICLE_SPAWNS).toHaveLength(1);
+  it('spawns the Mustang at the lighthouse, the GT500 beside it', () => {
+    expect(VEHICLE_SPAWNS).toHaveLength(2);
     expect(VEHICLE_SPAWNS[0].id).toBe('mustang');
     expect(VEHICLE_SPAWNS[0].poi).toBe('lighthouse_base');
     expect(VEHICLE_SPAWNS[0].variant).toBe('fx');
+    expect(VEHICLE_SPAWNS[1].id).toBe('gt500');
+    expect(VEHICLE_SPAWNS[1].poi).toBe('lighthouse_base');
   });
 
   it('no upgrade references a deleted vehicle or a deleted upgrade', () => {

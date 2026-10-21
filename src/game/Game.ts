@@ -17,7 +17,7 @@ import { HuskManager } from './Husks';
 import type { Husk, SpawnZone } from './Husks';
 import { InteractSystem, buildContainerDefs } from './Interact';
 import { AnimalManager } from './Animals';
-import { VehicleManager, applyUpgradeVisuals, attachMustangGlb, applyGlbVisuals, itemsWeightKg, type Vehicle } from './Vehicles';
+import { VehicleManager, applyUpgradeVisuals, attachMustangGlb, attachGt500Glb, applyGlbVisuals, itemsWeightKg, type Vehicle } from './Vehicles';
 import { CarPhysics } from './CarPhysics';
 import { WeatherSystem } from './Weather';
 import { canInstallUpgrade, storageCapKg, collisionLossFactor, ramDamageFactor } from '../data/upgrades';
@@ -230,6 +230,8 @@ export class Game {
     // (possibly save-restored) position.
     const mustang = this.vehicles.vehicles[0];
     if (mustang) attachMustangGlb(mustang);
+    const gt500 = this.vehicles.vehicles.find((v) => v.def.id === 'gt500');
+    if (gt500) attachGt500Glb(gt500);
     this.carPhysics = await CarPhysics.create(
       { onImpact: (dv) => this.onCarImpact(dv) },
       (x, z) => heightAt(x, z),
@@ -713,12 +715,18 @@ export class Game {
         return `${Math.round(x)}, ${Math.round(z)}`;
       };
       {
-        const mv = this.vehicles.vehicles[0];
-        if (mv && this.carPhysics) {
-          const key = `${mv.upgrades.join(',')}:${itemsWeightKg(mv.storage)}:${mv.tiresFlat}`;
+        // build watcher, per vehicle: a change re-derives the live
+        // body's params only for the def that body is bound to
+        // (setBuild ignores the rest) — mass follows the car you drive
+        if (this.carPhysics) {
+          const key = this.vehicles.vehicles
+            .map((mv) => `${mv.def.id}:${mv.upgrades.join(',')}:${itemsWeightKg(mv.storage)}:${mv.tiresFlat}`)
+            .join('|');
           if (key !== this.buildKey) {
             this.buildKey = key;
-            this.carPhysics.setBuild(mv.upgrades, itemsWeightKg(mv.storage));
+            for (const mv of this.vehicles.vehicles) {
+              this.carPhysics.setBuild(mv.upgrades, itemsWeightKg(mv.storage), mv.def.id);
+            }
           }
         }
       }
@@ -797,8 +805,7 @@ export class Game {
     if (!this.driving && this.carPhysics) {
       // parked: the handbrake holds the body; visuals follow the settle
       this.carPhysics.parkBrake();
-      const mv = this.vehicles.vehicles[0];
-      if (mv) applyGlbVisuals(mv);
+      for (const mv of this.vehicles.vehicles) applyGlbVisuals(mv);
     }
 
     // ROOFS NEVER DISAPPEAR (Ian's law, 2026-10-20): the old roof-lift
@@ -1245,7 +1252,9 @@ export class Game {
   /** Rigid-body impacts cost condition (the existing damage economy),
    *  scaled by fitted armor; a hard enough hit can blow a tire. */
   private onCarImpact(dv: number): void {
-    const v = this.vehicles?.vehicles[0];
+    // the live body is the driven car's (or the last-bound car's when
+    // parked) — impact damage lands on the car that actually hit
+    const v = this.driving ?? this.vehicles?.vehicles[0];
     if (!v || dv < 3.2) return;
     const loss = Math.min(0.3, (dv - 2.5) * 0.02) * collisionLossFactor(v.upgrades);
     if (loss > 0.004) {
@@ -1363,6 +1372,12 @@ export class Game {
       return;
     }
     this.driving = v;
+    // the one live body rebinds to the car being entered when it isn't
+    // already that car's (per-def params + geometry ride along); the
+    // car it leaves keeps its last synced transform as a parked visual
+    if (this.carPhysics && this.carPhysics.boundDefId !== v.def.id) {
+      this.carPhysics.spawnCar(v, v.upgrades, itemsWeightKg(v.storage));
+    }
     this.carPhysics?.wake();
     this.wasFirstPerson = this.player!.firstPerson;
     // first person stays first person: driveUpdate renders the

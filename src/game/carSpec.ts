@@ -83,9 +83,13 @@ export function torqueAt(curve: [number, number][], rpm: number): number {
   return curve[curve.length - 1][1];
 }
 
-export function peakPowerKw(curve: [number, number][]): number {
+export function peakPowerKw(curve: [number, number][], redlineRpm = 7600): number {
   let peak = 0;
-  for (let rpm = 1000; rpm <= 7600; rpm += 100) {
+  // never scan past the engine's own redline: torqueAt holds the last
+  // breakpoint flat, so an uncapped scan invents power the engine
+  // cannot make (the GT500's 6250-redline 5.4 read ~603 hp at 7600)
+  const cap = Math.min(7600, redlineRpm);
+  for (let rpm = 1000; rpm <= cap; rpm += 100) {
     peak = Math.max(peak, (torqueAt(curve, rpm) * rpm * Math.PI) / 30000);
   }
   return peak;
@@ -176,8 +180,8 @@ export function estimatePerformance(p: CarParams): PerfEstimate {
   return {
     zeroToHundredSec: t100,
     topSpeedKmh: vMax * 3.6,
-    powerKw: peakPowerKw(p.torqueCurve),
-    powerToWeightKwPerTonne: peakPowerKw(p.torqueCurve) / (p.massKg / 1000),
+    powerKw: peakPowerKw(p.torqueCurve, p.redlineRpm),
+    powerToWeightKwPerTonne: peakPowerKw(p.torqueCurve, p.redlineRpm) / (p.massKg / 1000),
     massKg: p.massKg,
   };
 }

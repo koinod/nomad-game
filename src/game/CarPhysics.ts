@@ -1,11 +1,15 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { carParams, torqueAt, type CarParams } from './carSpec';
+import { GT500_PARAMS } from './gt500Def';
 import type { Vehicle } from './Vehicles';
 import type { Collider } from './Colliders';
 
 /**
- * CarPhysics — rigid-body driving for the one Mustang (Piece 3).
+ * CarPhysics — rigid-body driving (Piece 3). One live body, bound to
+ * the vehicle being driven (spawnCar rebinds it); parameters and
+ * chassis geometry are per-def — carSpec builds the Stallion's from
+ * its upgrade state, gt500Def carries the Shelby's period spec.
  *
  * Rapier DynamicRayCastVehicleController: raycast suspension per wheel,
  * engine force from the carSpec torque curve through real gearing,
@@ -38,6 +42,34 @@ const WHEEL_Z = 1.359; // half wheelbase (S650: 2718 mm)
 const REST_LEN = 0.32;
 const MAX_STEER = 0.55; // rad at standstill, tapering with speed
 
+/** Chassis geometry per def: collider half extents + wheel connection
+ *  points (chassis space). The Mustang's values are the originals —
+ *  its measured behavior does not move. Unknown defs use them too. */
+interface ChassisGeom {
+  half: [number, number, number];
+  wheelX: number;
+  wheelZ: number;
+}
+const CHASSIS_GEOM: Record<string, ChassisGeom> = {
+  mustang: { half: [0.82, 0.3, 2.22], wheelX: WHEEL_X, wheelZ: WHEEL_Z },
+  // S197: 1.88 m wide, 4.77 m long, 2.71 m wheelbase, ~1.58 m track
+  gt500: { half: [0.94, 0.32, 2.39], wheelX: 0.79, wheelZ: 1.355 },
+};
+export function geomFor(defId: string): ChassisGeom {
+  return CHASSIS_GEOM[defId] ?? CHASSIS_GEOM.mustang;
+}
+
+/** Physics parameters per def. The Stallion derives from its upgrade
+ *  build state (carSpec). The GT500 runs its fixed period spec —
+ *  cargo is real mass on top; the upgrade tree's carSpec deltas are
+ *  Coyote-build tuning and do not transfer to the Shelby. */
+export function paramsForDef(defId: string, upgrades: readonly string[], cargoKg: number): CarParams {
+  if (defId === 'gt500') {
+    return { ...GT500_PARAMS, massKg: GT500_PARAMS.massKg + Math.max(0, cargoKg) };
+  }
+  return carParams(upgrades, cargoKg);
+}
+
 export class CarPhysics {
   private rapier: typeof RAPIER | null = null;
   private world: RAPIER.World | null = null;
@@ -45,6 +77,7 @@ export class CarPhysics {
   private chassisCollider: RAPIER.Collider | null = null;
   private controller: RAPIER.DynamicRayCastVehicleController | null = null;
   private events: RAPIER.EventQueue | null = null;
+  private defId = 'mustang'; // def the live body is bound to
   private params: CarParams = carParams([]);
   private fallback = false;
 
@@ -113,9 +146,15 @@ export class CarPhysics {
     return !this.fallback && !!this.body;
   }
 
+  /** Def the live body is currently bound to (spawnCar rebinds it). */
+  get boundDefId(): string {
+    return this.defId;
+  }
+
   /** (Re)build the chassis for the vehicle at its current transform. */
   spawnCar(v: Vehicle, upgrades: readonly string[], cargoKg: number): void {
-    this.params = carParams(upgrades, cargoKg);
+    this.defId = v.def.id;
+    this.params = paramsForDef(v.def.id, upgrades, cargoKg);
     if (this.fallback || !this.world || !this.rapier) return;
     const R = this.rapier;
     if (this.body) {
@@ -132,7 +171,8 @@ export class CarPhysics {
       .setCcdEnabled(true)
       .setCanSleep(true);
     this.body = this.world.createRigidBody(bodyDesc);
-    const colDesc = R.ColliderDesc.cuboid(0.82, 0.30, 2.22)
+    const geom = geomFor(v.def.id);
+    const colDesc = R.ColliderDesc.cuboid(geom.half[0], geom.half[1], geom.half[2])
       .setTranslation(0, 0, 0)
       .setMass(this.params.massKg)
       .setFriction(0.3)
@@ -142,8 +182,8 @@ export class CarPhysics {
     const ctrl = this.world.createVehicleController(this.body);
     // wheels: FL, FR, RL, RR — connection points in chassis space
     const pts: [number, number, number][] = [
-      [-WHEEL_X, 0.02, WHEEL_Z], [WHEEL_X, 0.02, WHEEL_Z],
-      [-WHEEL_X, 0.02, -WHEEL_Z], [WHEEL_X, 0.02, -WHEEL_Z],
+      [-geom.wheelX, 0.02, geom.wheelZ], [geom.wheelX, 0.02, geom.wheelZ],
+      [-geom.wheelX, 0.02, -geom.wheelZ], [geom.wheelX, 0.02, -geom.wheelZ],
     ];
     for (const [x, y, z] of pts) {
       ctrl.addWheel(
@@ -164,9 +204,13 @@ export class CarPhysics {
     this.prevVel.set(0, 0, 0);
   }
 
-  /** Upgrade/cargo changes re-derive mass + tire grip on the live body. */
-  setBuild(upgrades: readonly string[], cargoKg: number): void {
-    this.params = carParams(upgrades, cargoKg);
+  /** Upgrade/cargo changes re-derive mass + tire grip on the live body.
+   *  When defId is given, the call applies only if the live body is
+   *  bound to that def (a parked car's build change must not restamp
+   *  the car being driven). */
+  setBuild(upgrades: readonly string[], cargoKg: number, defId?: string): void {
+    if (defId !== undefined && defId !== this.defId) return;
+    this.params = paramsForDef(this.defId, upgrades, cargoKg);
     if (this.chassisCollider) this.chassisCollider.setMass(this.params.massKg);
     if (this.controller) {
       for (let i = 0; i < 4; i++) {
