@@ -110,9 +110,9 @@ export const TRADERS: TraderDef[] = [
     gateText: 'The bench is covered in relay guts. “Help me get this tower talking first,” Kowalski says, not looking up. “Then the bench is yours.”',
     greeting: 'Bench is open. Tech, mods, and things that hum. Mind the solder.',
     offers: [
-      { give: [S('components', 2)], get: S('relay_part', 1), note: 'Capacitors, rebuilt by hand' },
+      { give: [S('wire', 3), S('scrap', 2)], get: S('relay_part', 1), note: 'Capacitors, rebuilt by hand' },
       { give: [S('valuables', 2)], get: S('beacon_cell', 1) },
-      { give: [S('scrap', 4), S('wire', 2)], get: S('components', 1) },
+      { give: [S('relay_part', 1), S('wire', 2)], get: S('beacon_cell', 1), note: 'She assembles cells from capacitor banks' },
       { give: [S('valuables', 2)], get: S('reflex_sight', 1) },
       { give: [S('valuables', 2)], get: S('laser_sight', 1) },
       { give: [S('valuables', 1), S('scrap', 3)], get: S('tool_kit', 1) },
@@ -120,7 +120,7 @@ export const TRADERS: TraderDef[] = [
       { give: [S('scrap', 2)], get: S('gun_oil', 1) },
       // the bench BUYS tech
       { give: [S('relay_part', 1)], get: S('valuables', 1), note: 'She buys relay parts back' },
-      { give: [S('components', 2)], get: S('valuables', 1) },
+      { give: [S('beacon_cell', 1)], get: S('valuables', 2), note: 'She buys cells back — and doesn’t ask where you found one' },
     ],
   },
   {
@@ -153,7 +153,7 @@ export const TRADERS: TraderDef[] = [
       { give: [S('scrap', 3)], get: S('cloth', 2) },
       { give: [S('valuables', 1)], get: S('flare', 2) },
       { give: [S('valuables', 2)], get: S('flare_gun', 1), note: 'Every boat should carry one' },
-      { give: [S('valuables', 2), S('scrap', 4)], get: S('components', 1) },
+      { give: [S('valuables', 2), S('scrap', 4)], get: S('relay_part', 1), note: 'Relay gear, salvaged off a wreck' },
       { give: [S('valuables', 2)], get: S('engine_part', 1), note: 'Outboard-grade, mostly' },
       // the flotilla BUYS salvage — their whole economy
       { give: [S('valuables', 1)], get: S('scrap', 6), note: 'They sell scrap by the armload' },

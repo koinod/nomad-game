@@ -124,8 +124,8 @@ export const ENCLAVE_CACHES: EnclaveCache[] = [
   },
   {
     id: 'enclave_cache_wreck', poiId: 'wreck', dx: -9, dz: 11,
-    signatureItem: 'components',
-    flavor: 'Components in a sealed case, packed like they were expected to be found by someone specific. The case has a combination lock. The lock is open.',
+    signatureItem: 'gun_parts',
+    flavor: 'Machined parts in a sealed case — tolerances too fine for any shop on this island — packed like they were expected to be found by someone specific. The case has a combination lock. The lock is open.',
   },
   {
     id: 'enclave_cache_dune', poiId: 'dune_cache', dx: -6, dz: 9,
@@ -155,7 +155,7 @@ export const WORLD_WIRING_STEPS: string[] = [
   'W3. Trader hooks: talking to an NPC with a traderId opens TraderPanel with that trader (see data/traders.ts + ui/TraderPanel.tsx — panel self-registers from its mount point; the talk action is the only engine touch).',
   'W4. Territory markers: render territory.MAP_MARKERS in the phone World/map tab (label + owner color); no geometry.',
   'W5. Road network: draw ROAD_GRAPH edges as the road splines (road mode = dirt/asphalt strip; bridge/ferry edges render only when the OBX nodes exist). Skulls toll-crew event hook on relay_station→dune_cache.',
-  'W6. Enclave caches: place ENCLAVE_CACHES as locked container interactables (lockpick-gated) at their anchors with signatureItem + generic tech loot; flavor text on open.',
-  'W7. Radio burst: after flag relay_online first set, play ENCLAVE_RADIO_BURST via the dialogue/journal surface and set enclave_burst_heard; q_enclave_burst (quests.ts) completes on that flag (see FIELD REQUEST F4 — quest startsWhen needs a flag-only start, which exists; completion is a reach/collect on the caches — verify in pass).',
+  'W6. Enclave caches: place ENCLAVE_CACHES as locked container interactables (lockpick-gated) at their anchors with signatureItem + generic tech loot; flavor text on open; each registers interact id cache:<cacheId> and fires questEvent(\'interact\', \'cache:<cacheId>\') on open so q_enclave_burst steps complete.',
+  'W7. Radio burst: after flag relay_online first set, play ENCLAVE_RADIO_BURST via the dialogue/journal surface and set enclave_burst_heard — q_enclave_burst starts on that flag (startsWhen {flag} already supported) and completes on the three cache interacts (W6).',
   'W8. Relay mast visual: the relay_station interactable the purge left standing (Priya gate) — confirm its interact id stays poi:relay_switch so q3_clear_relay step s2 keeps completing.',
 ];
