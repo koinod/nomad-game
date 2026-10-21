@@ -3,11 +3,14 @@
 // this barter table, traders/caches roll these loot tables. A dangling
 // id anywhere is a runtime ghost item, so the whole graph gets swept.
 import { describe, it, expect } from 'vitest';
+import * as THREE from 'three';
 import {
   ITEMS, HUSK_LOOT, HUSK_KIND_LOOT, FURNITURE_LOOT, SAFE_LOOT, LOG_LOOT,
   BUSH_LOOT, FIELD_RECIPES, STATION_RECIPES, BARTER_VALUES, barterValueOf,
   BIOME_LOOT_WEIGHT, lootClassFor, weightedChance, rollLoot,
 } from '../data/items';
+import { respawnDaysFor, respawnEligible } from '../game/Interact';
+import { buildFurnitureMesh, applyDisturbed, applyRestored } from '../game/furnitureMeshes';
 
 const has = (id: string) => Object.prototype.hasOwnProperty.call(ITEMS, id);
 
@@ -138,5 +141,53 @@ describe('biome loot weighting (§4.5)', () => {
     i = 0;
     // …but the beach material class isn't ammo's; use no-biome base chance: 0.4 < 0.5 hits
     expect(rollLoot(table, rng)).toEqual([{ itemId: 'ammo_9mm', qty: 2 }]);
+  });
+});
+
+describe('respawn clocks (§4.5)', () => {
+  it('every period sits in sodgame\u2019s 7–21 day band and is deterministic', () => {
+    for (const id of ['c_town_1', 'c_wreck_1', 'n_log_3', 'c_parts_marina', 'c_light_1']) {
+      const d = respawnDaysFor(id);
+      expect(d).toBeGreaterThanOrEqual(7);
+      expect(d).toBeLessThanOrEqual(21);
+      expect(respawnDaysFor(id)).toBe(d);
+    }
+  });
+
+  it('locked safes and guaranteed key-item containers never respawn', () => {
+    const safe = { id: 's1', x: 0, z: 0, locked: true, loot: [{ id: 'valuables', min: 1, max: 2, chance: 0.9 }] };
+    expect(respawnEligible(safe)).toBe(false);
+    const phoneCrate = { id: 'c1', x: 0, z: 0, loot: [{ id: 'phone', min: 1, max: 1, chance: 1 }] };
+    expect(respawnEligible(phoneCrate)).toBe(false);
+    const relayCrate = { id: 'c2', x: 0, z: 0, loot: [{ id: 'relay_part', min: 1, max: 1, chance: 1 }, { id: 'scrap', min: 1, max: 2, chance: 0.7 }] };
+    expect(respawnEligible(relayCrate)).toBe(false);
+    const pantry = { id: 'c3', x: 0, z: 0, loot: [{ id: 'canned_food', min: 1, max: 2, chance: 0.8 }] };
+    expect(respawnEligible(pantry)).toBe(true);
+    const logpile = { id: 'c4', x: 0, z: 0, loot: [{ id: 'wood', min: 2, max: 4, chance: 1 }] };
+    expect(respawnEligible(logpile)).toBe(true); // guaranteed ≠ key item
+  });
+});
+
+describe('disturbed furniture (§4.5 visual)', () => {
+  it('applyDisturbed moves openers + darkens; applyRestored undoes both', () => {
+    const fridge = buildFurnitureMesh('fridge');
+    const doorOf = () => fridge.children.find((c) => c.name === 'opener')!;
+    const closedY = doorOf().rotation.y;
+    applyDisturbed(fridge);
+    expect(doorOf().rotation.y).not.toBe(closedY);
+    const mesh = fridge.children.find((c) => c instanceof THREE.Mesh) as THREE.Mesh;
+    const dark = (mesh.material as THREE.MeshStandardMaterial).color.getHex();
+    applyRestored(fridge);
+    expect(doorOf().rotation.y).toBe(closedY);
+    const fresh = buildFurnitureMesh('fridge');
+    const freshMesh = fresh.children.find((c) => c instanceof THREE.Mesh) as THREE.Mesh;
+    const freshHex = (freshMesh.material as THREE.MeshStandardMaterial).color.getHex();
+    expect(freshHex).not.toBe(dark); // disturbing really did darken it
+    expect((mesh.material as THREE.MeshStandardMaterial).color.getHex()).toBe(freshHex); // restored == pristine
+    // idempotent: disturbing twice doesn't double-swing
+    applyDisturbed(fridge);
+    const once = doorOf().rotation.y;
+    applyDisturbed(fridge);
+    expect(doorOf().rotation.y).toBe(once);
   });
 });

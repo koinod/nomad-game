@@ -7,7 +7,7 @@ import { ITEMS, HUSK_LOOT, HUSK_KIND_LOOT, LOG_LOOT, BUSH_LOOT, rollLoot, weight
 import { DESIGNED_RECRUITS, SURVIVOR_LOOKS } from '../data/survivors';
 import { CLAIMABLE } from '../data/base';
 import { buildGroundMesh } from './weaponMeshes';
-import { buildFurnitureMesh, FURNITURE_LABEL, type FurnitureKind } from './furnitureMeshes';
+import { buildFurnitureMesh, applyDisturbed, applyRestored, FURNITURE_LABEL, type FurnitureKind } from './furnitureMeshes';
 import { sfx } from '../systems/audio';
 import { CAMPFIRE_SPOTS, biomeAt } from './World';
 
@@ -111,6 +111,19 @@ export class InteractSystem {
   // hold-to-search bookkeeping (Game drives the timer)
   private containersById = new Map<string, ContainerDef>();
   private searchedContainers = new Set<string>();
+  // respawn clocks (§4.5): when an eligible container was emptied (abs
+  // game minutes) and which have since restocked. Session-scoped —
+  // cross-session clocks need lootedAt timestamps in the save
+  // (WorldDiff.lootedAt — FIELD REQUEST to Lane 5).
+  private lootedAtMin = new Map<string, number>();
+  private respawnedIds = new Set<string>();
+  private freshLabels = new Map<string, string>();
+  private respawnSweep = 0;
+
+  private absMinutes(): number {
+    const st = useGameStore.getState();
+    return st.daysElapsed * 1440 + st.timeMinutes;
+  }
 
   containerDef(id: string): ContainerDef | undefined {
     return this.containersById.get(id);
@@ -126,7 +139,7 @@ export class InteractSystem {
       const dz = c.z - z;
       if (dx * dx + dz * dz > r * r) continue;
       total++;
-      if (this.hooks.isLooted(c.id)) looted++;
+      if (this.hooks.isLooted(c.id) && !this.respawnedIds.has(c.id)) looted++;
     }
     return { total, looted };
   }
@@ -172,6 +185,12 @@ export class InteractSystem {
       this.crateMeshes.set(c.id, mesh);
       this.containersById.set(c.id, c);
       this.emptyLabels.set(c.id, c.label ? c.label.replace('Search', 'Empty') : 'Empty container');
+      this.freshLabels.set(c.id, c.label ?? 'Search container');
+      // a container a previous session emptied starts its respawn clock
+      // now — the island forgets slowly, and this is when you showed up
+      if (hooks.isLooted(c.id) && respawnEligible(c)) {
+        this.lootedAtMin.set(c.id, this.absMinutes());
+      }
       if (c.meshKind) this.furnitureIds.add(c.id);
       this.interactables.push({
         id: c.id,
@@ -181,14 +200,18 @@ export class InteractSystem {
         use: () => {
           // fresh state: the constructor's `s` snapshot goes stale after any set()
           const st = useGameStore.getState();
-          if (hooks.isLooted(c.id)) {
+          // a restocked container bypasses the save's looted flag and
+          // re-rolls fresh — the respawn clock already vouched for it
+          const restocked = this.respawnedIds.has(c.id);
+          if (restocked) this.respawnedIds.delete(c.id);
+          if (hooks.isLooted(c.id) && !restocked) {
             st.addToast('Nothing left here.');
             return;
           }
           // loot preview: roll once, stash it, show the panel — take what you want.
           // §4.5: the container's biome weights each entry's class, so the
           // same crate table plays differently in the forest vs in town.
-          if (!st.lootStash[c.id]) {
+          if (restocked || !st.lootStash[c.id]) {
             const items = rollLoot(c.loot, hooks.rng, {
               resourceMult: hooks.resourceMult,
               biome: biomeAt(c.x, c.z),
@@ -472,15 +495,41 @@ export class InteractSystem {
   }
 
   /** Mark a container fully looted: hide the mesh (crates only — furniture
-   *  stays), relabel the prompt. */
+   *  stays, but shows its disturbed state), relabel the prompt, and start
+   *  the container's respawn clock if it has one. */
   setContainerEmptied(id: string): void {
     this.hooks.markLooted(id);
+    const def = this.containersById.get(id);
+    if (def && respawnEligible(def)) {
+      this.lootedAtMin.set(id, this.absMinutes());
+    }
     if (!this.furnitureIds.has(id)) {
       const m = this.crateMeshes.get(id);
       if (m) m.visible = false;
+    } else {
+      const m = this.crateMeshes.get(id);
+      if (m) applyDisturbed(m); // searched-out furniture reads searched-out
     }
     const it = this.interactables.find((i) => i.id === id);
     if (it) it.label = this.emptyLabels.get(id) ?? 'Empty container';
+  }
+
+  /** Respawn sweep: restock every container whose clock has run out —
+   *  mesh back, furniture restored, fresh label, loot re-rolls on open. */
+  private sweepRespawns(): void {
+    const now = this.absMinutes();
+    for (const [id, at] of this.lootedAtMin) {
+      if (now - at < respawnDaysFor(id) * 1440) continue;
+      this.lootedAtMin.delete(id);
+      this.respawnedIds.add(id);
+      const mesh = this.crateMeshes.get(id);
+      if (mesh) {
+        if (this.furnitureIds.has(id)) applyRestored(mesh);
+        mesh.visible = true;
+      }
+      const it = this.interactables.find((i) => i.id === id);
+      if (it) it.label = this.freshLabels.get(id) ?? 'Search container';
+    }
   }
 
   /** Visible ground pickup with its own mesh. One-shot: taken once. */
@@ -518,6 +567,12 @@ export class InteractSystem {
     for (const mesh of this.pickupMeshes.values()) {
       mesh.position.y = (mesh.userData.baseY as number) + Math.sin(elapsed * 2 + (mesh.userData.phase as number)) * 0.06;
       mesh.rotation.y += _dt * 0.4;
+    }
+    // respawn clocks tick on game time; a 2s real-time sweep is plenty
+    this.respawnSweep += _dt;
+    if (this.respawnSweep >= 2) {
+      this.respawnSweep = 0;
+      this.sweepRespawns();
     }
   }
 
@@ -579,6 +634,28 @@ export class InteractSystem {
     }
     return best;
   }
+}
+
+/**
+ * Respawn period in game days for a container — sodgame's 7–21d band
+ * (POIS_FACTIONS_VEHICLES / GAP_AUDIT), hashed per id so the island
+ * forgets unevenly: one crate is back in a week, its twin takes three.
+ */
+export function respawnDaysFor(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return 7 + (h % 15);
+}
+
+/**
+ * Which containers get a respawn clock at all. Locked one-shots (safes)
+ * never restock — their permanence is the reward structure — and a
+ * container carrying a guaranteed key item (the phone, relay parts)
+ * must never duplicate its quest item.
+ */
+export function respawnEligible(c: ContainerDef): boolean {
+  if (c.locked) return false;
+  return !c.loot.some((e) => e.chance >= 1 && ITEMS[e.id]?.category === 'key');
 }
 
 /** Container placement. Positions are offsets around their POI. */
