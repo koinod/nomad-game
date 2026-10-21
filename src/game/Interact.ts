@@ -9,6 +9,7 @@ import { CLAIMABLE } from '../data/base';
 import { buildGroundMesh } from './weaponMeshes';
 import { buildFurnitureMesh, applyDisturbed, applyRestored, FURNITURE_LABEL, type FurnitureKind } from './furnitureMeshes';
 import { sfx } from '../systems/audio';
+import { AlarmRegistry, type AlarmDef } from './alarm';
 import { CAMPFIRE_SPOTS, biomeAt } from './World';
 
 export interface LootEntry {
@@ -29,6 +30,10 @@ export interface ContainerDef {
   rotY?: number;
   /** Locked (safes): needs a lockpick to start searching. */
   locked?: boolean;
+  /** Alarm wiring (§4.4): this container stands at an alarmed POI, and
+   *  if `major`, opening it crosses the tripwire (unless disarmed). */
+  alarmPoiId?: string;
+  major?: boolean;
   /** Seconds of hold-to-search before the loot panel opens. */
   searchTime?: number;
   /** Explicit placement height (upstairs furniture in two-story houses);
@@ -50,6 +55,8 @@ export interface InteractHooks {
   hostilesNear?: (x: number, z: number, r: number) => number; // base-claim gate
   /** World Y of the lighthouse lamp room floor — the beacon lives there now. */
   lampRoomY?: number;
+  /** Extra alarm definitions (§4.4) beyond the spec's flagged set. */
+  alarmDefs?: AlarmDef[];
 }
 
 export interface Interactable {
@@ -102,6 +109,10 @@ function buildPickupMesh(itemId: string, qty: number): THREE.Group {
 
 export class InteractSystem {
   readonly interactables: Interactable[] = [];
+  /** POI alarm engine (§4.4): trips queue events here for Game to
+   *  execute (noise burst + scout pair); flags mirror each trip for
+   *  consumers that only read the store. */
+  readonly alarms = new AlarmRegistry();
   private crateMeshes = new Map<string, THREE.Object3D>();
   private emptyLabels = new Map<string, string>();
   private furnitureIds = new Set<string>(); // furniture stays visible when empty
@@ -161,6 +172,10 @@ export class InteractSystem {
     this.hooks = hooks;
     const s = useGameStore.getState();
     const at = (id: string): [number, number] => pois[id] ?? [0, 0];
+    // the alarm registry starts with the spec's flagged set; world
+    // wiring can register more (or re-register to override) via hooks
+    this.alarms.registerAll(AlarmRegistry.specDefs());
+    if (hooks.alarmDefs) this.alarms.registerAll(hooks.alarmDefs);
 
     // ---- containers ----
     const crateMat = new THREE.MeshStandardMaterial({ color: 0x6e5a3e, roughness: 1 });
@@ -208,6 +223,19 @@ export class InteractSystem {
             st.addToast('Nothing left here.');
             return;
           }
+          // §4.4 tripwire: opening the POI's major container crosses it.
+          // A lockpick doesn't help you here — only the disarm box does.
+          // Interact applies the toast/rep/flag; the 60m noise burst and
+          // the scout pair are Game's to fire (registry event queue).
+          if (c.alarmPoiId && c.major) {
+            const ev = this.alarms.trip(c.alarmPoiId, 'container_trip');
+            if (ev) {
+              st.addToast(ev.effect.toast);
+              sfx.play('beacon', { volume: 0.8 });
+              if (ev.effect.factionRep) st.addRep(ev.effect.factionRep.faction, ev.effect.factionRep.delta);
+              st.setFlag(`alarm_tripped:${c.alarmPoiId}`);
+            }
+          }
           // loot preview: roll once, stash it, show the panel — take what you want.
           // §4.5: the container's biome weights each entry's class, so the
           // same crate table plays differently in the forest vs in town.
@@ -228,6 +256,49 @@ export class InteractSystem {
           sfx.play('ui', { volume: 0.5 });
         },
       });
+    }
+
+    // ---- alarm boxes (§4.4): one per alarmed POI, by its first wired
+    // container. The 30s disarm timer is a hold interaction Game routes
+    // (DISARM_SECONDS in alarm.ts); the requirements + state are the
+    // engine's, checked here at the box.
+    {
+      const boxAt = new Map<string, ContainerDef>();
+      for (const c of containers) {
+        if (c.alarmPoiId && !boxAt.has(c.alarmPoiId)) boxAt.set(c.alarmPoiId, c);
+      }
+      for (const [poiId, c] of boxAt) {
+        const pos = new THREE.Vector3(c.x + 0.9, hooks.groundY(c.x + 0.9, c.z + 0.9), c.z + 0.9);
+        this.interactables.push({
+          id: `alarmbox:${poiId}`,
+          kind: 'switch',
+          pos,
+          label: 'Alarm box',
+          use: () => {
+            const st = useGameStore.getState();
+            const check = this.alarms.canDisarm(
+              poiId,
+              st.countItem('tool_kit') > 0,
+              st.skills?.mechanics?.level ?? 0,
+            );
+            if (!check.ok) {
+              st.addToast(
+                check.reason === 'no_toolkit' ? 'You need a tool kit to open the alarm box.'
+                : check.reason === 'low_skill' ? 'Disarming this needs Mechanics 2.'
+                : check.reason === 'not_armed' && this.alarms.state(poiId) === 'tripped' ? 'Too late — it\u2019s already blown.'
+                : 'The alarm is already dark.',
+              );
+              sfx.play('ui', { volume: 0.5 });
+              return;
+            }
+            if (this.alarms.disarm(poiId)) {
+              st.addToast('Alarm disarmed. The POI stays quiet.');
+              st.setFlag(`alarm_disarmed:${poiId}`);
+              sfx.play('switch', { volume: 0.8 });
+            }
+          },
+        });
+      }
     }
 
     // ---- campfires (safe points + rest) ----

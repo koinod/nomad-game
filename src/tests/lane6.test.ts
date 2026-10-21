@@ -11,6 +11,7 @@ import {
 } from '../data/items';
 import { respawnDaysFor, respawnEligible } from '../game/Interact';
 import { buildFurnitureMesh, applyDisturbed, applyRestored } from '../game/furnitureMeshes';
+import { AlarmRegistry, DISARM_SECONDS, DISARM_SKILL_LEVEL } from '../game/alarm';
 
 const has = (id: string) => Object.prototype.hasOwnProperty.call(ITEMS, id);
 
@@ -189,5 +190,48 @@ describe('disturbed furniture (§4.5 visual)', () => {
     const once = doorOf().rotation.y;
     applyDisturbed(fridge);
     expect(doorOf().rotation.y).toBe(once);
+  });
+});
+
+describe('alarm engine (§4.4)', () => {
+  it('an active armed alarm trips once, with the spec\u2019s full effect', () => {
+    const r = new AlarmRegistry();
+    r.register({ poiId: 'military_checkpoint', mode: 'active', faction: 'remnants' });
+    const ev = r.trip('military_checkpoint', 'container_trip');
+    expect(ev).not.toBeNull();
+    expect(ev!.effect.noiseRadius).toBe(60);
+    expect(ev!.effect.spawn).toBe('scout_pair');
+    expect(ev!.effect.factionRep).toEqual({ faction: 'remnants', delta: -5 });
+    expect(r.state('military_checkpoint')).toBe('tripped');
+    expect(r.events).toHaveLength(1);
+    expect(r.trip('military_checkpoint', 'forced_entry')).toBeNull(); // never twice
+  });
+
+  it('silent POIs and factionless POIs trip without a rep hit', () => {
+    const r = new AlarmRegistry();
+    r.register({ poiId: 'strip_mall', mode: 'active' });
+    r.register({ poiId: 'quiet_place', mode: 'silent' });
+    expect(r.trip('quiet_place', 'container_trip')).toBeNull();
+    expect(r.state('quiet_place')).toBe('armed');
+    const ev = r.trip('strip_mall', 'forced_entry');
+    expect(ev!.effect.factionRep).toBeUndefined();
+    expect(r.trip('nowhere', 'container_trip')).toBeNull();
+  });
+
+  it('disarm demands the kit and the skill, before the trip only', () => {
+    const r = new AlarmRegistry();
+    r.register({ poiId: 'outpost', mode: 'active' });
+    expect(DISARM_SECONDS).toBe(30);
+    expect(DISARM_SKILL_LEVEL).toBe(2);
+    expect(r.canDisarm('outpost', false, 5)).toEqual({ ok: false, reason: 'no_toolkit' });
+    expect(r.canDisarm('outpost', true, 1)).toEqual({ ok: false, reason: 'low_skill' });
+    expect(r.canDisarm('outpost', true, 2)).toEqual({ ok: true });
+    expect(r.disarm('outpost')).toBe(true);
+    expect(r.trip('outpost', 'container_trip')).toBeNull(); // dark stays dark
+    expect(r.canDisarm('outpost', true, 5)).toEqual({ ok: false, reason: 'not_armed' });
+    r.reset('outpost');
+    expect(r.state('outpost')).toBe('armed');
+    r.trip('outpost', 'container_trip');
+    expect(r.disarm('outpost')).toBe(false); // a blown alarm can't be un-blown
   });
 });
