@@ -801,11 +801,24 @@ export function buildHandMesh(itemId: string, finish?: string, mods: readonly st
   return g;
 }
 
-/** Which item is "in hand" — melee wins, then ranged, then any holdable tool. */
+/** Which item is "in hand". Inventory v2: the SELECTED weapon slot
+ *  is what's held (keys 1/2/3) — the hand mesh follows it. The legacy
+ *  melee-then-ranged order remains as the fallback for callers that
+ *  pass only the projections. */
 export function activeHandItemId(
-  equipped: { melee: string | null; ranged: string | null },
+  equipped: {
+    melee: string | null; ranged: string | null;
+    primary?: string | null; secondary?: string | null; tertiary?: string | null;
+    activeWeapon?: 'primary' | 'secondary' | 'tertiary';
+  },
   inventory: { uid: string; itemId: string }[],
 ): string | null {
+  if (equipped.activeWeapon) {
+    const heldUid = equipped[equipped.activeWeapon];
+    const heldIt = heldUid ? inventory.find((i) => i.uid === heldUid) : undefined;
+    if (heldIt) return heldIt.itemId;
+    if (heldUid) return null; // slot selected but its weapon is gone — bare hands
+  }
   const meleeIt = equipped.melee ? inventory.find((i) => i.uid === equipped.melee) : undefined;
   if (meleeIt) return meleeIt.itemId;
   const rangedIt = equipped.ranged ? inventory.find((i) => i.uid === equipped.ranged) : undefined;

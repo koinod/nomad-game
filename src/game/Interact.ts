@@ -2,6 +2,13 @@
 // E within 3m picks the nearest interactable.
 
 import * as THREE from 'three';
+
+/** THE interaction ranges (one source): the E-prompt radius for world
+ *  interactables/containers, and the vehicle-storage radius (T key /
+ *  openStorageNear). The inventory NEARBY list reads the same numbers
+ *  — what the list shows is exactly what the world prompts reach. */
+export const INTERACT_RADIUS_M = 3;
+export const STORAGE_RADIUS_M = 3.6;
 import { useGameStore } from '../store/gameStore';
 import { ITEMS, HUSK_LOOT, HUSK_KIND_LOOT, LOG_LOOT, BUSH_LOOT, rollLoot, weightedChance } from '../data/items';
 import { DESIGNED_RECRUITS, SURVIVOR_LOOKS, NPC_LOOKS, type SurvivorLook } from '../data/survivors';
@@ -181,6 +188,27 @@ export class InteractSystem {
       if (this.hooks.isLooted(c.id) && !this.respawnedIds.has(c.id)) looted++;
     }
     return { total, looted };
+  }
+
+  /** Inventory v2 NEARBY: every searchable container within r meters,
+   *  with the same looted rule the census uses. Feeds the inventory
+   *  deck's NEARBY list (containers.ts nearbyFromSources assembles). */
+  containersWithin(x: number, z: number, r: number): { id: string; label: string; x: number; z: number; looted: boolean; locked: boolean }[] {
+    const out: { id: string; label: string; x: number; z: number; looted: boolean; locked: boolean }[] = [];
+    for (const c of this.containersById.values()) {
+      const dx = c.x - x;
+      const dz = c.z - z;
+      if (dx * dx + dz * dz > r * r) continue;
+      out.push({
+        id: c.id,
+        label: c.label ?? 'Container',
+        x: c.x,
+        z: c.z,
+        looted: this.hooks.isLooted(c.id) && !this.respawnedIds.has(c.id),
+        locked: !!c.locked,
+      });
+    }
+    return out;
   }
 
   isSearched(id: string): boolean {

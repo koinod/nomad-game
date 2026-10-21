@@ -74,10 +74,13 @@ export const ITEMS: Record<string, ItemDef> = {
   pack_t1: {
     id: 'pack_t1', name: 'Day pack', category: 'pack', weight: 0.8, slots: 2, stack: 1,
     desc: 'A sturdy day pack.', carryBonus: 8, packSlots: 4,
+    // inventory v2: the pack IS a container — its grid is its contents
+    garmentSlot: 'backpack', container: { cols: 8, rows: 7, kg: 30 },
   },
   pack_t2: {
     id: 'pack_t2', name: 'Rigger pack', category: 'pack', weight: 1.2, slots: 2, stack: 1,
     desc: 'A rigger’s pack with a reinforced frame.', carryBonus: 15, packSlots: 8,
+    garmentSlot: 'backpack', container: { cols: 8, rows: 9, kg: 45 },
   },
   flare: {
     id: 'flare', name: 'Road flare', category: 'tool', weight: 0.3, slots: 1, stack: 4,
@@ -353,10 +356,13 @@ export const ITEMS: Record<string, ItemDef> = {
     // Mitigation still also runs while-carried (damagePlayer's rule).
     id: 'armored_vest', name: 'Armored vest', category: 'armor', armorSlot: 'torso', weight: 2.4, slots: 2, stack: 1,
     desc: 'Kevlar panels under worn leather. Mitigates 25% of damage while carried.', armor: 0.25,
+    // inventory v2: the vest is a worn container (pouches on the carrier)
+    garmentSlot: 'vest', container: { cols: 3, rows: 2, kg: 5 },
   },
   riot_helmet: {
     id: 'riot_helmet', name: 'Riot helmet', category: 'armor', armorSlot: 'head', weight: 1.1, slots: 1, stack: 1,
     desc: 'Hard shell, cracked visor. Mitigates 15% of damage while carried.', armor: 0.15,
+    garmentSlot: 'head',
   },
   // armor completion (SYSTEMS_SPEC §2.5): torso T3 + the legs slot.
   // RE-CATEGORIZED at merge (Lane 5 field contract landed: 'armor'
@@ -365,10 +371,35 @@ export const ITEMS: Record<string, ItemDef> = {
   plate_carrier: {
     id: 'plate_carrier', name: 'Plate carrier', category: 'armor', armorSlot: 'torso', weight: 3.4, slots: 2, stack: 1,
     desc: 'Ceramic plates in a real carrier. Mitigates 40% of damage while carried.', armor: 0.40,
+    garmentSlot: 'vest', container: { cols: 4, rows: 2, kg: 8 },
   },
   shin_guards: {
     id: 'shin_guards', name: 'Shin guards', category: 'armor', armorSlot: 'legs', weight: 0.7, slots: 1, stack: 1,
     desc: 'Molded guards, straps still good. Mitigates 10% of damage while carried.', armor: 0.10,
+    garmentSlot: 'pants',
+  },
+  // ---- inventory v2 garments + portable containers (Ian 2026-10-21) ----
+  // The character's storage is what they wear: jacket, vest, pants,
+  // backpack — each a container with its own grid — plus pockets.
+  field_jacket: {
+    id: 'field_jacket', name: 'Field jacket', category: 'armor', armorSlot: 'torso', weight: 1.4, slots: 2, stack: 1,
+    desc: 'Canvas field jacket, four bellows pockets. Mitigates 5% of damage while carried.', armor: 0.05,
+    garmentSlot: 'jacket', container: { cols: 4, rows: 3, kg: 6 },
+  },
+  cargo_pants: {
+    id: 'cargo_pants', name: 'Cargo pants', category: 'armor', armorSlot: 'legs', weight: 0.9, slots: 2, stack: 1,
+    desc: 'Ripstop cargos with thigh pockets. Mitigates 2% of damage while carried.', armor: 0.02,
+    garmentSlot: 'pants', container: { cols: 3, rows: 2, kg: 4 },
+  },
+  hard_case: {
+    id: 'hard_case', name: 'Weapon case', category: 'tool', weight: 1.6, slots: 3, stack: 1,
+    desc: 'Foam-lined hard case. Opens into its own grid — guns and gear ride inside.',
+    container: { cols: 5, rows: 2, kg: 10 },
+  },
+  ammo_can: {
+    id: 'ammo_can', name: 'Ammo can', category: 'material', weight: 1.1, slots: 2, stack: 1,
+    desc: 'Steel ammo can, seal still good. Opens into its own grid.',
+    container: { cols: 3, rows: 2, kg: 12 },
   },
   // the only blueprint in the game (SYSTEMS_SPEC §4.3). RE-CATEGORIZED
   // at merge: Lane 5 landed 'blueprint' in ItemCategory.
@@ -765,11 +796,14 @@ export const FURNITURE_LOOT: Record<string, Record<'camp' | 'suburban', HuskLoot
     camp: [
       { id: 'cloth', min: 1, max: 2, chance: 0.6 },
       { id: 'bandage', min: 1, max: 1, chance: 0.3 },
+      { id: 'cargo_pants', min: 1, max: 1, chance: 0.12 },
     ],
     suburban: [
       { id: 'cloth', min: 1, max: 3, chance: 0.75 },
       { id: 'bandage', min: 1, max: 2, chance: 0.4 },
       { id: 'ammo_9mm', min: 2, max: 6, chance: 0.2 },
+      { id: 'field_jacket', min: 1, max: 1, chance: 0.14 },
+      { id: 'cargo_pants', min: 1, max: 1, chance: 0.14 },
     ],
   },
   bookshelf: {
@@ -804,6 +838,8 @@ export const FURNITURE_LOOT: Record<string, Record<'camp' | 'suburban', HuskLoot
       { id: 'cloth', min: 1, max: 2, chance: 0.45 },
       { id: 'cleaning_kit', min: 1, max: 1, chance: 0.16 },
       { id: 'gun_oil', min: 1, max: 2, chance: 0.22 },
+      { id: 'ammo_can', min: 1, max: 1, chance: 0.1 },
+      { id: 'hard_case', min: 1, max: 1, chance: 0.07 },
     ],
   },
   barrel: {
@@ -938,6 +974,7 @@ const FOOTPRINTS: Record<string, [number, number]> = {
   fuel_can: [2, 2], tire: [2, 2], engine_part: [2, 2], armor_plate: [2, 2], tool_kit: [2, 2],
   car_battery: [2, 1], wood: [2, 1], torch: [2, 1], riot_helmet: [2, 1],
   armored_vest: [2, 2], pack_t1: [2, 2], pack_t2: [3, 2],
+  field_jacket: [2, 2], cargo_pants: [2, 1], hard_case: [3, 2], ammo_can: [2, 2],
 };
 for (const [id, [w, h]] of Object.entries(FOOTPRINTS)) {
   if (ITEMS[id]) {

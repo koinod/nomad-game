@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { emptyEquipped } from '../store/equipment';
 import * as THREE from 'three';
 
 // The procedural body build needs a DOM canvas (textures); the state
@@ -299,7 +300,7 @@ describe('migration chain: old saves restore the fleet they knew', () => {
       playSeconds: 5400,
       player: { pos: [1, 2, 3], hp: 80 },
       inventory: [],
-      equipped: { melee: null, ranged: null, pack: null },
+      equipped: emptyEquipped(),
       hotbar: [null, null, null],
       quests: [],
       doneQuests: [],

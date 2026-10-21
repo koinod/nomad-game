@@ -23,6 +23,7 @@ vi.mock('../systems/save', () => ({
 }));
 
 import { craftQueueBridge, useGameStore } from '../store/gameStore';
+import { emptyEquipped } from '../store/equipment';
 
 const JOBS: CraftJob[] = [
   { uid: 'job_1_bandage', recipeId: 'bandage', startedAtMin: 1800, bankedMin: 0, durationMin: 30, status: 'running' },
@@ -39,7 +40,7 @@ function minimalSnapshot(patch: Partial<SaveSnapshot> = {}): SaveSnapshot {
     playSeconds: 3000,
     player: { pos: [1, 2, 3], hp: 77 },
     inventory: [],
-    equipped: { melee: null, ranged: null, pack: null },
+    equipped: emptyEquipped(),
     hotbar: [null, null, null, null],
     quests: [],
     doneQuests: [],

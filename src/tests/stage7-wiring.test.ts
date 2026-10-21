@@ -4,6 +4,7 @@
 // - item 4 (W6): Enclave cache container defs + quest targets.
 import { beforeEach, describe, expect, it } from 'vitest';
 import { useGameStore } from '../store/gameStore';
+import { emptyEquipped } from '../store/equipment';
 import { ITEMS } from '../data/items';
 import { QUESTS } from '../data/quests';
 import { ENCLAVE_CACHES, ENCLAVE_RADIO_BURST, ROAD_GRAPH, NPC_PLACEMENTS } from '../data/worldWiring';
@@ -40,28 +41,32 @@ describe('stage 7 item 10 — legacy armor', () => {
         { uid: 'p1', itemId: 'plate_carrier', qty: 1 },
         { uid: 'l1', itemId: 'shin_guards', qty: 1 },
       ],
-      equipped: { melee: null, ranged: null, pack: null },
+      equipped: emptyEquipped(),
       toasts: [],
     });
   });
 
-  it('equipUid routes armor into its body slot', () => {
+  // INVENTORY V2 (Ian 2026-10-21): the armor slots are GONE — armor
+  // IS the worn-garment class now. Torso armor equips into the VEST
+  // garment slot, head armor into HEAD, leg armor into PANTS, and
+  // swapping a garment returns the old one to a grid.
+  it('equipUid routes armor into its garment slot', () => {
     const s = useGameStore.getState();
     s.equipUid('v1');
-    expect(useGameStore.getState().equipped.armorTorso).toBe('v1');
+    expect(useGameStore.getState().equipped.vest).toBe('v1');
     s.equipUid('h1');
-    expect(useGameStore.getState().equipped.armorHead).toBe('h1');
-    s.equipUid('p1'); // same slot as the vest — replaces it
-    expect(useGameStore.getState().equipped.armorTorso).toBe('p1');
+    expect(useGameStore.getState().equipped.head).toBe('h1');
+    s.equipUid('p1'); // same garment slot as the vest — swaps with it
+    expect(useGameStore.getState().equipped.vest).toBe('p1');
     s.equipUid('l1');
-    expect(useGameStore.getState().equipped.armorLegs).toBe('l1');
+    expect(useGameStore.getState().equipped.pants).toBe('l1');
   });
 
-  it('unequipSlot clears a worn armor slot', () => {
+  it('unequipSlot clears a worn garment slot', () => {
     const s = useGameStore.getState();
     s.equipUid('v1');
-    s.unequipSlot('armorTorso');
-    expect(useGameStore.getState().equipped.armorTorso ?? null).toBeNull();
+    s.unequipSlot('vest');
+    expect(useGameStore.getState().equipped.vest ?? null).toBeNull();
   });
 });
 

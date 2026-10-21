@@ -112,6 +112,15 @@ export type ItemCategory =
   // Lane 6 codes its catalog re-categorization against these.
   | 'armor' | 'blueprint';
 
+// ---------- equipment model (inventory v2) ----------
+// Weapon slots: a slotted weapon LEAVES every grid and lives in its
+// slot; keys 1/2/3 select the slot; the held weapon is the selected
+// slot. Worn garments: the character's storage is what they wear —
+// each worn garment instance's `contents` are its grid.
+export type WeaponSlotId = 'primary' | 'secondary' | 'tertiary';
+export type GarmentSlotId = 'head' | 'jacket' | 'vest' | 'pants' | 'backpack';
+export type SlotId = WeaponSlotId | GarmentSlotId;
+
 export interface ItemDef {
   id: string;
   name: string;
@@ -159,6 +168,16 @@ export interface ItemDef {
   armorSlot?: 'head' | 'torso' | 'legs'; // armor: body slot it protects
   barterValue?: number; // trader price in "value" units (Lane 6 §3.5 anchors)
   skillReq?: { skill: SkillId; level: number }; // crafting gate (§4.2/§6.1)
+  // ---- inventory v2 (Unturned × Tarkov hybrid, Ian 2026-10-21) ----
+  // A container-capable item: instances carry `contents` (their own
+  // grid). cols/rows = the grid; kg = max weight of CONTENTS (the
+  // container's own weight is separate). Packs author this too — it
+  // supersedes packGridDims for the deck (kept in sync by hand).
+  container?: { cols: number; rows: number; kg: number };
+  // The worn-garment slot this item equips into. Armor IS the garment
+  // class now: vest = torso armor, pants = leg armor, jacket = torso
+  // layer. Absent = derive from category/armorSlot (see equipment.ts).
+  garmentSlot?: GarmentSlotId;
 }
 
 export interface InvItem {
@@ -175,18 +194,61 @@ export interface InvItem {
   gx?: number; // grid column
   gy?: number; // grid row
   rot?: boolean; // footprint rotated 90°
+  // ---- inventory v2 ----
+  // Container instances carry their contents (Tarkov rule: the grid
+  // travels with the item — worn, stored, or dropped). Contents ride
+  // the v3 save the same way gx/gy do: optional, stored as-is.
+  contents?: InvItem[];
+  // Top-level loose location. Only 'pockets' exists: every other
+  // carried item lives inside a container instance's contents, is
+  // worn, or is slotted. Absent on a top-level item that no slot
+  // references = legacy/loose (normalization assigns it a home).
+  loc?: 'pockets';
 }
 
 export interface Equipped {
-  melee: string | null; // uid
-  ranged: string | null; // uid
-  pack: string | null; // uid
-  // parallel cycle field contract (SYSTEMS_SPEC §1.3): worn-armor slots.
-  // OPTIONAL so every pre-cycle save and literal stays valid untouched;
-  // undefined and null both mean "nothing worn there".
-  armorHead?: string | null; // uid
-  armorTorso?: string | null; // uid
-  armorLegs?: string | null; // uid
+  // WEAPON SLOTS (canonical) — uid of the slotted weapon instance.
+  primary: string | null;
+  secondary: string | null;
+  tertiary: string | null;
+  // The selected weapon slot — the held weapon. Keys 1/2/3.
+  activeWeapon: WeaponSlotId;
+  // WORN GARMENTS (canonical) — uid of the worn garment instance.
+  // Armor is the garment class: vest = torso, pants = legs.
+  head: string | null;
+  jacket: string | null;
+  vest: string | null;
+  pants: string | null;
+  backpack: string | null;
+  // ENGINE PROJECTIONS — derived by the store from the weapon slots
+  // on every mutation (syncWeaponProjections in equipment.ts), never
+  // set directly: the slotted melee / ranged weapon uids. Player and
+  // Combat read these exactly as they read the old two-slot model.
+  melee: string | null;
+  ranged: string | null;
+}
+
+/** Pre-v2 equipped shape, still found in existing saves. */
+export interface LegacyEquipped {
+  melee?: string | null;
+  ranged?: string | null;
+  pack?: string | null;
+  armorHead?: string | null;
+  armorTorso?: string | null;
+  armorLegs?: string | null;
+}
+
+/** One entry in the inventory NEARBY list (inventory v2): world
+ *  containers and vehicle storage within interaction radius. */
+export interface NearbyEntry {
+  kind: 'vehicle' | 'container';
+  uid: string; // vehicle def uid, or world container id
+  label: string;
+  dist: number; // meters, one decimal
+  looted?: boolean; // containers: emptied already
+  locked?: boolean; // containers: needs a lockpick
+  usedKg?: number; // vehicles: storage load
+  capKg?: number; // vehicles: storage capacity
 }
 
 // ---------- quests ----------

@@ -63,7 +63,13 @@ export function migrate(record: RawSaveRecord): SaveSnapshot {
     if (s.phoneUnlocked === undefined) s.phoneUnlocked = false;
     if (s.hotbar === undefined) s.hotbar = [null, null, null];
     if (s.equipped === undefined)
-      s.equipped = { melee: null, ranged: null, pack: null };
+      // inventory v2 shape; older records keep their legacy fields and
+      // are unified by the store's load migration (migrateEquipped).
+      s.equipped = {
+        primary: null, secondary: null, tertiary: null, activeWeapon: 'primary',
+        head: null, jacket: null, vest: null, pants: null, backpack: null,
+        melee: null, ranged: null,
+      };
     if (s.seed === undefined) s.seed = 0;
     s.version = 1;
   }

@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { ITEMS } from '../data/items';
 import { useGameStore } from '../store/gameStore';
+import { walkCarried } from '../store/containers';
 import { sfx } from '../systems/audio';
 import type { HuskManager } from './Husks';
 import { modSpreadMult } from '../data/mods';
@@ -250,7 +251,7 @@ export function tryRanged(h: CombatHooks): RangedResult {
     }
     if (inst) s.setLoaded(inst.uid, loaded - 1);
   } else {
-    const ammoUid = s.inventory.find((i) => i.itemId === def.ammoId)?.uid;
+    const ammoUid = walkCarried(s.inventory).find((i) => i.itemId === def.ammoId)?.uid;
     if (!ammoUid) {
       useGameStore.getState().addToast('No ammo.');
       sfx.play('dryfire', { volume: 0.7 });

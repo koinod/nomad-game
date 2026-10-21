@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { FINISHES, MODS, finishDef, type ModSlot } from '../data/mods';
 import { ITEMS } from '../data/items';
 import { useGameStore } from '../store/gameStore';
+import { emptyEquipped } from '../store/equipment';
 
 const SLOTS: ModSlot[] = ['optic', 'muzzle', 'magazine', 'underbarrel'];
 const ranged = Object.values(ITEMS).filter((i) => i.category === 'weapon-ranged');
@@ -91,7 +92,7 @@ describe('applyFinish (store)', () => {
   beforeEach(() => {
     useGameStore.setState({
       inventory: [],
-      equipped: { melee: null, ranged: null, pack: null },
+      equipped: emptyEquipped(),
       nearStation: null,
       toasts: [],
     });

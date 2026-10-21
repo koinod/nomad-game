@@ -198,14 +198,21 @@ function Crosshair() {
 
 function Hotbar() {
   const hotbar = useGameStore((s) => s.hotbar);
+  const equipped = useGameStore((s) => s.equipped);
   const inventory = useGameStore((s) => s.inventory);
   const useHotbar = useGameStore((s) => s.useHotbar);
+  // inventory v2: keys 1/2/3 ARE the weapon slots (primary/secondary/
+  // tertiary — the held one highlights); key 4 is the quick-use item
+  const slotUids: (string | null)[] = [
+    equipped.primary, equipped.secondary, equipped.tertiary, hotbar[3] ?? null,
+  ];
   // touch: compact vertical strip for the right thumb; desktop: bottom-center row
   return (
     <div className={isTouch ? 'flex flex-col gap-2' : 'flex gap-2'}>
-      {hotbar.map((uid, i) => {
+      {slotUids.map((uid, i) => {
         const item = uid ? inventory.find((x) => x.uid === uid) : undefined;
         const def = item ? ITEMS[item.itemId] : undefined;
+        const held = i < 3 && equipped.activeWeapon === (['primary', 'secondary', 'tertiary'] as const)[i];
         return (
           <button
             key={i}
@@ -213,12 +220,12 @@ function Hotbar() {
               sfx.play('ui');
               useHotbar(i);
             }}
-            aria-label={`Hotbar ${i + 1}${def ? `: use ${def.name}` : ''}`}
-            className={
+            aria-label={`Hotbar ${i + 1}${def ? `: ${i < 3 ? 'draw' : 'use'} ${def.name}` : ''}`}
+            className={`${
               isTouch
-                ? 'flex h-11 w-12 flex-col items-center justify-center rounded border border-[#232b36] bg-[#0b0e12]/80 px-1 active:border-[#e8b34b]'
-                : 'flex h-14 w-16 flex-col items-center justify-center rounded border border-[#232b36] bg-[#0b0e12]/80 px-1 transition-colors hover:border-[#e8b34b]'
-            }
+                ? 'flex h-11 w-12 flex-col items-center justify-center rounded border bg-[#0b0e12]/80 px-1 active:border-[#e8b34b]'
+                : 'flex h-14 w-16 flex-col items-center justify-center rounded border bg-[#0b0e12]/80 px-1 transition-colors hover:border-[#e8b34b]'
+            } ${held ? 'border-[#e8b34b]' : 'border-[#232b36]'}`}
           >
             <span className="text-[10px] text-[#8a94a3]">{i + 1}</span>
             <span className="w-full truncate text-center text-xs text-[#d7dde5]">
