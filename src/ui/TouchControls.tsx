@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { input } from '../game/input';
+import { input, resetDriveInputs, setHandbrake } from '../game/input';
 import { useGameStore } from '../store/gameStore';
 import { ITEMS } from '../data/items';
 import { sfx } from '../systems/audio';
@@ -164,8 +164,9 @@ export default function TouchControls() {
   // it gates the driving cluster (handbrake) below
   const vehicle = useGameStore((s) => s.vehicle);
   useEffect(() => {
-    // never leave the handbrake held after stepping out mid-press
-    if (!vehicle) input.ascend = false;
+    // never leave drive inputs stuck after stepping out mid-press:
+    // a held handbrake or rolled-on throttle must die with the seat
+    if (!vehicle) resetDriveInputs();
   }, [vehicle]);
   const joyBaseRef = useRef<HTMLDivElement | null>(null);
   const joyId = useRef<number | null>(null);
@@ -313,19 +314,25 @@ export default function TouchControls() {
           onPress={() => { input.zoomOut = true; }}
           onRelease={() => { input.zoomOut = false; }}
         />
+        <ControlButton
+          small
+          label="FUEL"
+          ariaLabel="Pour a fuel can into the nearby vehicle"
+          onPress={() => { input.refuel = true; }}
+        />
       </div>
 
       
 
-      {/* driving cluster: handbrake (Space on desktop) — input.ascend is
-          the handbrake while driving; hold to lock the rear wheels */}
+      {/* driving cluster: handbrake (Space on desktop) — written through
+          the drive-input abstraction; hold to lock the rear wheels */}
       {vehicle && (
         <div className="absolute bottom-64 right-6">
           <ControlButton
             label="BRK"
             ariaLabel="Hold for handbrake"
-            onPress={() => { input.ascend = true; }}
-            onRelease={() => { input.ascend = false; }}
+            onPress={() => setHandbrake(true)}
+            onRelease={() => setHandbrake(false)}
           />
         </div>
       )}
@@ -368,7 +375,13 @@ export default function TouchControls() {
             label="FIRE"
             ariaLabel="Fire ranged weapon"
             className="h-24 w-24 border-[#d9534f]/70 text-base"
-            onPress={() => { input.attackRanged = true; }}
+            onPress={() => {
+              // desktop parity: a press is one shot, a HOLD is sustained
+              // fire for auto weapons (Player reads attackHeld)
+              input.attackRanged = true;
+              input.attackHeld = true;
+            }}
+            onRelease={() => { input.attackHeld = false; }}
           />
           <div className="flex gap-3">
             <ControlButton label="☎" ariaLabel="Open phone" onPress={() => { input.phone = true; }} />
