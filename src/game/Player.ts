@@ -63,6 +63,60 @@ export interface PlayerCtx {
   colliders: readonly Collider[]; // house walls + furniture
 }
 
+/** Car interiors for the seated-driver anchor (Item 5, 2026-10-21).
+ *  cushionY/floorY/roofY are measured in the car's own space (group
+ *  origin = ground plane under the car). The GT500's interior is the
+ *  real S197 geometry; the Mustang's is its S650 class dimensions. */
+export interface CarSeatSpec {
+  cushionY: number; // top of the seat cushion
+  floorY: number; // floorboard the heels rest on
+  roofY: number; // inner roof line the head must clear
+}
+export const CAR_SEATS: Record<string, CarSeatSpec> = {
+  gt500: { cushionY: 0.56, floorY: 0.16, roofY: 1.37 },
+  mustang: { cushionY: 0.55, floorY: 0.16, roofY: 1.35 },
+};
+
+export interface SeatPose {
+  /** Avatar group-origin offset in car space (the FEET origin). */
+  gy: number;
+  /** Thigh pivot rotation.x that lands the feet on the floorboard. */
+  thighX: number;
+  /** Driver's eye height in car space (head center − 0.06). */
+  eyeY: number;
+  /** Where the hip pivot lands in car space. */
+  hipY: number;
+  /** Where the feet land in car space (the no-clip assertion). */
+  footY: number;
+  /** Top of the head in car space (the roof-clearance assertion). */
+  headTop: number;
+}
+
+/** The seated pose, SOLVED from the rig's own proportions and the
+ *  car's interior — replacing the old hand-sunk gy (−0.66) that put
+ *  the hip 0.35 under the cushion and speared the feet through the
+ *  floorboard. The hip rests in the bucket (cushion compressed
+ *  0.14); the thigh angle is whatever geometry needs to put the
+ *  boot on the floorboard; the head must clear the roof line. */
+export function carSeatPose(H: number, spec: CarSeatSpec): SeatPose {
+  const hipLine = H * 0.48; // figureKit: hip pivot height over the feet origin
+  const legLen = hipLine - H * 0.02; // figureKit leg length
+  const sink = 0.14; // bucket-seat cushion compression
+  const gy = spec.cushionY - sink - hipLine;
+  const hipY = gy + hipLine;
+  const drop = hipY - spec.floorY;
+  const cosT = Math.min(1, Math.max(-1, drop / legLen));
+  const thighX = -Math.acos(cosT);
+  return {
+    gy,
+    thighX,
+    eyeY: gy + H * 0.925 - 0.06,
+    hipY,
+    footY: hipY - legLen * Math.cos(-thighX),
+    headTop: gy + H * 0.925 + H * 0.072,
+  };
+}
+
 const WALK_SPEED = 5.6;
 const SPRINT_SPEED = 10.4;
 const CROUCH_SPEED = 2.6;
@@ -72,6 +126,9 @@ const GRAVITY = 20;
 export class Player {
   readonly group = new THREE.Group();
   yaw = 0; // body facing
+  /** The rig's standing height (m) — set at every figure build; the
+   *  seated pose is solved from it (carSeatPose). */
+  rigH = 1.8;
   camYaw = Math.PI; // camera behind player facing +z? set on spawn
   camPitch = -0.18;
   stamina = 100;
@@ -222,8 +279,9 @@ export class Player {
     const packIt = s.equipped.pack ? s.inventory.find((i) => i.uid === s.equipped.pack) : undefined;
     const hasVest = s.inventory.some((i) => i.itemId === 'armored_vest' && i.qty > 0);
     const hasHelm = s.inventory.some((i) => i.itemId === 'riot_helmet' && i.qty > 0);
+    this.rigH = female ? 1.73 : 1.8;
     const fig = buildHumanFigure({
-      height: female ? 1.73 : 1.8,
+      height: this.rigH,
       build: a.build,
       female,
       palette: {
@@ -984,7 +1042,7 @@ export class Player {
     ty: number,
     tz: number,
     camDist: number,
-    seat?: { kind: string; id: string; length: number; width: number; heading: number },
+    seat?: { kind: string; id: string; length: number; width: number; heading: number; quat?: THREE.Quaternion },
   ): void {
     // V in the driver's seat: chase cam <-> driver's-eye first person
     if (input.fpToggle) {
@@ -1011,6 +1069,8 @@ export class Player {
       let lz = 0;
       let gy = 0; // group-origin height offset (feet), per vehicle
       let armReach = -0.55;
+      let thighX = -1.25; // seated thigh angle (solved per car below)
+      let eyeCarY: number | null = null; // solved eye height, car space
       switch (seat.kind) {
         case 'bike':
         case 'moto':
@@ -1033,26 +1093,50 @@ export class Player {
           lx = W * 0.21; // driver's seat, left-hand drive (+X = vehicle left)
           const cabForward = seat.id === 'van' || seat.id === 'v03_hauler' || seat.id === 'boxtruck' || seat.id === 'semi' || seat.id === 'semi_day' || seat.id === 'sprinter' || seat.id === 'goliath';
           lz = cabForward ? L * 0.24 : L * 0.03;
-          // group origin is at the avatar's FEET and the avatar stands
-          // 1.96m tall — sink the body so the head lands in the glass
-          // band, not through the roof (per-vehicle roof heights)
-          gy = ({
-            semi: 0.28, semi_day: 0.28, boxtruck: 0.24, van: 0.0, v03_hauler: 0.0, sprinter: 0.06, goliath: 0.12, tank: 0.55,
-            f250: 0.12, pickup: 0.06, bronco: 0.06, mustang: -0.66, marsh_buggy: 0.0, sedan: -0.14,
-          } as Record<string, number>)[seat.id] ?? -0.66;
+          const spec = CAR_SEATS[seat.id];
+          if (spec) {
+            // Item 5: the pose is SOLVED from the car's interior and
+            // the rig's proportions — hip in the bucket, feet on the
+            // floorboard, head under the roof (carSeatPose above)
+            const pose = carSeatPose(this.rigH, spec);
+            gy = pose.gy;
+            thighX = pose.thighX;
+            eyeCarY = pose.eyeY;
+          } else {
+            // legacy fleet (not in the current game): hand-sunk
+            // offsets so the head lands in the glass band
+            gy = ({
+              semi: 0.28, semi_day: 0.28, boxtruck: 0.24, van: 0.0, v03_hauler: 0.0, sprinter: 0.06, goliath: 0.12, tank: 0.55,
+              f250: 0.12, pickup: 0.06, bronco: 0.06, marsh_buggy: 0.0, sedan: -0.14,
+            } as Record<string, number>)[seat.id] ?? -0.66;
+          }
         }
       }
-      const c = Math.cos(seat.heading);
-      const s = Math.sin(seat.heading);
-      this.group.position.set(tx + lx * c + lz * s, ty + gy, tz - lx * s + lz * c);
-      this.group.rotation.y = seat.heading;
-      // driver's eye: head position, a touch forward of the seat point
-      eyeX = tx + lx * c + (lz + 0.12) * s;
-      eyeY = ty + gy + 1.84;
-      eyeZ = tz - lx * s + (lz + 0.12) * c;
+      if (seat.quat) {
+        // ride the body's TRUE orientation (Item 4's sibling): the
+        // seat anchor rotates with the car, so the figure stays in
+        // the seat at every suspension state and slope — no floor
+        // clip from a level avatar in a pitched car
+        const off = new THREE.Vector3(lx, gy, lz).applyQuaternion(seat.quat);
+        this.group.position.set(tx + off.x, ty + off.y, tz + off.z);
+        this.group.quaternion.copy(seat.quat);
+        const eyeOff = new THREE.Vector3(lx, eyeCarY ?? gy + 1.84, lz + 0.12).applyQuaternion(seat.quat);
+        eyeX = tx + eyeOff.x;
+        eyeY = ty + eyeOff.y;
+        eyeZ = tz + eyeOff.z;
+      } else {
+        const c = Math.cos(seat.heading);
+        const s = Math.sin(seat.heading);
+        this.group.position.set(tx + lx * c + lz * s, ty + gy, tz - lx * s + lz * c);
+        this.group.rotation.y = seat.heading;
+        // driver's eye: head position, a touch forward of the seat point
+        eyeX = tx + lx * c + (lz + 0.12) * s;
+        eyeY = ty + (eyeCarY ?? gy + 1.84);
+        eyeZ = tz - lx * s + (lz + 0.12) * c;
+      }
       // seated pose: thighs forward, hands to the wheel/bars
-      this.legL.rotation.x = -1.25;
-      this.legR.rotation.x = -1.25;
+      this.legL.rotation.x = thighX;
+      this.legR.rotation.x = thighX;
       this.armL.rotation.x = armReach;
       this.armR.rotation.x = armReach;
       this.armL.rotation.z = 0.08;
@@ -1111,7 +1195,11 @@ export class Player {
   /** Restore the on-foot body after exiting a vehicle. */
   endDrive(): void {
     this.group.visible = true;
-    // stand back up: clear the seated pose
+    // stand back up: clear the seated pose AND the car's orientation
+    // (driveUpdate may have ridden the body quaternion) — keep the
+    // yaw, drop the pitch/roll, or the avatar walks tilted
+    const yawOnly = new THREE.Euler().setFromQuaternion(this.group.quaternion, 'YXZ').y;
+    this.group.rotation.set(0, yawOnly, 0);
     this.legL.rotation.x = 0;
     this.legR.rotation.x = 0;
     this.armL.rotation.x = 0;

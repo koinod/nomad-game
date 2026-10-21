@@ -89,6 +89,31 @@ describe('figureKit rig structure', () => {
     expect(v.z).toBeGreaterThan(0.4); // head at the FRONT of the body
   });
 
+  it('legs attach at the hips: anatomical pivot width, parallel at rest (Item 8)', () => {
+    // Ian playtest 2026-10-21: "legs are detached from hips, out to
+    // the sides". The pivots sat at ±0.095H — outside the pelvis.
+    // Pin the anatomy: hip joints at ±0.09..0.11 m for a 1.8 m figure,
+    // scaling with height, hanging straight (no rest splay), with the
+    // thigh tops meeting the pelvis instead of floating beside it.
+    const base = buildHumanFigure({ palette: PAL });
+    expect(Math.abs(base.legL.position.x)).toBeGreaterThanOrEqual(0.09);
+    expect(Math.abs(base.legL.position.x)).toBeLessThanOrEqual(0.11);
+    expect(base.legL.position.x).toBeCloseTo(-base.legR.position.x, 6);
+    expect(base.legL.position.z).toBe(0);
+    expect(base.legL.rotation.z).toBe(0);
+    expect(base.legR.rotation.z).toBe(0);
+    expect(base.legL.rotation.x).toBe(base.pose.legLX);
+    // proportional on a bigger frame
+    const brute = buildHumanFigure({ palette: PAL, height: 2.4 });
+    expect(Math.abs(brute.legL.position.x)).toBeCloseTo(0.055 * 2.4, 3);
+    // thigh inner edges nearly meet at the crotch (no bow-legged gap):
+    // pivot 0.099 - thigh top half-width ~0.094 leaves ~5 mm
+    const thighHalf = 0.052 * 1.8;
+    expect(Math.abs(base.legL.position.x) - thighHalf).toBeLessThan(0.02);
+    // and the thigh stays inside a human silhouette (pivot + half < 0.21)
+    expect(Math.abs(base.legL.position.x) + thighHalf).toBeLessThan(0.21);
+  });
+
   it('human figure: contract proportions + gear renders on the body', () => {
     const base = buildHumanFigure({ palette: PAL });
     expect(base.height).toBe(1.8);

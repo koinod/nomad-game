@@ -1691,6 +1691,8 @@ export class Game {
       length: v.def.length,
       width: v.def.width,
       heading: v.heading,
+      // the seated figure rides the body's true orientation (Item 5)
+      quat: v.group.quaternion,
     });
     // Driver XP: clean miles count — a collision resets the streak
     if (v.condition < condBefore - 0.001) {

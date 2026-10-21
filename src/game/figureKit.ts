@@ -180,11 +180,16 @@ export function buildHumanFigure(spec: HumanSpec & { headCenterY?: number }): Fi
   const torsoLen = H * 0.36;
 
   // ---- legs (root children; pivots at the hip line) ----
+  // Hip joints sit at the anatomical bi-acetabular width — ±0.055H
+  // (±0.099 m at 1.8 m), INSIDE the pelvis silhouette. The pre-fix
+  // ±0.095H put the pivots outside the pelvis (±0.084H half-width):
+  // the thigh columns hung outboard of the body with a wide crotch
+  // gap and read as detached, splayed legs (Ian playtest, 2026-10-21).
   const legLen = hipY - H * 0.02;
   const mkLeg = (side: number) => {
     const pivot = new THREE.Group();
-    pivot.position.set(side * H * 0.095 * bw, hipY, 0);
-    const leg = limb(legLen, H * 0.058 * limbNarrow, H * 0.046, H * 0.037, pantsMat);
+    pivot.position.set(side * H * 0.055 * bw, hipY, 0);
+    const leg = limb(legLen, H * 0.052 * limbNarrow, H * 0.046, H * 0.037, pantsMat);
     leg.scale.x = bw;
     pivot.add(leg);
     const boot = new THREE.Mesh(new THREE.BoxGeometry(0.11 * (H / 1.8), 0.07 * (H / 1.8), 0.24 * (H / 1.8)), darkMat);
