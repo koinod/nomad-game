@@ -34,7 +34,7 @@ export const TERRITORY: TerritoryDef[] = [
   { site: 'forest_cache', poiId: 'forest_cache', owner: 'neutral', presence: 'Hunting stash', notes: 'Fast-travel node; Kowalski’s capacitor caches draw from here.', claim: 'n/a' },
   { site: 'relay_station', poiId: 'relay_station', owner: 'remnants', presence: 'Remnant listening post (Phase 3)', notes: 'The Collective wants it back — built-in quest tension. The player restores it in q3_clear_relay; ownership on paper is the Long Chain’s.', claim: 'never' },
   { site: 'dune_cache', poiId: 'dune_cache', owner: 'neutral', presence: 'D.C.-road staging', notes: 'Lina watches the road from here.', claim: 'n/a' },
-  { site: 'raider_fort', poiId: 'raider_fort', owner: 'skulls', presence: 'Rust Skulls main base (~x 500 dunes)', notes: 'Spike walls, skull poles, the fighting pit.', claim: 'never' },
+  { site: 'raider fort', poiId: 'raider_fort', owner: 'skulls', presence: 'Rust Skulls main base (~x 500 dunes)', notes: 'Spike walls, skull poles, the fighting pit.', claim: 'never' },
   { site: 'lighthouse', poiId: 'lighthouse_base', owner: 'lighthouse', presence: 'Lighthouse Collective — story anchor', notes: 'Not claimable, ever.', claim: 'never' },
   { site: 'military base / Coast Guard', poiId: 'airbase', owner: 'remnants', presence: 'Military Remnants main base, east cape', notes: 'HESCO perimeter, motor pool, the armory. (POI id is the shipped “airbase”.)', claim: 'never' },
   { site: 'eastern tollgate', poiId: 'tollgate', owner: 'tollkeepers', presence: 'The Tollkeepers — the island’s exit gate', notes: 'The bridge proper is the OBX leg.', claim: 'never' },
