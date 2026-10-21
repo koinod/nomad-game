@@ -169,7 +169,9 @@ export class Game {
     this.houseFloors = [...this.world.lighthouseKit.floors];
     // snapshot world diff
     const snap = opts.snapshot ?? null;
+    let savedLootedAt: Record<string, number> = {};
     if (snap) {
+      savedLootedAt = snap.world.lootedAt ?? {};
       for (const id of snap.world.looted) this.looted.add(id);
       for (const id of snap.world.deadHusks) this.deadHusks.add(id);
       for (const id of snap.world.cleared) this.cleared.add(id);
@@ -289,6 +291,7 @@ export class Game {
         ...buildContainerDefs(this.world.poiPositions),
         ...this.world.lighthouseKit.containers,
       ],
+      savedLootedAt,
     );
 
     // shadow flags for world + husk + interactable meshes (idempotent)
@@ -379,6 +382,7 @@ export class Game {
       looted: [...this.looted],
       deadHusks: [...this.deadHusks],
       cleared: [...this.cleared],
+      lootedAt: this.interact?.getLootedAt() ?? {},
     };
   }
 

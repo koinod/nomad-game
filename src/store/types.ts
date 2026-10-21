@@ -251,6 +251,11 @@ export interface WorldDiff {
   looted: string[]; // container ids looted
   deadHusks: string[]; // husk spawn ids killed
   cleared: string[]; // one-shot interactable ids used (switches etc.)
+  // Lane 6 §4.5 (field request 3, landed at merge): abs game minutes when
+  // each respawn-eligible container was emptied — the clocks persist
+  // across sessions instead of restarting at world build. Optional:
+  // absent on old saves, which keep the start-clock-at-load behavior.
+  lootedAt?: Record<string, number>;
 }
 
 export interface VehicleSave {

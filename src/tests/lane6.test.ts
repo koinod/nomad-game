@@ -9,7 +9,9 @@ import {
   BUSH_LOOT, FIELD_RECIPES, STATION_RECIPES, BARTER_VALUES, barterValueOf,
   BIOME_LOOT_WEIGHT, lootClassFor, weightedChance, rollLoot,
 } from '../data/items';
-import { respawnDaysFor, respawnEligible } from '../game/Interact';
+import { InteractSystem, respawnDaysFor, respawnEligible, type ContainerDef, type InteractHooks } from '../game/Interact';
+import { migrate, type RawSaveRecord } from '../systems/save';
+import { useGameStore } from '../store/gameStore';
 import { buildFurnitureMesh, applyDisturbed, applyRestored } from '../game/furnitureMeshes';
 import { AlarmRegistry, DISARM_SECONDS, DISARM_SKILL_LEVEL } from '../game/alarm';
 import { buildItemModel, ITEM_MODEL_IDS } from '../game/itemModels';
@@ -167,6 +169,50 @@ describe('respawn clocks (§4.5)', () => {
     expect(respawnEligible(pantry)).toBe(true);
     const logpile = { id: 'c4', x: 0, z: 0, loot: [{ id: 'wood', min: 2, max: 4, chance: 1 }] };
     expect(respawnEligible(logpile)).toBe(true); // guaranteed ≠ key item
+  });
+});
+
+describe('respawn clocks persist across sessions (WorldDiff.lootedAt)', () => {
+  const CRATE: ContainerDef = { id: 'c_rt_1', x: 0, z: 0, loot: [{ id: 'scrap', min: 1, max: 2, chance: 0.5 }] };
+  const hooks = (looted: Set<string>): InteractHooks => ({
+    resourceMult: 1,
+    rng: () => 0.5,
+    groundY: () => 0,
+    scene: new THREE.Scene(),
+    isLooted: (id) => looted.has(id),
+    markLooted: (id) => { looted.add(id); },
+    isCleared: () => false,
+    markCleared: () => {},
+    setLastSafe: () => {},
+  });
+
+  it('the snapshot carries lootedAt through a save round-trip (migrate passthrough)', () => {
+    const record = {
+      version: 3, slot: 'auto',
+      world: { looted: ['c_rt_1'], deadHusks: [], cleared: [], lootedAt: { c_rt_1: 4321 } },
+    } as unknown as RawSaveRecord;
+    // IndexedDB structured-clones the record; a JSON round-trip is the
+    // faithful stand-in for that hop in a unit test.
+    const revived = migrate(JSON.parse(JSON.stringify(record)) as RawSaveRecord);
+    expect(revived.world.lootedAt).toEqual({ c_rt_1: 4321 });
+  });
+
+  it('a loaded clock resumes from the saved timestamp, not from load time', () => {
+    useGameStore.setState({ daysElapsed: 10, timeMinutes: 600 }); // abs now = 15000
+    const looted = new Set(['c_rt_1']);
+    // no timestamps saved (old save): the clock starts at world build
+    const fresh = new InteractSystem(hooks(looted), {}, [CRATE]);
+    expect(fresh.getLootedAt()).toEqual({ c_rt_1: 15000 });
+    // timestamps saved: the emptied-at minute survives save → load intact
+    const resumed = new InteractSystem(hooks(looted), {}, [CRATE], { c_rt_1: 4321 });
+    expect(resumed.getLootedAt()).toEqual({ c_rt_1: 4321 });
+  });
+
+  it('ineligible containers never take a clock, saved or not', () => {
+    useGameStore.setState({ daysElapsed: 10, timeMinutes: 600 });
+    const safe: ContainerDef = { id: 's_rt', x: 5, z: 0, locked: true, loot: [{ id: 'valuables', min: 1, max: 1, chance: 0.9 }] };
+    const sys = new InteractSystem(hooks(new Set(['s_rt'])), {}, [safe], { s_rt: 100 });
+    expect(sys.getLootedAt()).toEqual({});
   });
 });
 

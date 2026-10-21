@@ -123,9 +123,10 @@ export class InteractSystem {
   private containersById = new Map<string, ContainerDef>();
   private searchedContainers = new Set<string>();
   // respawn clocks (§4.5): when an eligible container was emptied (abs
-  // game minutes) and which have since restocked. Session-scoped —
-  // cross-session clocks need lootedAt timestamps in the save
-  // (WorldDiff.lootedAt — FIELD REQUEST to Lane 5).
+  // game minutes) and which have since restocked. Persisted across
+  // sessions via WorldDiff.lootedAt (harvested by getLootedAt, seeded
+  // from the constructor's savedLootedAt); a looted container with no
+  // saved timestamp starts its clock at world build, as before.
   private lootedAtMin = new Map<string, number>();
   private respawnedIds = new Set<string>();
   private freshLabels = new Map<string, string>();
@@ -138,6 +139,13 @@ export class InteractSystem {
 
   containerDef(id: string): ContainerDef | undefined {
     return this.containersById.get(id);
+  }
+
+  /** Respawn clocks for the save snapshot (WorldDiff.lootedAt): abs game
+   *  minutes when each eligible container was emptied and not yet
+   *  restocked. Game.getWorldDiff harvests this on save. */
+  getLootedAt(): Record<string, number> {
+    return Object.fromEntries(this.lootedAtMin);
   }
 
   /** Wave 3 Scout intel: real container census around a point — how many
@@ -168,7 +176,7 @@ export class InteractSystem {
     it?.use();
   }
 
-  constructor(hooks: InteractHooks, pois: Record<string, [number, number]>, containers: ContainerDef[]) {
+  constructor(hooks: InteractHooks, pois: Record<string, [number, number]>, containers: ContainerDef[], savedLootedAt?: Record<string, number>) {
     this.hooks = hooks;
     const s = useGameStore.getState();
     const at = (id: string): [number, number] => pois[id] ?? [0, 0];
@@ -201,10 +209,12 @@ export class InteractSystem {
       this.containersById.set(c.id, c);
       this.emptyLabels.set(c.id, c.label ? c.label.replace('Search', 'Empty') : 'Empty container');
       this.freshLabels.set(c.id, c.label ?? 'Search container');
-      // a container a previous session emptied starts its respawn clock
-      // now — the island forgets slowly, and this is when you showed up
+      // a container a previous session emptied resumes its respawn clock
+      // from the saved timestamp; with none saved it starts now — the
+      // island forgets slowly, and this is when you showed up
       if (hooks.isLooted(c.id) && respawnEligible(c)) {
-        this.lootedAtMin.set(c.id, this.absMinutes());
+        const saved = savedLootedAt?.[c.id];
+        this.lootedAtMin.set(c.id, typeof saved === 'number' && Number.isFinite(saved) ? saved : this.absMinutes());
       }
       if (c.meshKind) this.furnitureIds.add(c.id);
       this.interactables.push({
