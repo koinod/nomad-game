@@ -75,6 +75,15 @@ export interface CarSeatSpec {
 export const CAR_SEATS: Record<string, CarSeatSpec> = {
   gt500: { cushionY: 0.56, floorY: 0.16, roofY: 1.37 },
   mustang: { cushionY: 0.55, floorY: 0.16, roofY: 1.35 },
+  // Nomad Prime (measured from the GLB): cushion top 1.395, cab floor
+  // top 1.14, cab roof line over the seats ~3.40. A high cab: the
+  // solved thigh angle runs steeper than the cars' (legs drop from a
+  // captain's chair to a high floorboard) — the pose test's band
+  // accounts for it.
+  nomad_prime: { cushionY: 1.4, floorY: 1.14, roofY: 3.4 },
+  // V-04 Sprinter (measured from the GLB): seat base top 0.98, cab
+  // floor top 0.63, inner roof 2.62.
+  sprinter_van: { cushionY: 0.98, floorY: 0.63, roofY: 2.62 },
 };
 
 export interface SeatPose {
@@ -1042,7 +1051,14 @@ export class Player {
     ty: number,
     tz: number,
     camDist: number,
-    seat?: { kind: string; id: string; length: number; width: number; heading: number; quat?: THREE.Quaternion },
+    seat?: {
+      kind: string; id: string; length: number; width: number; heading: number;
+      quat?: THREE.Quaternion;
+      /** Driver-seat anchor in vehicle space, from the GLB's
+       *  driver_seat marker — when present it replaces the
+       *  length/width-proportion seat placement below. */
+      ax?: number; az?: number;
+    },
   ): void {
     // V in the driver's seat: chase cam <-> driver's-eye first person
     if (input.fpToggle) {
@@ -1090,9 +1106,9 @@ export class Player {
           else { lx = 0.3; lz = 1.05; gy = -0.42; } // little bird, in the bubble
           break;
         default: {
-          lx = W * 0.21; // driver's seat, left-hand drive (+X = vehicle left)
+          lx = seat.ax ?? W * 0.21; // driver's seat, left-hand drive (+X = vehicle left)
           const cabForward = seat.id === 'van' || seat.id === 'v03_hauler' || seat.id === 'boxtruck' || seat.id === 'semi' || seat.id === 'semi_day' || seat.id === 'sprinter' || seat.id === 'goliath';
-          lz = cabForward ? L * 0.24 : L * 0.03;
+          lz = seat.az ?? (cabForward ? L * 0.24 : L * 0.03);
           const spec = CAR_SEATS[seat.id];
           if (spec) {
             // Item 5: the pose is SOLVED from the car's interior and

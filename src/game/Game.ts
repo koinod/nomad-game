@@ -17,7 +17,7 @@ import { HuskManager } from './Husks';
 import type { Husk, SpawnZone } from './Husks';
 import { InteractSystem, buildContainerDefs } from './Interact';
 import { AnimalManager } from './Animals';
-import { VehicleManager, applyUpgradeVisuals, attachGt500Glb, placeSeahawk, applyGlbVisuals, itemsWeightKg, type Vehicle } from './Vehicles';
+import { VehicleManager, applyUpgradeVisuals, attachGt500Glb, attachPrimeGlb, attachSprinterGlb, placeSeahawk, applyGlbVisuals, itemsWeightKg, type Vehicle } from './Vehicles';
 import { CarPhysics } from './CarPhysics';
 import { WeatherSystem } from './Weather';
 import { CloudLayer, updateWindUniforms } from './Clouds';
@@ -265,6 +265,12 @@ export class Game {
     const firstCar = this.vehicles.vehicles[0];
     const gt500 = this.vehicles.vehicles.find((v) => v.def.id === 'gt500');
     if (gt500) attachGt500Glb(gt500);
+    // The fleet GLBs (Ian's specs, approved as-is 2026-10-21): each
+    // replaces its procedural stand-in when it loads.
+    const prime = this.vehicles.vehicles.find((v) => v.def.id === 'nomad_prime');
+    if (prime) attachPrimeGlb(prime);
+    const sprinter = this.vehicles.vehicles.find((v) => v.def.id === 'sprinter_van');
+    if (sprinter) attachSprinterGlb(sprinter);
     // Lane 2 staged placement: the Seahawk sits on the airbase apron as
     // a static landmark — no flight model yet, and deliberately not a
     // Vehicle instance, so the save shape is untouched
@@ -1697,6 +1703,10 @@ export class Game {
       heading: v.heading,
       // the seated figure rides the body's true orientation (Item 5)
       quat: v.group.quaternion,
+      // the GLB's driver_seat marker anchor, when the model carries
+      // one (the Prime + Sprinter do; the GT500 keeps proportions)
+      ax: v.seatAnchor?.lx,
+      az: v.seatAnchor?.lz,
     });
     // Driver XP: clean miles count — a collision resets the streak
     if (v.condition < condBefore - 0.001) {
