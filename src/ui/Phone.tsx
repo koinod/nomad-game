@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useGameStore } from '../store/gameStore';
-import { ITEMS, FIELD_RECIPES, STATION_RECIPES, STATION_LABEL } from '../data/items';
-import { FINISHES, MODS } from '../data/mods';
+import { ITEMS, STATION_LABEL } from '../data/items';
 import { QUESTS } from '../data/quests';
 import { FACTIONS, repTier } from '../data/factions';
 import { SKILLS, TREES, PERKS, xpToNext } from '../data/skills';
@@ -14,6 +13,8 @@ import { VEHICLE_DEFS } from '../game/Vehicles';
 import { carryLimitKg, encumbranceTier, totalWeightKg } from '../store/inventoryUtils';
 import { packGridDims, canPlace, layoutItems } from '../store/gridUtils';
 import GridInventory from './GridInventory';
+import SkillsPanel from './SkillsPanel';
+import { CraftPanel } from './CraftPanel';
 import { DIFFICULTIES, HAIR_COLORS, SKIN_TONES } from '../store/types';
 import type { BuildType, HairStyle } from '../store/types';
 import type { PhoneTab } from '../store/types';
@@ -1009,15 +1010,13 @@ function CharacterTab() {
           </div>
         )}
       </section>
-      {/* MERGE SLOT — Lane 8 SkillsPanel (src/ui/SkillsPanel.tsx on
-          lane/skills, default export, store-driven, no props). At merge:
-          import SkillsPanel from './SkillsPanel'; and render
-          <SkillsPanel /> here — the full §6.2 surface (tier chains,
-          capstone exclusivity, engine lock reasons). The compact
-          SkillsTab above stays as the summary strip per Lane 8's plan.
-          Its LightIndicator named export is Lane 11's HUD piece, fed by
-          the store's `visibility` flag (Lane 5 contract). */}
+      {/* Lane 8 SkillsPanel (merged stage 2a): the full §6.2 surface —
+          tier chains, capstone exclusivity, engine lock reasons — under
+          the compact SkillsTab summary strip. Its LightIndicator named
+          export is Lane 11's HUD piece, fed by the store's `visibility`
+          flag (Lane 5 contract). */}
       <SkillsTab />
+      <SkillsPanel />
     </div>
   );
 }
@@ -1084,196 +1083,13 @@ function TeamTab() {
 
 /* ---------------- CRAFT app: the tree + weapon/clothing modification ---------------- */
 
-/** Wave 4: finish kits at the bench — shows the weapon's current coat and
- *  a button per kit in the pack. The kit is consumed on application. */
-function FinishRow({ weaponUid, current }: { weaponUid: string; current?: string }) {
-  const inventory = useGameStore((s) => s.inventory);
-  const nearStation = useGameStore((s) => s.nearStation);
-  const applyFinish = useGameStore((s) => s.applyFinish);
-  const atBench = nearStation === 'workbench';
-  const kits = inventory.filter((i) => i.itemId in FINISHES);
-  return (
-    <div className="mt-1 flex flex-col gap-1.5 border-t border-[#232b36] pt-2">
-      <div className="flex items-center gap-2 text-sm">
-        <span className="w-24 text-[11px] uppercase tracking-wide text-[#8a94a3]">finish</span>
-        <span className="flex-1 text-[#d7dde5]">
-          {current ? (FINISHES[current]?.name ?? current) : 'Factory / field-worn'}
-        </span>
-      </div>
-      {atBench && kits.length === 0 && (
-        <span className="text-[11px] text-[#8a94a3]">No finish kits carried — they turn up in town and on the carrier.</span>
-      )}
-      {atBench &&
-        kits.map((k) => (
-          <button
-            key={k.uid}
-            disabled={current === k.itemId}
-            onClick={() => { sfx.play('ui'); applyFinish(weaponUid, k.uid); }}
-            className="rounded border border-[#232b36] px-2 py-1 text-left text-xs text-[#e8b34b] hover:border-[#e8b34b] disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Apply {FINISHES[k.itemId]?.name} (uses the kit)
-          </button>
-        ))}
-    </div>
-  );
-}
-
-/**
- * MERGE SLOT — Lane 7 CraftPanel (src/ui/CraftPanel.tsx on lane/crafting).
- * At merge, replace this tab's body with the panel:
- *   import { CraftPanel } from './CraftPanel';
- *   function CraftTab() { return <CraftPanel />; }
- * CraftPanel is self-contained (timed queue via systems/crafting +
- * craftQueue persistence through gameStore's craftQueueBridge) and is a
- * drop-in per its file header. The hand-rolled instant-craft body below
- * is the pre-merge fallback — delete it at the swap.
- */
+/** The Craft tab is Lane 7's CraftPanel (merged stage 2a): field recipes
+ *  stay instant via gameStore.craftRecipe; station recipes run on the
+ *  timed queue (systems/crafting) with full gate checks. The pre-merge
+ *  hand-rolled tab (incl. FinishRow) was deleted at the swap per Lane 5's
+ *  merge slot; weapon mods remain available at the bench in the Backpack. */
 function CraftTab() {
-  const inventory = useGameStore((s) => s.inventory);
-  const equipped = useGameStore((s) => s.equipped);
-  const nearStation = useGameStore((s) => s.nearStation);
-  const craftRecipe = useGameStore((s) => s.craftRecipe);
-  const attachMod = useGameStore((s) => s.attachMod);
-  const detachMod = useGameStore((s) => s.detachMod);
-  const countItem = (id: string) => inventory.reduce((a, i) => a + (i.itemId === id ? i.qty : 0), 0);
-  const weapon = inventory.find((i) => i.uid === equipped.ranged);
-  const weaponDef = weapon ? ITEMS[weapon.itemId] : undefined;
-  const meleeWeapon = inventory.find((i) => i.uid === equipped.melee);
-  const meleeDef = meleeWeapon ? ITEMS[meleeWeapon.itemId] : undefined;
-  const atBench = nearStation === 'workbench';
-  const armorPieces = inventory.filter((i) => (ITEMS[i.itemId]?.armor ?? 0) > 0);
-
-  const recipeRow = (r: (typeof FIELD_RECIPES)[string], lockedNote?: string) => {
-    const can = !lockedNote && r.components.every((c) => countItem(c.itemId) >= c.qty);
-    return (
-      <div key={r.id} className={`flex items-center justify-between gap-2 text-sm ${lockedNote ? 'opacity-50' : ''}`}>
-        <div className="min-w-0">
-          <div className="text-[#d7dde5]">{r.name}</div>
-          <div className="truncate text-[11px] text-[#8a94a3]">
-            {lockedNote ??
-              r.components
-                .map((c) => `${countItem(c.itemId)}/${c.qty} ${ITEMS[c.itemId]?.name ?? c.itemId}`)
-                .join(' · ')}
-          </div>
-        </div>
-        <button
-          onClick={() => { sfx.play('ui'); craftRecipe(r.id); }}
-          disabled={!can}
-          className="shrink-0 rounded border border-[#232b36] px-2.5 py-1 text-xs text-[#d7dde5] transition-colors hover:border-[#e8b34b] disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          Craft
-        </button>
-      </div>
-    );
-  };
-
-  return (
-    <div className="nomad-scroll flex h-full flex-col gap-4 overflow-y-auto">
-      <section>
-        <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Field craft — anywhere</h3>
-        <div className="flex flex-col gap-1.5">
-          {Object.values(FIELD_RECIPES).filter((r) => !r.station).map((r) => recipeRow(r))}
-        </div>
-      </section>
-      {(['workbench', 'chemistry', 'industrial'] as const).map((st) => (
-        <section key={st}>
-          <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">
-            {STATION_LABEL[st]}
-            {nearStation === st && <span className="ml-1 text-[#e8b34b]">— in range</span>}
-          </h3>
-          <div className="flex flex-col gap-1.5">
-            {Object.values(STATION_RECIPES)
-              .filter((r) => r.station === st)
-              .map((r) =>
-                recipeRow(
-                  r,
-                  nearStation === st
-                    ? undefined
-                    : `Needs a ${STATION_LABEL[st]} — ${st === 'industrial' ? 'at the marina Machine Shop' : st === 'chemistry' ? 'one at the relay station' : 'at Jonah\u2019s camp or in town'}`,
-                ),
-              )}
-          </div>
-        </section>
-      ))}
-
-      <section>
-        <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Modify — weapon</h3>
-        {!weapon || !weaponDef ? (
-          <p className="text-sm text-[#8a94a3]">No ranged weapon equipped. Equip one from the Pack.</p>
-        ) : !weaponDef.modSlots || weaponDef.modSlots.length === 0 ? (
-          <div className="flex flex-col gap-1.5">
-            <p className="text-sm text-[#8a94a3]">{weaponDef.name} takes no attachments — but it takes a finish.</p>
-            <FinishRow weaponUid={weapon.uid} current={weapon.finish} />
-          </div>
-        ) : (
-          <div className="flex flex-col gap-1.5">
-            <div className="text-sm text-[#d7dde5]">
-              {weaponDef.name}
-              {!atBench && <span className="ml-2 text-[11px] text-[#8a94a3]">fitting needs a Weapons Bench</span>}
-            </div>
-            {weaponDef.modSlots.map((slot) => {
-              const attached = (weapon.mods ?? []).find((id) => MODS[id]?.slot === slot);
-              return (
-                <div key={slot} className="flex items-center gap-2 text-sm">
-                  <span className="w-24 text-[11px] uppercase tracking-wide text-[#8a94a3]">{slot}</span>
-                  {attached ? (
-                    <>
-                      <span className="flex-1 text-[#d7dde5]">{MODS[attached]?.name ?? attached}</span>
-                      {atBench && (
-                        <button
-                          onClick={() => { sfx.play('ui'); detachMod(weapon.uid, attached); }}
-                          className="rounded border border-[#232b36] px-2 py-0.5 text-[11px] text-[#d7dde5] hover:border-[#e8b34b]"
-                        >
-                          Remove
-                        </button>
-                      )}
-                    </>
-                  ) : (
-                    <span className="flex-1 text-[11px] text-[#8a94a3]">empty</span>
-                  )}
-                </div>
-              );
-            })}
-            {atBench &&
-              inventory
-                .filter((i) => i.itemId in MODS)
-                .map((mi) => (
-                  <button
-                    key={mi.uid}
-                    onClick={() => { sfx.play('ui'); attachMod(weapon.uid, mi.uid); }}
-                    className="rounded border border-[#232b36] px-2 py-1 text-left text-xs text-[#e8b34b] hover:border-[#e8b34b]"
-                  >
-                    Fit {MODS[mi.itemId]?.name} ({MODS[mi.itemId]?.gunPartsCost} parts)
-                  </button>
-                ))}
-            <FinishRow weaponUid={weapon.uid} current={weapon.finish} />
-          </div>
-        )}
-        {meleeWeapon && meleeDef && (
-          <div className="mt-3 flex flex-col gap-1.5">
-            <div className="text-sm text-[#d7dde5]">{meleeDef.name} <span className="text-[11px] text-[#8a94a3]">(melee)</span></div>
-            <FinishRow weaponUid={meleeWeapon.uid} current={meleeWeapon.finish} />
-          </div>
-        )}
-      </section>
-
-      <section>
-        <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Modify — clothing & armor</h3>
-        {armorPieces.length === 0 ? (
-          <p className="text-sm text-[#8a94a3]">No rated armor carried. Vests and helmets cut the damage you take, up to 50%.</p>
-        ) : (
-          <div className="flex flex-col gap-1">
-            {armorPieces.map((i) => (
-              <div key={i.uid} className="flex items-center justify-between text-sm">
-                <span className="text-[#d7dde5]">{ITEMS[i.itemId]?.name} ×{i.qty}</span>
-                <span className="text-xs text-[#8a94a3]">{Math.round((ITEMS[i.itemId]?.armor ?? 0) * 100)}% each</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-    </div>
-  );
+  return <CraftPanel />;
 }
 
 /* ---------------- VEHICLES app ---------------- */
