@@ -352,6 +352,53 @@ export function attachGt500Glb(v: Vehicle): void {
     });
 }
 
+export const SEAHAWK_GLB_PATH = '/seahawk.glb';
+
+/** Where the Seahawk sits: the hangar apron survey point on the airbase
+ *  plateau (AIRFIELD_LAYOUT's hangar at AIRBASE_CENTER + (-18,-34), its
+ *  apron 24 m south of the hangar front). Heading -PI/2 reads as a
+ *  vehicle heading — nose west, parked parallel to the hangar front. */
+export const SEAHAWK_PAD = { x: 462, z: -118, heading: -Math.PI / 2 };
+
+/**
+ * Lane 2's MH-60S Seahawk (public/seahawk.glb, tools/seahawk/SPEC.md),
+ * staged as a STATIC landmark on the airbase apron. Deliberately NOT a
+ * Vehicle instance: no flight model exists yet (heliMath was purged),
+ * so nothing here touches the vehicle save shape — it's a world prop
+ * that loads async and simply never appears if the fetch fails. The
+ * model's gear bottoms sit on its local z=0 plane and its glTF space
+ * matches the cars' (nose +X, up +Y — verified against the shipped
+ * node transforms), so the same wrapper correction applies: -PI/2
+ * about Y brings the nose to the stack's +Z forward before the pad
+ * heading turns it west. Doors ship closed, rotors parked in X —
+ * boarding/flight wiring is a later stage.
+ */
+export function placeSeahawk(scene: THREE.Scene, groundY: (x: number, z: number) => number): void {
+  const y = groundY(SEAHAWK_PAD.x, SEAHAWK_PAD.z);
+  import('three/addons/loaders/GLTFLoader.js')
+    .then(({ GLTFLoader }) => new GLTFLoader().loadAsync(SEAHAWK_GLB_PATH))
+    .then((gltf) => {
+      const model = gltf.scene;
+      const wrapper = new THREE.Group();
+      wrapper.rotation.y = -Math.PI / 2;
+      wrapper.add(model);
+      const group = new THREE.Group();
+      group.add(wrapper);
+      group.position.set(SEAHAWK_PAD.x, y, SEAHAWK_PAD.z);
+      group.rotation.y = SEAHAWK_PAD.heading;
+      model.traverse((o) => {
+        if ((o as THREE.Mesh).isMesh) {
+          o.castShadow = true;
+          o.receiveShadow = true;
+        }
+      });
+      scene.add(group);
+    })
+    .catch((err) => {
+      console.warn('[Vehicles] seahawk.glb failed to load; the apron stands empty:', err);
+    });
+}
+
 /** Per-frame GLB rig update: steering, spin, suspension travel. */
 export function applyGlbVisuals(v: Vehicle): void {
   const g = v.glb;

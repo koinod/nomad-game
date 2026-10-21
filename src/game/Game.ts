@@ -17,7 +17,7 @@ import { HuskManager } from './Husks';
 import type { Husk, SpawnZone } from './Husks';
 import { InteractSystem, buildContainerDefs } from './Interact';
 import { AnimalManager } from './Animals';
-import { VehicleManager, applyUpgradeVisuals, attachMustangGlb, attachGt500Glb, applyGlbVisuals, itemsWeightKg, type Vehicle } from './Vehicles';
+import { VehicleManager, applyUpgradeVisuals, attachMustangGlb, attachGt500Glb, placeSeahawk, applyGlbVisuals, itemsWeightKg, type Vehicle } from './Vehicles';
 import { CarPhysics } from './CarPhysics';
 import { WeatherSystem } from './Weather';
 import { canInstallUpgrade, storageCapKg, collisionLossFactor, ramDamageFactor } from '../data/upgrades';
@@ -234,6 +234,10 @@ export class Game {
     if (mustang) attachMustangGlb(mustang);
     const gt500 = this.vehicles.vehicles.find((v) => v.def.id === 'gt500');
     if (gt500) attachGt500Glb(gt500);
+    // Lane 2 staged placement: the Seahawk sits on the airbase apron as
+    // a static landmark — no flight model yet, and deliberately not a
+    // Vehicle instance, so the save shape is untouched
+    placeSeahawk(this.scene, (x, z) => heightAt(x, z));
     this.carPhysics = await CarPhysics.create(
       { onImpact: (dv) => this.onCarImpact(dv) },
       (x, z) => heightAt(x, z),
