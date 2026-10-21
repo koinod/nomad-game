@@ -42,8 +42,10 @@ export type RawSaveRecord = Omit<Partial<SaveSnapshot>, 'version'> & {
  * Throws on unknown versions so bad data never silently loads.
  *
  * Parallel-cycle note (Lane 5 field contract): the v3 snapshot grows by
- * OPTIONAL fields only — craftQueue / storyChoices / baseExt (Lane 7/9/10
- * state), joining wave 3's dispatches/journal/scouted/baseQueue and wave
+ * OPTIONAL fields only — craftQueue (Lane 7's CraftJob[], segment-based:
+ * startedAtMin/bankedMin/durationMin/status — see types.ts) /
+ * storyChoices / baseExt (Lane 7/9/10 state), joining wave 3's
+ * dispatches/journal/scouted/baseQueue and wave
  * 4's appearance. IndexedDB stores records as-is, so current-version
  * saves pass through untouched below and the new fields ride along; the
  * STORE defaults any that are absent on load (see gameStore.loadFromSlot).

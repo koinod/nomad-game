@@ -1,12 +1,13 @@
 // Lane 5 field-contract tests (parallel cycle): the optional v3 fields
-// sibling lanes persist through — craftQueue (Lane 7), storyChoices
-// (Lane 9), baseExt (Lane 10) — plus the store verbs that own them.
-// Rules under test: passthrough-safe (migrate never drops or invents
-// them), old saves load without crashing, new-game state starts empty.
+// sibling lanes persist through — craftQueue (Lane 7's CraftJob[]),
+// storyChoices (Lane 9), baseExt (Lane 10) — plus the store plumbing
+// that owns them. Rules under test: passthrough-safe (migrate never
+// drops or invents them), old saves load without crashing, new-game
+// state starts empty, and the Lane 7 bridge harvests/rehydrates.
 import { beforeEach, describe, expect, it } from 'vitest';
 import { migrate, type RawSaveRecord } from '../systems/save';
-import { useGameStore } from '../store/gameStore';
-import type { SaveSnapshot } from '../store/types';
+import { craftQueueBridge, useGameStore } from '../store/gameStore';
+import type { CraftJob, SaveSnapshot } from '../store/types';
 
 function baseV3(): RawSaveRecord {
   return {
@@ -39,9 +40,11 @@ function baseV3(): RawSaveRecord {
   };
 }
 
-const CRAFT = [
-  { id: 'c1', recipeId: 'bandage', stationId: null, qty: 2, readyMin: 1900 },
-  { id: 'c2', recipeId: 'ammo_9mm', stationId: 'workbench', qty: 1, readyMin: 2100 },
+// Lane 7's engine shape (src/systems/crafting.ts CraftJob): segment-based,
+// so an interrupted job's banked progress must survive the round trip.
+const CRAFT: CraftJob[] = [
+  { uid: 'job_1_bandage', recipeId: 'bandage', startedAtMin: 1800, bankedMin: 0, durationMin: 30, status: 'running' },
+  { uid: 'job_2_ammo_9mm', recipeId: 'ammo_9mm', startedAtMin: 1700, bankedMin: 12, durationMin: 45, status: 'interrupted' },
 ];
 const CHOICES = { beacon: 'lit', ending_path: 'leave' };
 const BASE_EXT = {
@@ -83,26 +86,18 @@ describe('field-contract fields survive the save migration path', () => {
   });
 });
 
-describe('field-contract store verbs', () => {
+describe('field-contract store plumbing', () => {
   beforeEach(() => {
+    craftQueueBridge.read = null;
+    craftQueueBridge.write = null;
     useGameStore.setState({ craftQueue: [], storyChoices: {}, baseExt: {} });
   });
 
-  it('enqueueCraft appends with a generated id; cancel/remove take it out', () => {
-    const s = useGameStore.getState();
-    const id = s.enqueueCraft({ recipeId: 'bandage', stationId: null, qty: 1, readyMin: 1500 });
-    expect(typeof id).toBe('string');
-    expect(id.length).toBeGreaterThan(0);
-    let q = useGameStore.getState().craftQueue;
-    expect(q).toHaveLength(1);
-    expect(q[0]).toMatchObject({ recipeId: 'bandage', qty: 1, readyMin: 1500 });
-    useGameStore.getState().cancelCraft(id);
-    expect(useGameStore.getState().craftQueue).toHaveLength(0);
-
-    const id2 = useGameStore.getState().enqueueCraft({ recipeId: 'stew', stationId: 'chemistry', qty: 3, readyMin: 1600 });
-    useGameStore.getState().removeCraft(id2);
-    q = useGameStore.getState().craftQueue;
-    expect(q).toHaveLength(0);
+  it('setCraftQueue replaces the persisted mirror', () => {
+    useGameStore.getState().setCraftQueue(CRAFT);
+    expect(useGameStore.getState().craftQueue).toEqual(CRAFT);
+    useGameStore.getState().setCraftQueue([]);
+    expect(useGameStore.getState().craftQueue).toEqual([]);
   });
 
   it('setStoryChoice records string choices the boolean flags cannot hold', () => {
@@ -118,9 +113,11 @@ describe('field-contract store verbs', () => {
     expect(useGameStore.getState().baseExt).toEqual({ heat: 10, siegeState: 'warning', siegeNextMin: 5000 });
   });
 
-  it('startNewGame resets all three contract fields', () => {
+  it('startNewGame resets all three contract fields and clears the bridge sink', () => {
+    const cleared: CraftJob[][] = [];
+    craftQueueBridge.write = (jobs) => cleared.push(jobs);
     const s = useGameStore.getState();
-    s.enqueueCraft({ recipeId: 'bandage', stationId: null, qty: 1, readyMin: 1 });
+    s.setCraftQueue(CRAFT);
     s.setStoryChoice('beacon', 'lit');
     s.setBaseExt({ heat: 99 });
     s.startNewGame('survivor');
@@ -128,5 +125,6 @@ describe('field-contract store verbs', () => {
     expect(st.craftQueue).toEqual([]);
     expect(st.storyChoices).toEqual({});
     expect(st.baseExt).toEqual({});
+    expect(cleared).toEqual([[]]);
   });
 });

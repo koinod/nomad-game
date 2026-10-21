@@ -22,6 +22,15 @@ export interface FleetEntry {
   tiresFlat: number;
   hitchedTrailer: string | null; // trailer defId being towed
   loc: string; // wave 3: human location label ("At the depot", "Carrier deck", coords)
+  // parallel cycle (Lane 13 field request): instance + fuel accounting.
+  // OPTIONAL because the engine stamps them when it publishes the fleet;
+  // until a publisher stamps them, readers default: instanceId ?? defId
+  // (one instance per def in the current fleet), fuelLiters ?? fuelPct
+  // of tankLiters. Lane 13's DispatchPanel reads them defensively.
+  instanceId?: string;
+  fuelLiters?: number; // absolute fuel aboard, liters
+  tankLiters?: number; // tank capacity, liters
+  burnClass?: number; // fuel burn class (Lane 13's consumption model)
 }
 
 /** One trailer row for the phone's Vehicles app. */
@@ -36,6 +45,9 @@ export interface TrailerFleetEntry {
   fuelLiters: number; // tanker only, else 0
   beaconMode: 'off' | 'sat' | 'horde';
   loadedVehicle: string | null; // vehicle name riding the deck
+  // parallel cycle (Lane 13 field request): instance identity, same
+  // defaulting rule as FleetEntry (instanceId ?? defId until stamped).
+  instanceId?: string;
 }
 
 export interface DifficultyDef {
@@ -296,6 +308,15 @@ export interface Dispatch {
   etaMin: number;
   distM: number;
   status: 'out';
+  // parallel cycle (Lane 13 field request): instance addressing + fuel.
+  // Optional on the type because legacy saves carry dispatches without
+  // them; loadFromSlot defaults them (instance ids := the def ids, fuel
+  // := 0 = not yet accounted) and startDispatch stamps them at creation,
+  // so live state always carries them. Lane 13's instance-id
+  // startDispatch signature lands at integration (main agent).
+  vehicleInstanceId?: string;
+  trailerInstanceId?: string | null;
+  fuelLiters?: number;
 }
 
 export interface JournalEntry {
@@ -324,16 +345,21 @@ export interface BaseBuildOrder {
 // All are OPTIONAL on the v3 snapshot (passthrough-safe, see save.ts):
 // older saves lack them, the store defaults them on load, no version bump.
 
-/** One timed station-craft order (Lane 7's timer engine owns the logic;
- *  Lane 5 owns persistence). Times are absolute game minutes, the same
- *  clock as Dispatch/BaseBuildOrder. */
-export interface CraftOrder {
-  id: string;
+/** One timed craft job — Lane 7's engine shape, declared here so the
+ *  save contract and src/systems/crafting.ts (which exports the identical
+ *  interface) stay structurally interchangeable. Segment-based on
+ *  purpose: an interrupted job banks its progress and freezes, which a
+ *  single deadline timestamp cannot express. Lane 7 owns the engine and
+ *  its useCraftQueue store; Lane 5 owns persisting this array. */
+export interface CraftJob {
+  uid: string;
   recipeId: string; // FIELD_RECIPES / STATION_RECIPES id (data/items)
-  stationId: string | null; // StationId, null = field craft
-  qty: number; // units of the result to produce
-  /** Absolute game minutes when the order completes. */
-  readyMin: number;
+  /** Absolute game minute the current run segment started. */
+  startedAtMin: number;
+  /** Progress banked before this segment (interrupt/resume), in minutes. */
+  bankedMin: number;
+  durationMin: number;
+  status: 'running' | 'interrupted';
 }
 
 /** Base-state extensions (Lane 10 owns the logic: claims, heat, siege,
@@ -392,11 +418,12 @@ export interface SaveSnapshot {
   // wave 4: character appearance — optional on v3, store defaults on load
   appearance?: Appearance;
   // parallel cycle (Lane 5 field contract) — optional on v3, same rule:
-  // absent on older saves, store defaults them on load. Lane 7 persists
-  // its timed craft queue here; Lane 9 records string-valued story
-  // choices the boolean `flags` map cannot hold (e.g. beacon: 'lit');
-  // Lane 10 persists base extensions here.
-  craftQueue?: CraftOrder[];
+  // absent on older saves, store defaults them on load. Lane 7's timed
+  // craft jobs persist here (harvested/rehydrated through the bridge in
+  // gameStore.ts); Lane 9 records string-valued story choices the
+  // boolean `flags` map cannot hold (e.g. beacon: 'lit'); Lane 10
+  // persists base extensions here.
+  craftQueue?: CraftJob[];
   storyChoices?: Record<string, string>;
   baseExt?: BaseExt;
 }

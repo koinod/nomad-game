@@ -1,10 +1,12 @@
 // Lane 5 snapshot round-trip: store state -> SaveSnapshot -> store state,
 // with the IndexedDB layer mocked out (the real save.ts migration path is
 // covered by lane5-contract.test.ts and save.test.ts). Proves saveToSlot
-// writes the field-contract fields and loadFromSlot restores them — and
-// that a snapshot WITHOUT them loads with empty defaults, never a crash.
+// writes the field-contract fields — harvesting Lane 7's live jobs
+// through craftQueueBridge when registered — and loadFromSlot restores
+// them (and rehydrates the bridge sink), defaulting cleanly when an
+// older snapshot lacks them.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { SaveSnapshot } from '../store/types';
+import type { CraftJob, SaveSnapshot } from '../store/types';
 
 const captured = vi.hoisted(() => ({
   saved: null as { slot: string; snap: SaveSnapshot } | null,
@@ -20,7 +22,12 @@ vi.mock('../systems/save', () => ({
   listSaveSlots: async () => [],
 }));
 
-import { useGameStore } from '../store/gameStore';
+import { craftQueueBridge, useGameStore } from '../store/gameStore';
+
+const JOBS: CraftJob[] = [
+  { uid: 'job_1_bandage', recipeId: 'bandage', startedAtMin: 1800, bankedMin: 0, durationMin: 30, status: 'running' },
+  { uid: 'job_2_ammo_9mm', recipeId: 'ammo_9mm', startedAtMin: 1700, bankedMin: 12, durationMin: 45, status: 'interrupted' },
+];
 
 function minimalSnapshot(patch: Partial<SaveSnapshot> = {}): SaveSnapshot {
   return {
@@ -56,47 +63,87 @@ function minimalSnapshot(patch: Partial<SaveSnapshot> = {}): SaveSnapshot {
 beforeEach(() => {
   captured.saved = null;
   captured.loadResult = null;
+  craftQueueBridge.read = null;
+  craftQueueBridge.write = null;
   useGameStore.setState({ craftQueue: [], storyChoices: {}, baseExt: {}, toasts: [] });
 });
 
 describe('store snapshot round-trip (field contract)', () => {
-  it('saveToSlot writes craftQueue / storyChoices / baseExt into the snapshot', async () => {
+  it('saveToSlot writes storyChoices / baseExt and the mirrored craft queue', async () => {
     const s = useGameStore.getState();
-    const id = s.enqueueCraft({ recipeId: 'bandage', stationId: null, qty: 2, readyMin: 1900 });
+    s.setCraftQueue(JOBS);
     s.setStoryChoice('beacon', 'lit');
     s.setBaseExt({ heat: 42, stockpile: [{ uid: 's1', itemId: 'scrap', qty: 9 }] });
 
     const ok = await useGameStore.getState().saveToSlot('1');
     expect(ok).toBe(true);
     expect(captured.saved?.slot).toBe('1');
-    expect(captured.saved?.snap.craftQueue).toEqual([
-      { id, recipeId: 'bandage', stationId: null, qty: 2, readyMin: 1900 },
-    ]);
+    expect(captured.saved?.snap.craftQueue).toEqual(JOBS);
     expect(captured.saved?.snap.storyChoices).toEqual({ beacon: 'lit' });
     expect(captured.saved?.snap.baseExt?.heat).toBe(42);
     expect(captured.saved?.snap.baseExt?.stockpile).toHaveLength(1);
   });
 
-  it('loadFromSlot restores the fields from a snapshot that carries them', async () => {
+  it('saveToSlot harvests Lane 7 jobs through the bridge when registered', async () => {
+    craftQueueBridge.read = () => JOBS;
+    const ok = await useGameStore.getState().saveToSlot('1');
+    expect(ok).toBe(true);
+    expect(captured.saved?.snap.craftQueue).toEqual(JOBS);
+    // and the store mirror was refreshed from the harvest
+    expect(useGameStore.getState().craftQueue).toEqual(JOBS);
+  });
+
+  it('loadFromSlot restores the fields and rehydrates the bridge sink', async () => {
+    const sunk: CraftJob[][] = [];
+    craftQueueBridge.write = (jobs) => sunk.push(jobs);
     captured.loadResult = minimalSnapshot({
-      craftQueue: [{ id: 'c9', recipeId: 'stew', stationId: 'chemistry', qty: 1, readyMin: 3000 }],
+      craftQueue: JOBS,
       storyChoices: { beacon: 'dark' },
       baseExt: { siegeState: 'warning', siegeNextMin: 4400 },
     });
     const ok = await useGameStore.getState().loadFromSlot('1');
     expect(ok).toBe(true);
     const st = useGameStore.getState();
-    expect(st.craftQueue).toHaveLength(1);
-    expect(st.craftQueue[0].recipeId).toBe('stew');
+    expect(st.craftQueue).toEqual(JOBS);
     expect(st.storyChoices).toEqual({ beacon: 'dark' });
     expect(st.baseExt.siegeState).toBe('warning');
     expect(st.baseExt.siegeNextMin).toBe(4400);
+    expect(sunk).toEqual([JOBS]);
+  });
+
+  it('loadFromSlot defaults Lane 13 dispatch instance ids + fuel on legacy entries', async () => {
+    captured.loadResult = minimalSnapshot({
+      dispatches: [
+        // legacy entry: no instance ids, no fuel (pre-request save)
+        {
+          id: 'd1', survivorId: 'sv1', vehicleDefId: 'stallion_fx', trailerDefId: null,
+          task: 'scavenge', destPoiId: 'relay_station', departMin: 100, etaMin: 400, distM: 900, status: 'out',
+        },
+        // stamped entry: everything present, must pass through untouched
+        {
+          id: 'd2', survivorId: 'sv2', vehicleDefId: 'stallion_fx', trailerDefId: 'trailer_box',
+          task: 'scout', destPoiId: 'town', departMin: 200, etaMin: 500, distM: 1500, status: 'out',
+          vehicleInstanceId: 'stallion_fx', trailerInstanceId: 'trailer_box', fuelLiters: 18.5,
+        },
+      ],
+    });
+    const ok = await useGameStore.getState().loadFromSlot('1');
+    expect(ok).toBe(true);
+    const [d1, d2] = useGameStore.getState().dispatches;
+    expect(d1.vehicleInstanceId).toBe('stallion_fx');
+    expect(d1.trailerInstanceId).toBeNull();
+    expect(d1.fuelLiters).toBe(0);
+    expect(d2.vehicleInstanceId).toBe('stallion_fx');
+    expect(d2.trailerInstanceId).toBe('trailer_box');
+    expect(d2.fuelLiters).toBe(18.5);
   });
 
   it('loadFromSlot defaults the fields when an older snapshot lacks them', async () => {
+    const sunk: CraftJob[][] = [];
+    craftQueueBridge.write = (jobs) => sunk.push(jobs);
     // dirty the store first so defaults are observable, not inherited
     const s = useGameStore.getState();
-    s.enqueueCraft({ recipeId: 'bandage', stationId: null, qty: 1, readyMin: 1 });
+    s.setCraftQueue(JOBS);
     s.setStoryChoice('beacon', 'lit');
     s.setBaseExt({ heat: 88 });
 
@@ -107,5 +154,6 @@ describe('store snapshot round-trip (field contract)', () => {
     expect(st.craftQueue).toEqual([]);
     expect(st.storyChoices).toEqual({});
     expect(st.baseExt).toEqual({});
+    expect(sunk).toEqual([[]]);
   });
 });

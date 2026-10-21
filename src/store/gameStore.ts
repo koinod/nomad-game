@@ -11,7 +11,7 @@ import { DEFAULT_APPEARANCE, DIFFICULTIES } from './types';
 import type {
   Appearance, DifficultyId, Equipped, FleetEntry, InvItem, PhoneTab, QuestProgress, QuestStepType,
   SaveMeta, SaveSnapshot, Screen, ToastMsg, TrailerFleetEntry,
-  Dispatch, JournalEntry, ScoutReport, BaseBuildOrder, CraftOrder, BaseExt,
+  Dispatch, JournalEntry, ScoutReport, BaseBuildOrder, CraftJob, BaseExt,
 } from './types';
 import {
   carryLimitKg, encumbranceTier, slotLimit, totalWeightKg, usedSlots,
@@ -125,14 +125,13 @@ interface GameState {
   scouted: Record<string, ScoutReport>;
   baseQueue: BaseBuildOrder[];
 
-  // parallel cycle — Lane 5 field contract state (see types.ts). Lane 7's
-  // crafting engine drives the queue through these verbs; Lane 9 records
-  // story choices; Lane 10 patches base extensions. All default empty and
-  // ride the v3 save as optional fields.
-  craftQueue: CraftOrder[];
-  enqueueCraft: (order: Omit<CraftOrder, 'id'>) => string;
-  cancelCraft: (id: string) => void;
-  removeCraft: (id: string) => void;
+  // parallel cycle — Lane 5 field contract state (see types.ts). The
+  // craft queue is Lane 7's job array, mirrored here for persistence and
+  // synced with their useCraftQueue store through craftQueueBridge
+  // (below); Lane 9 records story choices; Lane 10 patches base
+  // extensions. All default empty and ride the v3 save as optional fields.
+  craftQueue: CraftJob[];
+  setCraftQueue: (jobs: CraftJob[]) => void;
   storyChoices: Record<string, string>;
   setStoryChoice: (key: string, value: string) => void;
   baseExt: BaseExt;
@@ -272,6 +271,27 @@ interface GameState {
 }
 
 const initialEquipped: Equipped = { melee: null, ranged: null, pack: null };
+
+/**
+ * Craft-queue persistence bridge (Lane 5 field contract, Lane 7 request).
+ * Lane 7's engine keeps its jobs in its own zustand store (useCraftQueue
+ * in src/systems/crafting.ts), which this module must not import — that
+ * file imports this store, so a static import back would close a cycle.
+ * Instead Lane 7 registers its store here at merge time (two lines in
+ * crafting.ts):
+ *
+ *   craftQueueBridge.read = () => useCraftQueue.getState().jobs;
+ *   craftQueueBridge.write = (jobs) => useCraftQueue.setState({ jobs: [...jobs] });
+ *
+ * Until registered (and in every test that doesn't), read/write are null
+ * and persistence falls back to the store's own craftQueue mirror.
+ * saveToSlot harvests bridge-first and refreshes the mirror; loadFromSlot
+ * and startNewGame push the restored/cleared array into the bridge.
+ */
+export const craftQueueBridge: {
+  read: (() => CraftJob[]) | null;
+  write: ((jobs: CraftJob[]) => void) | null;
+} = { read: null, write: null };
 
 export const useGameStore = create<GameState>()((set, get) => {
   /** Wave 3: settle every dispatch whose ETA has passed. Runs off
@@ -518,6 +538,8 @@ export const useGameStore = create<GameState>()((set, get) => {
         craftQueue: [], storyChoices: {}, baseExt: {},
         dayStats: { kills: 0, crafts: 0, pickups: 0 },
       });
+      // a new run starts with an empty bench — clear Lane 7's store too
+      craftQueueBridge.write?.([]);
     },
 
     syncPlayer: (pos, hp, stamina) => set({ pos, hp: Math.max(0, hp), stamina }),
@@ -1392,19 +1414,7 @@ export const useGameStore = create<GameState>()((set, get) => {
     craftQueue: [],
     storyChoices: {},
     baseExt: {},
-    enqueueCraft: (order) => {
-      const id = `c${Date.now().toString(36)}${(uidCounter++).toString(36)}`;
-      set({ craftQueue: [...get().craftQueue, { ...order, id }] });
-      return id;
-    },
-    cancelCraft: (id) => {
-      set({ craftQueue: get().craftQueue.filter((o) => o.id !== id) });
-    },
-    removeCraft: (id) => {
-      // completion removal is cancelCraft's twin; kept as a separate verb
-      // so Lane 7's engine reads clearly at the call site (finish != cancel)
-      set({ craftQueue: get().craftQueue.filter((o) => o.id !== id) });
-    },
+    setCraftQueue: (jobs) => set({ craftQueue: [...jobs] }),
     setStoryChoice: (key, value) => {
       set({ storyChoices: { ...get().storyChoices, [key]: value } });
     },
@@ -1459,6 +1469,11 @@ export const useGameStore = create<GameState>()((set, get) => {
         id: `d${Date.now().toString(36)}${(uidCounter++).toString(36)}`,
         survivorId, vehicleDefId, trailerDefId, task, destPoiId,
         departMin: now, etaMin, distM, status: 'out',
+        // Lane 13: instance ids := def ids (one instance per def today);
+        // fuel accounting (burn on dispatch) lands with their integration
+        vehicleInstanceId: vehicleDefId,
+        trailerInstanceId: trailerDefId,
+        fuelLiters: 0,
       };
       set({ dispatches: [...s.dispatches, d] });
       const vehName = s.fleet.find((f) => f.defId === vehicleDefId)?.name ?? vehicleDefId;
@@ -1663,6 +1678,10 @@ export const useGameStore = create<GameState>()((set, get) => {
     saveToSlot: async (slot) => {
       const s = get();
       const eng = getGame();
+      // Lane 7 bridge: their live job array wins over the mirror; either
+      // way the mirror is refreshed so state readers see the truth.
+      const craftJobs = craftQueueBridge.read ? craftQueueBridge.read() : s.craftQueue;
+      if (craftJobs !== s.craftQueue) set({ craftQueue: [...craftJobs] });
       const snapshot: SaveSnapshot = {
         version: 3,
         savedAt: Date.now(),
@@ -1694,7 +1713,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         scouted: s.scouted,
         baseQueue: s.baseQueue,
         appearance: s.appearance,
-        craftQueue: s.craftQueue,
+        craftQueue: [...craftJobs],
         storyChoices: s.storyChoices,
         baseExt: s.baseExt,
       };
@@ -1740,8 +1759,15 @@ export const useGameStore = create<GameState>()((set, get) => {
         perks: snap.perks,
         survivors: snap.survivors,
         base: sanitizeBase(snap.base),
-        // wave 3 fields: absent on older v3 saves — default them here
-        dispatches: snap.dispatches ?? [],
+        // wave 3 fields: absent on older v3 saves — default them here.
+        // Lane 13: legacy dispatch entries predate instance ids + fuel —
+        // default per entry (instance := def, fuel := 0 unaccounted).
+        dispatches: (snap.dispatches ?? []).map((d) => ({
+          ...d,
+          vehicleInstanceId: d.vehicleInstanceId ?? d.vehicleDefId,
+          trailerInstanceId: d.trailerInstanceId ?? d.trailerDefId,
+          fuelLiters: d.fuelLiters ?? 0,
+        })),
         journal: snap.journal ?? [],
         scouted: snap.scouted ?? {},
         baseQueue: snap.baseQueue ?? [],
@@ -1755,6 +1781,8 @@ export const useGameStore = create<GameState>()((set, get) => {
         dayStats: { kills: 0, crafts: 0, pickups: 0 },
         pendingSnapshot: snap,
       });
+      // Lane 7 bridge: rehydrate their queue store with the loaded jobs
+      craftQueueBridge.write?.(snap.craftQueue ?? []);
       return true;
     },
 
