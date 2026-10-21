@@ -1,7 +1,8 @@
 // CRAFT WAVE movement pass — pure locomotion helpers.
 import { describe, expect, it } from 'vitest';
 import {
-  accelRate, expDamp, sprintFovKick, wadeBlocksJump, wadeBlocksSprint, wadeFactor,
+  accelRate, bobPhaseDelta, expDamp, groundContactY, sprintFovKick, sprintLatch,
+  wadeBlocksJump, wadeBlocksSprint, wadeFactor,
 } from '../game/moveMath';
 
 describe('expDamp', () => {
@@ -30,6 +31,55 @@ describe('sprintFovKick', () => {
     expect(sprintFovKick(0)).toBe(0);
     expect(sprintFovKick(1)).toBe(6);
     expect(sprintFovKick(2)).toBe(6);
+  });
+});
+
+// Item 1 (2026-10-21 playtest: "camera spazzes while running") —
+// the three root causes, pinned at the math level: sprint stamina
+// flicker, the downhill ground-contact sawtooth, and time-keyed bob.
+describe('sprintLatch (Item 1)', () => {
+  it('engages only at empty and holds until a real reserve is back', () => {
+    expect(sprintLatch(false, 100)).toBe(false);
+    expect(sprintLatch(false, 2)).toBe(false);
+    expect(sprintLatch(false, 1)).toBe(true); // bottomed out
+    expect(sprintLatch(false, 0)).toBe(true);
+    expect(sprintLatch(true, 10)).toBe(true); // still latched mid-regen
+    expect(sprintLatch(true, 24.9)).toBe(true);
+    expect(sprintLatch(true, 25)).toBe(false); // reserve restored
+    expect(sprintLatch(true, 100)).toBe(false);
+  });
+  it('cannot oscillate: between 1 and 25 the state is sticky both ways', () => {
+    for (const s of [2, 5, 12, 20, 24]) {
+      expect(sprintLatch(false, s)).toBe(false);
+      expect(sprintLatch(true, s)).toBe(true);
+    }
+  });
+});
+
+describe('groundContactY (Item 1)', () => {
+  it('snaps to terrain for rises and step-scale drops (downhill stays grounded)', () => {
+    expect(groundContactY(1, 1.2)).toBe(1.2); // terrain rose underfoot
+    expect(groundContactY(1, 1)).toBe(1); // flat
+    expect(groundContactY(1, 0.98)).toBe(0.98); // the old 0.02 break-contact case
+    expect(groundContactY(1, 0.6)).toBe(0.6); // 0.4 m step down: still contact
+  });
+  it('releases only past the step allowance (a real ledge)', () => {
+    expect(groundContactY(1, 0.55)).toBe(0.55); // exactly at the allowance
+    expect(groundContactY(1, 0.5)).toBeNull(); // 0.5 m drop: airborne
+    expect(groundContactY(3, 0)).toBeNull(); // cliff edge
+  });
+});
+
+describe('bobPhaseDelta (Item 1)', () => {
+  it('one full cycle per two footsteps (2 x 2.4 m)', () => {
+    expect(bobPhaseDelta(2.4)).toBeCloseTo(Math.PI, 10); // one step = half cycle
+    expect(bobPhaseDelta(4.8)).toBeCloseTo(Math.PI * 2, 10);
+  });
+  it('is distance-proportional: no distance, no phase (no velocity-noise bob)', () => {
+    expect(bobPhaseDelta(0)).toBe(0);
+    expect(bobPhaseDelta(1.2)).toBeCloseTo(bobPhaseDelta(0.6) * 2, 10);
+    // split steps compose: phase over 1 m in two halves equals the whole
+    expect(bobPhaseDelta(0.5) + bobPhaseDelta(0.5)).toBeCloseTo(bobPhaseDelta(1), 10);
   });
 });
 

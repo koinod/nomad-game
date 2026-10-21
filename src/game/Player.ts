@@ -13,8 +13,16 @@ import { sfx } from '../systems/audio';
 import type { HuskManager } from './Husks';
 import { clamp, lerp } from './rng';
 import {
-  accelRate, expDamp, sprintFovKick, wadeBlocksJump, wadeBlocksSprint, wadeFactor,
+  accelRate, bobPhaseDelta, expDamp, groundContactY, sprintFovKick, sprintLatch,
+  wadeBlocksJump, wadeBlocksSprint, wadeFactor,
 } from './moveMath';
+
+/** Per-frame multiplicative decay (x *= 0.9 style), made frame-rate
+ *  independent: the factor the value would have kept after ONE second
+ *  at 60 fps, applied over dt instead of per rendered frame. */
+function frameDecay(perFrameAt60: number, dt: number): number {
+  return Math.exp(Math.log(perFrameAt60) * 60 * Math.max(dt, 0));
+}
 import { useGameStore } from '../store/gameStore';
 import { buildHumanFigure } from './figureKit';
 import { XP_EVENTS, type XpEventId } from '../systems/skills';
@@ -174,6 +182,7 @@ export class Player {
   private speedNorm = 0; // 0..1 of sprint speed, feeds move spread + sway
   private timeS = 0; // controller clock (sway phase)
   private lastHpSeen = -1; // damage interrupts reloads
+  private sprintExhausted = false; // stamina latch (moveMath.sprintLatch)
   private vel = new THREE.Vector3(); // horizontal velocity (smoothed)
   private vy = 0; // vertical velocity
   private grounded = true;
@@ -503,7 +512,11 @@ export class Player {
     // wading: shoreline ground below y=0 drags the stride (moveMath)
     const groundHere = ctx.groundY(this.pos.x, this.pos.z);
     const wade = wadeFactor(groundHere);
-    const wantSprint = input.sprint && ctx.sprintAllowed && this.stamina > 1 && mz > 0.1 && !this.crouching;
+    // stamina latch: sprint cuts at empty and stays cut until a real
+    // reserve is back — the old `stamina > 1` gate flickered sprint
+    // (and its FOV kick) on/off near empty (Item 1)
+    this.sprintExhausted = sprintLatch(this.sprintExhausted, this.stamina);
+    const wantSprint = input.sprint && ctx.sprintAllowed && !this.sprintExhausted && mz > 0.1 && !this.crouching;
     const sprinting = wantSprint && wishInput && !wadeBlocksSprint(groundHere);
 
     let speed = WALK_SPEED * ctx.speedMul * wade;
@@ -527,7 +540,7 @@ export class Player {
       let d = targetYaw - this.yaw;
       while (d > Math.PI) d -= Math.PI * 2;
       while (d < -Math.PI) d += Math.PI * 2;
-      this.yaw += d * Math.min(1, dt * 10);
+      this.yaw += d * expDamp(10, dt);
       this.group.rotation.y = this.yaw;
     }
     // smooth accel toward wish velocity: eager launch, firmer stop,
@@ -570,16 +583,24 @@ export class Player {
         this.grounded = true;
       }
     } else {
-      // glued to terrain when grounded (walk off a ledge -> next tick we're airborne)
+      // glued to terrain when grounded: a drop within the step
+      // allowance keeps contact and snaps down (descending slopes no
+      // longer sawtooth airborne->fall->land-dip — Item 1); only a
+      // real ledge starts a fall.
       const gy = Math.max(ctx.groundY(this.pos.x, this.pos.z), -0.5);
-      if (this.pos.y > gy + 0.02) this.grounded = false; // walked off something
-      else this.pos.y = gy;
+      const snapped = groundContactY(this.pos.y, gy);
+      if (snapped === null) this.grounded = false; // walked off a real ledge
+      else this.pos.y = snapped;
     }
-    this.landDip = lerp(this.landDip, 0, Math.min(1, dt * 7));
+    this.landDip = lerp(this.landDip, 0, expDamp(7, dt));
 
     if (moving) {
-      // locomotion cycle: limbs swing from hip/shoulder pivots
-      this.walkPhase += dt * (sprinting ? 13 : this.crouching ? 6 : 9);
+      // locomotion cycle: limbs swing from hip/shoulder pivots. The
+      // phase advances with DISTANCE traveled (one cycle = two 2.4 m
+      // footsteps), so bob, limb swing and footstep sounds stay in
+      // sync at any speed — the old time-keyed rates slid against
+      // the stride whenever velocity ramped or dragged (Item 1).
+      this.walkPhase += bobPhaseDelta(this.vel.length() * dt);
       const sw = Math.sin(this.walkPhase);
       const amp = sprinting ? 0.68 : this.crouching ? 0.34 : 0.52;
       this.legL.rotation.x = sw * amp;
@@ -627,10 +648,11 @@ export class Player {
       this.leanS = lerp(this.leanS, 0, expDamp(7, dt));
       this.rig.rotation.x = this.leanF;
       this.rig.rotation.z = this.leanS;
-      this.legL.rotation.x *= 0.9;
-      this.legR.rotation.x *= 0.9;
-      this.armL.rotation.x *= 0.9;
-      this.armR.rotation.x *= 0.9;
+      const settle = frameDecay(0.9, dt);
+      this.legL.rotation.x *= settle;
+      this.legR.rotation.x *= settle;
+      this.armL.rotation.x *= settle;
+      this.armR.rotation.x *= settle;
     }
 
     // stamina
@@ -645,7 +667,7 @@ export class Player {
     // shots and swings originate from the peeked position
     {
       const leanDir = (input.leanLeft ? -1 : 0) + (input.leanRight ? 1 : 0);
-      this.leanAmt = lerp(this.leanAmt, leanDir, Math.min(1, dt * 12));
+      this.leanAmt = lerp(this.leanAmt, leanDir, expDamp(12, dt));
       if (Math.abs(this.leanAmt) < 0.001 && leanDir === 0) this.leanAmt = 0;
     }
 
@@ -670,7 +692,7 @@ export class Player {
 
     // --- attack animation (right-arm override, after locomotion) ---
     const blocking = input.blocking && this.handItemId != null;
-    this.blockBlend = lerp(this.blockBlend, blocking ? 1 : 0, Math.min(1, dt * 12));
+    this.blockBlend = lerp(this.blockBlend, blocking ? 1 : 0, expDamp(12, dt));
     if (this.blockBlend > 0.02) {
       // block pose: arm across the chest, weapon up — blends in/out, overrides
       const b = this.blockBlend;
@@ -687,15 +709,15 @@ export class Player {
       const mat = this.swingTrail.material as THREE.MeshBasicMaterial;
       mat.opacity = 0.42 * (this.attackT / this.swingTotal);
     } else {
-      this.rig.rotation.y *= 0.8;
-      this.armR.rotation.y *= 0.9; // release the block pose's cross-body angle
+      this.rig.rotation.y *= frameDecay(0.8, dt);
+      this.armR.rotation.y *= frameDecay(0.9, dt); // release the block pose's cross-body angle
       if (this.swingTrail.visible && this.attackT <= 0) this.swingTrail.visible = false;
     }
     if (this.recoilT > 0) {
       this.recoilT -= dt;
       const k = Math.max(this.recoilT, 0) / 0.16;
       this.armR.rotation.x = -1.2 - k * 0.35; // arm up, kicked back
-      this.rig.rotation.y *= 0.8;
+      this.rig.rotation.y *= frameDecay(0.8, dt);
     }
 
     // gun carry/aim pose: shoulder the ranged weapon with both hands — off-hand
@@ -706,11 +728,11 @@ export class Player {
       const posing = rangedNow && this.attackT <= 0 && this.blockBlend < 0.5 && this.recoilT <= 0;
       if (posing && (!sprinting || this.aimLevel > 0)) {
         const aimX = this.aimLevel > 0 ? -1.52 : -1.2;
-        this.armR.rotation.x = lerp(this.armR.rotation.x, aimX, Math.min(1, dt * 10));
-        this.armL.rotation.x = lerp(this.armL.rotation.x, -1.1, Math.min(1, dt * 8));
-        this.armL.rotation.y = lerp(this.armL.rotation.y, 0.5, Math.min(1, dt * 8));
+        this.armR.rotation.x = lerp(this.armR.rotation.x, aimX, expDamp(10, dt));
+        this.armL.rotation.x = lerp(this.armL.rotation.x, -1.1, expDamp(8, dt));
+        this.armL.rotation.y = lerp(this.armL.rotation.y, 0.5, expDamp(8, dt));
       } else {
-        this.armL.rotation.y = lerp(this.armL.rotation.y, 0, Math.min(1, dt * 8));
+        this.armL.rotation.y = lerp(this.armL.rotation.y, 0, expDamp(8, dt));
       }
     }
 
@@ -973,7 +995,7 @@ export class Player {
       this.updateViewModel(dt, leanAmt);
       const eyeH = (this.crouching ? 1.2 : 1.82) - this.landDip;
       if (this.fpEyeYSmooth === 0) this.fpEyeYSmooth = this.pos.y + eyeH;
-      this.fpEyeYSmooth = lerp(this.fpEyeYSmooth, this.pos.y + eyeH, Math.min(1, dt * 20));
+      this.fpEyeYSmooth = lerp(this.fpEyeYSmooth, this.pos.y + eyeH, expDamp(20, dt));
       const eye = new THREE.Vector3(this.pos.x, this.fpEyeYSmooth, this.pos.z);
       const fwd = new THREE.Vector3(
         Math.sin(this.camYaw) * cp,
@@ -1005,7 +1027,7 @@ export class Player {
         this.smoothTarget.copy(target);
         this.smoothInit = true;
       }
-      this.smoothTarget.lerp(target, Math.min(1, dt * 22));
+      this.smoothTarget.lerp(target, expDamp(22, dt));
       const dist = shoulderAim ? Math.min(this.zoomDist, 2.4) : this.zoomDist;
       const off = new THREE.Vector3(
         -Math.sin(this.camYaw) * cp,
@@ -1017,15 +1039,15 @@ export class Player {
       // swung over a hill or rock edge — ride over it instead
       const targetMinY = ctx.groundY(camPos.x, camPos.z) + 0.5;
       if (this.smoothCamMinY === 0) this.smoothCamMinY = targetMinY;
-      this.smoothCamMinY = lerp(this.smoothCamMinY, targetMinY, Math.min(1, dt * 6));
+      this.smoothCamMinY = lerp(this.smoothCamMinY, targetMinY, expDamp(6, dt));
       if (camPos.y < this.smoothCamMinY) camPos.y = this.smoothCamMinY;
       // impact punch: the camera jolts toward the player on every connect
-      this.hitPunch = lerp(this.hitPunch, 0, Math.min(1, dt * 10));
+      this.hitPunch = lerp(this.hitPunch, 0, expDamp(10, dt));
       if (this.hitPunch > 0.001) {
         const punchDir = this.smoothTarget.clone().sub(camPos).normalize();
         camPos.addScaledVector(punchDir, this.hitPunch * 1.4);
       }
-      cam.position.lerp(camPos, Math.min(1, dt * 18));
+      cam.position.lerp(camPos, expDamp(18, dt));
       cam.lookAt(this.smoothTarget);
       cam.rotateZ(-leanAmt * 0.32); // roll the view with the lean
     }
@@ -1035,7 +1057,7 @@ export class Player {
     const speedNorm = clamp(Math.hypot(this.vel.x, this.vel.z) / SPRINT_SPEED, 0, 1);
     const wantFov = this.aimLevel === 2 ? 38 : this.aimLevel === 1 ? 52 : 60 + (sprinting ? sprintFovKick(speedNorm) : 0);
     if (Math.abs(cam.fov - wantFov) > 0.05) {
-      cam.fov = lerp(cam.fov, wantFov, Math.min(1, dt * 10));
+      cam.fov = lerp(cam.fov, wantFov, expDamp(10, dt));
       cam.updateProjectionMatrix();
     }
   }
@@ -1180,7 +1202,7 @@ export class Player {
       );
       cam.lookAt(eyeX + fwd.x * 3, eyeY + fwd.y * 3, eyeZ + fwd.z * 3);
       if (Math.abs(cam.fov - 66) > 0.05) {
-        cam.fov = lerp(cam.fov, 66, Math.min(1, dt * 8));
+        cam.fov = lerp(cam.fov, 66, expDamp(8, dt));
         cam.updateProjectionMatrix();
       }
       return;
@@ -1190,7 +1212,7 @@ export class Player {
       this.smoothTarget.copy(target);
       this.smoothInit = true;
     }
-    this.smoothTarget.lerp(target, Math.min(1, dt * 22));
+    this.smoothTarget.lerp(target, expDamp(22, dt));
     const dist = Math.max(this.zoomDist, camDist);
     const off = new THREE.Vector3(
       -Math.sin(this.camYaw) * cp,
@@ -1198,12 +1220,16 @@ export class Player {
       -Math.cos(this.camYaw) * cp,
     ).multiplyScalar(dist);
     const camPos = this.smoothTarget.clone().add(off);
-    const minY = ctx.groundY(camPos.x, camPos.z) + 0.6;
-    if (camPos.y < minY) camPos.y = minY;
-    cam.position.lerp(camPos, Math.min(1, dt * 18));
+    // smoothed ground clearance, same as the on-foot camera — the old
+    // hard clamp snapped the chase cam when it swung over an edge
+    const targetMinY = ctx.groundY(camPos.x, camPos.z) + 0.6;
+    if (this.smoothCamMinY === 0) this.smoothCamMinY = targetMinY;
+    this.smoothCamMinY = lerp(this.smoothCamMinY, targetMinY, expDamp(6, dt));
+    if (camPos.y < this.smoothCamMinY) camPos.y = this.smoothCamMinY;
+    cam.position.lerp(camPos, expDamp(18, dt));
     cam.lookAt(this.smoothTarget);
     if (Math.abs(cam.fov - 62) > 0.05) {
-      cam.fov = lerp(cam.fov, 62, Math.min(1, dt * 8));
+      cam.fov = lerp(cam.fov, 62, expDamp(8, dt));
       cam.updateProjectionMatrix();
     }
   }
@@ -1241,12 +1267,12 @@ export class Player {
     if (this.aimLevel === 2) {
       // down the sights: gun centered, steady, no bob or swing theatrics
       vm.position.set(
-        lerp(vm.position.x, -0.02, Math.min(1, dt * 14)),
-        lerp(vm.position.y, -0.185, Math.min(1, dt * 14)),
-        lerp(vm.position.z, -0.5, Math.min(1, dt * 14)),
+        lerp(vm.position.x, -0.02, expDamp(14, dt)),
+        lerp(vm.position.y, -0.185, expDamp(14, dt)),
+        lerp(vm.position.z, -0.5, expDamp(14, dt)),
       );
-      vm.rotation.x = lerp(vm.rotation.x, 0, Math.min(1, dt * 14));
-      vm.rotation.z = lerp(vm.rotation.z, 0, Math.min(1, dt * 14));
+      vm.rotation.x = lerp(vm.rotation.x, 0, expDamp(14, dt));
+      vm.rotation.z = lerp(vm.rotation.z, 0, expDamp(14, dt));
       return;
     }
     if (this.attackT > 0) {
@@ -1255,15 +1281,15 @@ export class Player {
       vm.position.set(0.32 - leanAmt * 0.1, -0.3 + bob, -0.55 - Math.sin(k * Math.PI) * 0.14);
     } else if (this.blockBlend > 0.02) {
       vm.position.set(
-        lerp(vm.position.x, 0.08, Math.min(1, dt * 12)),
-        lerp(vm.position.y, -0.27, Math.min(1, dt * 12)),
+        lerp(vm.position.x, 0.08, expDamp(12, dt)),
+        lerp(vm.position.y, -0.27, expDamp(12, dt)),
         -0.5,
       );
-      vm.rotation.z = lerp(vm.rotation.z, 0.55, Math.min(1, dt * 12));
-      vm.rotation.x = lerp(vm.rotation.x, -0.15, Math.min(1, dt * 12));
+      vm.rotation.z = lerp(vm.rotation.z, 0.55, expDamp(12, dt));
+      vm.rotation.x = lerp(vm.rotation.x, -0.15, expDamp(12, dt));
     } else {
-      vm.rotation.x = lerp(vm.rotation.x, 0, Math.min(1, dt * 10));
-      vm.rotation.z = lerp(vm.rotation.z, 0, Math.min(1, dt * 10));
+      vm.rotation.x = lerp(vm.rotation.x, 0, expDamp(10, dt));
+      vm.rotation.z = lerp(vm.rotation.z, 0, expDamp(10, dt));
       vm.position.set(0.32 - leanAmt * 0.12, -0.3 + bob, -0.55);
     }
   }
