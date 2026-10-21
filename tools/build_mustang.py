@@ -513,7 +513,7 @@ SHOTS = [
     ('04_front', (7.8, 0, 0.80), (0, 0, 0.58)),
     ('05_rear', (-7.8, 0, 0.95), (0, 0, 0.60)),
     ('06_top', (0.6, -0.9, 9.4), (0.2, 0, 0.3)),
-    ('07_interior', (0.28, 0.40, 1.17), (1.45, 0.26, 0.92)),
+    ('07_interior', (-2.0, -2.3, 1.65), (0.35, 0.05, 0.92)),
 ]
 for (name, loc, tgt) in SHOTS:
     cam.location = loc
@@ -523,7 +523,7 @@ for (name, loc, tgt) in SHOTS:
         # the studio rig can't see into a closed cabin: lift the roof
         # panel for this shot only and add a soft cabin fill, so the
         # interior proof actually proves the interior
-        for nm in ('RoofPanel', 'Sunroof', 'AntennaFin'):
+        for nm in ('RoofPanel', 'Sunroof', 'AntennaFin', 'Glasshouse', 'GlassSeal'):
             if nm in bpy.data.objects:
                 bpy.data.objects[nm].hide_render = True
         ld = bpy.data.lights.new('CabinFill', 'POINT')
@@ -546,7 +546,7 @@ for (name, loc, tgt) in SHOTS:
     print('RENDERED', name)
     if cabin_fill is not None:
         bpy.data.objects.remove(cabin_fill, do_unlink=True)
-        for nm in ('RoofPanel', 'Sunroof', 'AntennaFin'):
+        for nm in ('RoofPanel', 'Sunroof', 'AntennaFin', 'Glasshouse', 'GlassSeal'):
             if nm in bpy.data.objects:
                 bpy.data.objects[nm].hide_render = False
 
