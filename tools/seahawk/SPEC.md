@@ -2,6 +2,7 @@
 
 Asset: `public/seahawk.glb` · Source: `tools/seahawk/build_seahawk.py` (procedural, Blender 4.2)
 Proofs: `design-refs/proof-seahawk/` (01 front34 · 02 rear34 · 03 side · 04 front · 05 top · 06 door gunner · 07 cockpit cutaway)
+Finish-pass proofs: `design-refs/proof-seahawk-finish/` (same angles, `tools/seahawk/render_proofs_finish.py`)
 Built from Ian's reference (`design-refs/seahawk-reference-ian.png`): US NAVY 615 / HSC-5, door gunner
 at the open port door, FLIR ball, rescue hoist, canted tail rotor.
 
@@ -60,19 +61,39 @@ at the open port door, FLIR ball, rescue hoist, canted tail rotor.
 - **Rescue hoist**: starboard above door; drum (3.30, −1.50, 2.58), hook rest (3.30, −1.52, 2.00).
 - **Cabin**: 2 bench rows (6 troops) + 2 forward jump seats; dome lights emissive.
 
-## Materials (PBR, no textures — procedural)
+## Materials (PBR)
 
-`naval_gray` airframe (0.335/0.365/0.385, rough .58, metal .18) · `glass_tint` (alpha 0.62,
-rough .07) · rotor charcoal · low-viz `marking` decals as geometry text: **615 + HSC-5** on both
-boom sides, **US NAVY** on both doghouse sides, **NAVY** on fin · emissive position lights
-(port red / stbd green / tail white) and MFD screens (teal + amber).
+`naval_gray` airframe (0.335/0.365/0.385, rough .58, metal .18) · rotor charcoal · low-viz
+`marking` decals as geometry text: **615 + HSC-5** on both boom sides, **US NAVY** on both
+doghouse sides, **NAVY** on fin · emissive position lights (port red / stbd green / tail
+white) and MFD screens (teal + amber).
+
+FINISH PASS (Ty's conditional-approval items, 2026-10-21):
+- **Panel lines + weathering** are painted into canvas textures in the lofts' parametric UV
+  space (u = station fraction, v = ring angle): `naval_gray_fuse` (2048×1024) and
+  `naval_gray_dog` (1024×512), exported as JPEG q90. Frame stations, longeron/floor seams,
+  nose-avionics + cockpit-door + boom-avionics outlines, exhaust soot over the doghouse/boom
+  top, door-sill/window/sponson grime streaks, belly shading, two replacement-panel tones,
+  fine per-pixel grain. Geometry adds: tail-fold collar (`SH_TailFoldRing`, seam gray) at the
+  boom fold station, rotor-deck seam strips, sliding-door gasket frames (`SH_DoorGasket*`).
+- **`glass_tint` reworked**: dark blue-green dielectric (0.030/0.068/0.088, rough .05,
+  metal 0), alpha **0.82 BLEND** — and `mat()` now drives the BSDF Alpha input, without
+  which the original alpha never exported at all (the shipped GLB's glass was silently
+  opaque 1.0). All glazing is conformal: windshield + chin are `loft_band`s that parallel
+  the skin exactly; cockpit/cabin windows are framed surface patches (dark frame proud of
+  skin, glass proud of frame). Cabin windows remain surface glass over the tub wall (see
+  Gaps) but now read as framed windows, not decals.
 
 ## Gaps / notes for integration
 
-- Glass exports with alpha 0.62 + dithered transparency; if the game's material pass prefers
-  opaque canopy glass, swap `glass_tint` values at load — geometry is unaffected.
+- Glass is alpha 0.82 BLEND, dielectric. Alpha is deliberately not lower: the nose cone
+  ahead of the instrument panel is hollow, and at ~0.55 the far skin's painted texture
+  bleeds through the windshield as pale patches (diagnosed via A/B renders during the
+  finish pass). If a future cockpit liner fills the nose, alpha can drop toward the
+  GT500 windshield's 0.42.
 - Door apertures are TRUE boolean cutouts in the fuselage loft; doors ship closed (translate to open).
-- Cabin side windows aft are surface panes (not cut through) — cabin interior is a tub with its
-  own walls, so cut-through windows there would show the tub wall; panes read correctly dark.
+- Cabin side windows aft are surface glass (not cut through) — cabin interior is a tub with its
+  own walls, so cut-through windows there would show the tub wall; the framed patches read
+  correctly dark against it.
 - No LODs, no collision meshes, no flight model — flight integration is a later serialized step
   (heliMath was purged). Poly count ≈ 12.9k faces / 157 mesh objects — plenty of headroom.
