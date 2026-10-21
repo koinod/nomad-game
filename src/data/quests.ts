@@ -3,6 +3,16 @@ import type { QuestDef } from '../store/types';
 // v0.1.0 vertical slice: prologue + one main chain ending at The Lighthouse.
 // Quest targets: 'poi:<id>' positions come from the engine's POI registry;
 // 'npc:<id>' talks resolve through dialogue; 'husk' kills; item ids for collect.
+//
+// STORY AUDIT (Lane 9, 2026-10-21 — chain verified in the purged world):
+// prologue (dialogue questEvent boat_choice → prologue_done) → q1 Jonah
+// (talk + met_jonah) → q2 phone (wreck collect → phone_unlocked) → q3 relay
+// (5 husks + relay_switch interact → relay_online, which is also Priya's
+// recruit gate in Interact: requiresFlag 'relay_online' ✓) → q4 parts →
+// q5 beacon: Interact opens Kowalski's beacon_choice dialogue at the lamp
+// room; DialogueOverlay fires questEvent('choice','beacon_choice') and
+// triggerEnding('light'|'dark'); the choices set beacon_lit / beacon_dark —
+// the hardmode seed (FACTIONS_CANON Decision 4). Chain is intact end-to-end.
 export const QUESTS: QuestDef[] = [
   {
     id: 'q_prologue',
@@ -89,5 +99,26 @@ export const QUESTS: QuestDef[] = [
     ],
     rewards: { flags: ['ending_ready'] },
     startsWhen: { questDone: 'q4_parts' },
+  },
+  {
+    // FACTIONS_CANON §2.7: the Enclave is a rumor — dead drops and ONE radio
+    // burst on a dead frequency, never an answer. The burst (worldWiring
+    // ENCLAVE_RADIO_BURST) fires after the relay lives and sets
+    // 'enclave_burst_heard', which starts this chain. Cache interactables
+    // (wiring step W6) fire questEvent('interact', 'cache:<cacheId>').
+    id: 'q_enclave_burst',
+    title: 'A Voice on a Dead Frequency',
+    giver: 'Unknown frequency',
+    brief: 'Once the relay breathed again, something answered on a band that has been dead for eighteen months. Whoever they are, they leave things behind. Find what they left.',
+    steps: [
+      { id: 's1', objective: 'Open the dead drop at the forest cache', type: 'interact', target: 'cache:enclave_cache_forest', count: 1 },
+      { id: 's2', objective: 'Open the dead drop at the wreck', type: 'interact', target: 'cache:enclave_cache_wreck', count: 1 },
+      { id: 's3', objective: 'Open the dead drop in the dunes', type: 'interact', target: 'cache:enclave_cache_dune', count: 1 },
+    ],
+    rewards: {
+      items: [{ id: 'gun_parts', qty: 2 }, { id: 'wire', qty: 2 }],
+      flags: ['enclave_evidence'],
+    },
+    startsWhen: { flag: 'enclave_burst_heard' },
   },
 ];
