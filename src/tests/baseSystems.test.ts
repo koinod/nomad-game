@@ -15,6 +15,7 @@ import {
   applyUpkeep, dailyMoraleTick, moraleEvent, newMoraleRuntime,
   moraleProductionMult, jobProductionMult, foodUseMult, upkeepCoverageDays,
 } from '../systems/morale';
+import { planPrefabRing, ringSegmentCount, ghostProgress, ghostComplete, ghostShortfall } from '../game/baseGhosts';
 import type { SurvivorDef } from '../data/survivors';
 
 function surv(id: string, over: Partial<SurvivorDef> = {}): SurvivorDef {
@@ -388,5 +389,45 @@ describe('facilities: power + production (§3.3/§3.5)', () => {
     expect(ready.siegeReadiness.verdict).toBe('ready'); // defense 20, ammo 90 ≥ burn 80
     const naked = jobBoard(homeBase(), [], computeHeat(homeBase(), [], 0));
     expect(naked.siegeReadiness.verdict).toBe('exposed');
+  });
+});
+
+describe('blueprint ghosts (§3.3b)', () => {
+  it('the ring tiles the circumference and leaves a gate gap on the bearing', () => {
+    const anchor = { x: 100, z: 50, radiusM: 40 };
+    const n = ringSegmentCount(40, true); // (2π·40 − 4) / 3 ≈ 82
+    expect(n).toBe(82);
+    const ids = Array.from({ length: n }, () => 'palisade_wall');
+    const plan = planPrefabRing(anchor, [...ids, 'gate'], 0);
+    const walls = plan.filter((p) => p.prefabId === 'palisade_wall');
+    const gate = plan.find((p) => p.prefabId === 'gate');
+    expect(walls.length).toBe(n);
+    expect(gate).toBeTruthy();
+    // gate sits exactly on bearing 0 at the radius
+    expect(gate!.x).toBeCloseTo(140);
+    expect(gate!.z).toBeCloseTo(50);
+    // no wall segment sits inside the 4m gap around the bearing
+    for (const w of walls) {
+      const d = Math.hypot(w.x - gate!.x, w.z - gate!.z);
+      expect(d).toBeGreaterThan(2);
+    }
+    // every wall is on the ring
+    for (const w of walls) expect(Math.hypot(w.x - 100, w.z - 50)).toBeCloseTo(40);
+  });
+
+  it('interior pieces land inside the ring; the watchtower rides the shoulder', () => {
+    const plan = planPrefabRing({ x: 0, z: 0, radiusM: 40 }, ['watchtower', 'campfire_bedroll', 'storage_crate'], Math.PI / 2);
+    for (const p of plan) expect(Math.hypot(p.x, p.z)).toBeLessThan(40);
+    const tower = plan.find((p) => p.prefabId === 'watchtower')!;
+    expect(Math.hypot(tower.x, tower.z)).toBeCloseTo(40 * 0.92);
+  });
+
+  it('a ghost completes only when materials AND labor are both done', () => {
+    const cost = [{ itemId: 'wood', qty: 3 }];
+    expect(ghostProgress([{ itemId: 'wood', qty: 3 }], cost, 0.1, 1 / 3)).toBeCloseTo(0.3);
+    expect(ghostProgress([{ itemId: 'wood', qty: 1 }], cost, 99, 1 / 3)).toBeCloseTo(1 / 3);
+    expect(ghostComplete([{ itemId: 'wood', qty: 3 }], cost, 1 / 3, 1 / 3)).toBe(true);
+    expect(ghostComplete([{ itemId: 'wood', qty: 3 }], cost, 0.2, 1 / 3)).toBe(false);
+    expect(ghostShortfall([{ itemId: 'wood', qty: 1 }], cost)).toEqual([{ itemId: 'wood', qty: 2 }]);
   });
 });
