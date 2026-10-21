@@ -435,9 +435,9 @@ for sgn, nm in ((1, "Port"), (-1, "Stbd")):
 # ---- door gunner station (PORT): swing-arm mount + M240-style gun
 gun_pivot = empty("GunPivot_Port", (3.30, 1.02, 1.62), parent=ROOTOB)
 box("SH_GunArmBase", (0, 0.0, -0.25), (0.10, 0.10, 0.5), METAL, parent=gun_pivot)
-arm = box("SH_GunArm", (0, 0.22, 0.12), (0.07, 0.5, 0.07), METAL,
+arm = box("SH_GunArm", (0, 0.06, 0.12), (0.07, 0.5, 0.07), METAL,
           rot=(math.radians(-18), 0, 0), parent=gun_pivot)
-gun = empty("DoorGun_Port", (0, 0.46, 0.30), parent=gun_pivot)
+gun = empty("DoorGun_Port", (0, 0.08, 0.30), parent=gun_pivot)
 box("SH_GunReceiver", (0.05, 0, 0), (0.52, 0.13, 0.17), METAL, bevel=0.02, parent=gun)
 cyl("SH_GunBarrel", (0.52, 0, 0.02), 0.028, 0.62, METAL, rot=(0, math.radians(90), 0), parent=gun)
 cyl("SH_GunShroud", (0.38, 0, 0.02), 0.045, 0.30, DARK, rot=(0, math.radians(90), 0), parent=gun)
@@ -494,10 +494,10 @@ def marking(text, loc, size, sgn, nm):
     return t
 # "615" both sides of tail boom + "HSC-5" beneath (per Ian's image)
 for sgn in (1, -1):
-    marking("615", (-4.55, sgn * 0.545, 2.52), 0.78, sgn, "SH_Mark615_%d" % sgn)
-    marking("HSC-5", (-4.55, sgn * 0.51, 2.06), 0.30, sgn, "SH_MarkHSC_%d" % sgn)
+    marking("615", (-4.55, sgn * 0.60, 2.52), 0.78, sgn, "SH_Mark615_%d" % sgn)
+    marking("HSC-5", (-4.55, sgn * 0.565, 2.06), 0.30, sgn, "SH_MarkHSC_%d" % sgn)
     # "US NAVY" on doghouse sides
-    marking("US NAVY", (1.15, sgn * 0.80, 3.14), 0.30, sgn, "SH_MarkUSN_%d" % sgn)
+    marking("US NAVY", (1.15, sgn * 0.815, 3.14), 0.30, sgn, "SH_MarkUSN_%d" % sgn)
     # "NAVY" small on fin
     marking("NAVY", (-7.05, sgn * 0.108, 3.85), 0.24, sgn, "SH_MarkFin_%d" % sgn)
 

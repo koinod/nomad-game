@@ -79,12 +79,14 @@ shot("03_side.png", (0.4, 26, 3.4), (0.4, 0, 2.0), lens=42)
 shot("04_front.png", (26, 0.5, 2.8), (0, 0, 2.1), lens=44)
 shot("05_top.png", (0.6, 0.6, 31), (0.5, 0, 1.6), lens=40)
 
-# ---- door gunner: port door slid aft, gun swung out
+# ---- door gunner: port door slid aft, gun arm out + traversed
 door = O("DoorPivot_Port"); gun = O("GunPivot_Port")
 door.location.x -= 1.04
-gun.rotation_euler = (0, 0, math.radians(28))
+gun.location.y += 0.25
+gun.rotation_euler = (0, 0, math.radians(24))
 shot("06_door_gunner.png", (8.6, 7.6, 2.6), (3.2, 1.0, 1.55), lens=52)
 door.location.x += 1.04
+gun.location.y -= 0.25
 gun.rotation_euler = (0, 0, 0)
 
 # ---- cockpit cutaway: hide shell, camera at pilot eye
