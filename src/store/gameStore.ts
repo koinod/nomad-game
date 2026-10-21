@@ -15,15 +15,26 @@ import {
 } from '../systems/baseClaims';
 import { DEFAULT_APPEARANCE, DIFFICULTIES } from './types';
 import type {
-  Appearance, DifficultyId, Equipped, FleetEntry, InvItem, PhoneTab, QuestProgress, QuestStepType,
-  SaveMeta, SaveSnapshot, Screen, ToastMsg, TrailerFleetEntry,
+  Appearance, DifficultyId, Equipped, FleetEntry, InvItem, NearbyEntry, PhoneTab, QuestProgress, QuestStepType,
+  SaveMeta, SaveSnapshot, Screen, SlotId, ToastMsg, TrailerFleetEntry, WeaponSlotId,
   Dispatch, JournalEntry, ScoutReport, BaseBuildOrder, CraftJob, BaseExt,
   ClaimsState, MoraleRuntime, BaseInstance,
 } from './types';
 import {
-  carryLimitKg, encumbranceTier, slotLimit, totalWeightKg, usedSlots,
+  carryLimitKg, encumbranceTier, totalWeightKg,
 } from './inventoryUtils';
-import { arrangeItems as arrangeGridItems, packGridDims } from './gridUtils';
+import {
+  ALL_SLOTS, emptyEquipped, equipSlotForDef, heldWeaponUid,
+  isWeaponSlot, migrateEquipped, slotOfUid,
+  syncWeaponProjections, WEAPON_SLOTS,
+} from './equipment';
+import {
+  addToCarried, countCarried, findCarried, fitInDest, hasPhoneCarried,
+  insertIntoDest, itemWeightKg, listInDest, normalizeCarried, POCKETS, receiveDests,
+  removeCarried, specForDest, transferCarried, updateCarried, walkCarried,
+  type CarriedDest,
+} from './containers';
+import { arrangeItems as arrangeGridItems } from './gridUtils';
 import { applyXp, canBuyPerk, XP_EVENTS } from '../systems/skills';
 import { deleteSaveSlot, listSaveSlots, loadGameFromSlot, saveGameToSlot } from '../systems/save';
 import { sfx } from '../systems/audio';
@@ -33,6 +44,12 @@ import { input } from '../game/input';
 
 let uidCounter = 1;
 const newUid = () => `i${Date.now().toString(36)}${(uidCounter++).toString(36)}`;
+
+function sameDest(a: CarriedDest, b: CarriedDest): boolean {
+  if (a.type !== b.type) return false;
+  if (a.type === 'container' && b.type === 'container') return a.uid === b.uid;
+  return true; // pockets / loose are singletons
+}
 let toastCounter = 1;
 
 export interface DialogueState {
@@ -206,7 +223,13 @@ interface GameState {
   treatSurvivor: (survivorId: string) => void;
   moveInvItem: (uid: string, gx: number, gy: number, rot: boolean) => void;
   arrangeInventory: (order: 'size' | 'category') => void;
+  arrangeContainer: (dest: CarriedDest, order: 'size' | 'category') => void;
   moveStorageItem: (index: number, gx: number, gy: number, rot: boolean) => void;
+
+  // inventory v2: NEARBY storage (world containers + vehicle storage
+  // within interaction radius), refreshed by the deck while it is open
+  nearby: NearbyEntry[];
+  refreshNearby: () => void;
 
   // hold-to-search: active search of a container / corpse / safe
   search: { id: string; label: string; frac: number } | null;
@@ -270,7 +293,12 @@ interface GameState {
   attachMod: (weaponUid: string, modUid: string) => void;
   applyFinish: (weaponUid: string, finishUid: string) => void;
   detachMod: (weaponUid: string, modId: string) => void;
-  unequipSlot: (slot: keyof Equipped) => void;
+  unequipSlot: (slot: SlotId | 'melee' | 'ranged' | 'pack') => void;
+  selectWeaponSlot: (slot: WeaponSlotId) => void;
+  /** Move one carried instance into a carried destination grid
+   *  (pockets, or a container instance's contents — worn garments
+   *  included). Vehicle storage goes through storagePut/storageTake. */
+  transferItem: (uid: string, dest: CarriedDest) => void;
   useItemUid: (uid: string) => void;
   dropUid: (uid: string) => void;
   assignHotbar: (index: number, uid: string | null) => void;
@@ -326,7 +354,7 @@ interface GameState {
   autosave: () => Promise<void>;
 }
 
-const initialEquipped: Equipped = { melee: null, ranged: null, pack: null };
+const initialEquipped: Equipped = emptyEquipped();
 
 /**
  * Craft-queue persistence bridge (Lane 5 field contract, Lane 7 request).
@@ -620,6 +648,13 @@ export const useGameStore = create<GameState>()((set, get) => {
 
     poiPositions: {},
 
+    nearby: [],
+    refreshNearby: () => {
+      const eng = getGame();
+      if (!eng) return;
+      set({ nearby: eng.getNearbyStorage() });
+    },
+
     toasts: [],
     dead: false,
     deathCause: null,
@@ -642,12 +677,17 @@ export const useGameStore = create<GameState>()((set, get) => {
         timeMinutes: 480,
         daysElapsed: 0,
         playSeconds: 0,
-        inventory: [], equipped: { ...initialEquipped }, hotbar: [null, null, null, null],
+        // inventory v2 (Ian 2026-10-21): you SPAWN with the sat phone
+        // as an item — in your pockets — so the interface is in hand
+        // from minute zero. The deck follows the item from here on.
+        inventory: [{ uid: newUid(), itemId: 'phone', qty: 1, loc: 'pockets' }],
+        equipped: { ...initialEquipped }, hotbar: [null, null, null, null],
         quests: [{ id: 'q_prologue', stepIndex: 0, progress: 0 }],
         doneQuests: [],
         flags: {},
         rep: { ...STARTING_REP },
-        phoneOpen: false, phoneTab: 'home', phoneUnlocked: false, battery: 100,
+        phoneOpen: false, phoneTab: 'home', phoneUnlocked: true, battery: 100,
+        nearby: [],
         backpackOpen: false, inventoryOpen: false, sleepOpen: false, restedMinutesLeft: 0, lootOpenId: null, lootStash: {},
         storageOpen: null, storageItems: [], vehicle: null, fleet: [], trailerFleet: [],
         dialogue: { source: 'prologue', nodeId: 'start' },
@@ -712,17 +752,30 @@ export const useGameStore = create<GameState>()((set, get) => {
       if (!s.storageOpen) return;
       const eng = getGame();
       if (!eng) return;
-      const inv = s.inventory.find((i) => i.uid === invUid);
-      if (!inv) return;
+      const found = findCarried(s.inventory, invUid);
+      if (!found) return;
+      const inv = found.item;
       // never store something you're wearing/holding — it would strand the slot
-      if (invUid === s.equipped.melee || invUid === s.equipped.ranged || invUid === s.equipped.pack
-        || s.hotbar.includes(invUid)) {
+      if (slotOfUid(s.equipped, invUid) || s.hotbar.includes(invUid)) {
         s.addToast('Unequip it first.');
         return;
       }
-      const err = eng.storagePutItem(s.storageOpen.kind, s.storageOpen.uid, { uid: inv.uid, itemId: inv.itemId, qty: inv.qty });
+      // vehicle storage stacks by itemId (the engine merges) — a
+      // container carrying contents would lose them in the merge.
+      // Empty it first; an EMPTY container stores fine.
+      if ((inv.contents?.length ?? 0) > 0) {
+        s.addToast(`Empty the ${ITEMS[inv.itemId]?.name ?? 'container'} first — storage stacks by kind.`);
+        return;
+      }
+      // trial the carried-side removal before the engine takes it, so
+      // a refused removal never strands the item between worlds
+      const trial = removeCarried(s.inventory, invUid, inv.qty);
+      if (!trial.ok) { s.addToast('Can’t store that.'); return; }
+      const err = eng.storagePutItem(s.storageOpen.kind, s.storageOpen.uid, { ...inv });
       if (err) { s.addToast(err); return; }
-      s.removeItem(invUid, inv.qty);
+      set({ inventory: trial.inventory });
+      // the deck follows the phone: stored in a trunk = not on you
+      if (get().phoneOpen && !hasPhoneCarried(trial.inventory)) set({ phoneOpen: false });
       s.refreshStorage();
       sfx.play('pickup', { volume: 0.4 });
     },
@@ -771,7 +824,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         s.addToast(`Needs ${cost.qty}× ${ITEMS[cost.itemId]?.name ?? cost.itemId}.`);
         return;
       }
-      const it = s.inventory.find((i) => i.itemId === cost.itemId);
+      const it = walkCarried(s.inventory).find((i) => i.itemId === cost.itemId);
       if (!it || !s.removeItem(it.uid, cost.qty)) return;
       const condBefore = row.condPct;
       const msg = eng.applyRepair(uid, kind);
@@ -801,7 +854,7 @@ export const useGameStore = create<GameState>()((set, get) => {
       }
       if (!eng.canTakeUpgrade(uid, upgradeId)) { s.addToast('That vehicle can\u2019t take this upgrade.'); return; }
       for (const c of def.cost) {
-        const it = s.inventory.find((i) => i.itemId === c.itemId);
+        const it = walkCarried(s.inventory).find((i) => i.itemId === c.itemId);
         if (it) s.removeItem(it.uid, c.qty);
       }
       eng.applyUpgrade(uid, upgradeId);
@@ -835,10 +888,11 @@ export const useGameStore = create<GameState>()((set, get) => {
       if (cause === 'husk' && input.blocking) {
         dealt *= 0.25;
       }
-      // armor carried in the pack still protects (plates in a vest you own)
+      // armor carried still protects (plates in a vest you own) —
+      // inventory v2: counted across the whole carried forest
       if (cause === 'husk' || cause === 'explosion') {
         let prot = 0;
-        for (const it of s.inventory) {
+        for (const it of walkCarried(s.inventory)) {
           const def = ITEMS[it.itemId];
           if (def?.armor) prot += def.armor * it.qty;
         }
@@ -891,28 +945,45 @@ export const useGameStore = create<GameState>()((set, get) => {
       const def = ITEMS[itemId];
       if (!def) return false;
       const s = get();
-      // weight gate: >160% of limit blocks pickup
+      // weight gate: >160% of limit blocks pickup (unchanged rule;
+      // the weight itself is the recursive forest weight now)
       const addedW = def.weight * qty;
       const limit = carryLimitKg(s.equipped, s.inventory, s.difficulty, s.perks.includes('sc_packmule') ? 8 : 0);
       if (encumbranceTier(totalWeightKg(s.inventory) + addedW, limit) === 'immobile') {
         if (!quiet) s.addToast('Too heavy — drop something first.');
         return false;
       }
-      const inv = s.inventory.map((i) => ({ ...i }));
+      let inv = s.inventory;
       let remaining = qty;
-      for (const it of inv) {
-        if (it.itemId === itemId && remaining > 0) {
-          const space = def.stack - it.qty;
-          const take = Math.min(space, remaining);
-          it.qty += take;
-          remaining -= take;
+      // 1) top up existing stacks anywhere in the forest (walk order),
+      //    respecting the holding container's own weight cap
+      for (const stack of walkCarried(inv)) {
+        if (remaining <= 0) break;
+        if (stack.itemId !== itemId) continue;
+        const space = def.stack - stack.qty;
+        if (space <= 0) continue;
+        const holderUid = findCarried(inv, stack.uid)?.containerUid ?? null;
+        if (holderUid) {
+          const spec = specForDest(inv, { type: 'container', uid: holderUid });
+          if (spec) {
+            const holder = findCarried(inv, holderUid)?.item;
+            const contentsKg = (holder?.contents ?? []).reduce((a, c) => a + itemWeightKg(c), 0);
+            const room = Math.max(0, Math.floor((spec.kg - contentsKg) / Math.max(def.weight, 0.0001)));
+            if (room <= 0) continue;
+            const take = Math.min(space, remaining, room);
+            if (take <= 0) continue;
+            inv = updateCarried(inv, stack.uid, (i) => ({ ...i, qty: i.qty + take }));
+            remaining -= take;
+            continue;
+          }
         }
+        const take = Math.min(space, remaining);
+        inv = updateCarried(inv, stack.uid, (i) => ({ ...i, qty: i.qty + take }));
+        remaining -= take;
       }
+      // 2) fresh stacks land in the receive grids (worn backpack →
+      //    pockets → jacket → vest → pants), first fit that holds them
       while (remaining > 0) {
-        if (usedSlots(inv) + def.slots > slotLimit(s.equipped, inv, s.perks.includes('sc_pockets') ? 4 : 0)) {
-          if (!quiet) s.addToast('No pack space left.');
-          break;
-        }
         const take = Math.min(def.stack, remaining);
         const fresh: InvItem = { uid: newUid(), itemId, qty: take };
         // a weapon found in the world has lived a life: condition 35–85.
@@ -920,7 +991,12 @@ export const useGameStore = create<GameState>()((set, get) => {
         if (opts?.found && (def.category === 'weapon-ranged' || def.category === 'weapon-melee')) {
           fresh.condition = 35 + Math.floor(Math.random() * 51);
         }
-        inv.push(fresh);
+        const placed = addToCarried(inv, s.equipped, fresh);
+        if (!placed) {
+          if (!quiet) s.addToast('No room — every grid is full.');
+          break;
+        }
+        inv = placed;
         remaining -= take;
       }
       const added = qty - remaining;
@@ -942,69 +1018,103 @@ export const useGameStore = create<GameState>()((set, get) => {
 
     removeItem: (uid, qty) => {
       const s = get();
-      const inv = s.inventory.map((i) => ({ ...i }));
-      const idx = inv.findIndex((i) => i.uid === uid);
-      if (idx < 0) return false;
-      inv[idx].qty -= qty;
-      if (inv[idx].qty <= 0) inv.splice(idx, 1);
-      // clear dangling references
-      const gone = (u: string | null) => (u === uid && !inv.some((i) => i.uid === uid) ? null : u);
+      // deep removal: the instance may live in any grid or container.
+      // A non-empty container refuses (empty it first) — see
+      // containers.removeCarried; dropUid is the whole-bag path.
+      const res = removeCarried(s.inventory, uid, qty);
+      if (!res.ok) return false;
+      const inv = res.inventory;
+      // clear dangling references across every slot + the hotbar
+      const alive = (u: string | null) => (u && findCarried(inv, u) ? u : null);
+      const eq: Equipped = { ...s.equipped };
+      for (const slot of ALL_SLOTS) eq[slot] = alive(eq[slot]);
       set({
         inventory: inv,
-        equipped: {
-          melee: gone(s.equipped.melee), ranged: gone(s.equipped.ranged), pack: gone(s.equipped.pack),
-        },
-        hotbar: s.hotbar.map((h) => gone(h)),
+        equipped: syncWeaponProjections(eq, inv),
+        hotbar: s.hotbar.map((h) => alive(h)),
       });
+      // the deck follows the phone item
+      if (get().phoneOpen && !hasPhoneCarried(inv)) set({ phoneOpen: false });
       return true;
     },
 
-    countItem: (itemId) => {
-      const s = get();
-      return s.inventory.filter((i) => i.itemId === itemId).reduce((a, i) => a + i.qty, 0);
-    },
+    countItem: (itemId) => countCarried(get().inventory, itemId),
 
     equipUid: (uid) => {
       const s = get();
-      const it = s.inventory.find((i) => i.uid === uid);
-      const def = it ? ITEMS[it.itemId] : undefined;
-      if (!it || !def) return;
-      const slot: keyof Equipped | null =
-        def.category === 'weapon-melee' ? 'melee'
-        : def.category === 'weapon-ranged' ? 'ranged'
-        : def.category === 'pack' ? 'pack'
-        // worn armor (Lane 5's slots): route by the def's body slot
-        : def.category === 'armor' && def.armorSlot === 'head' ? 'armorHead'
-        : def.category === 'armor' && def.armorSlot === 'torso' ? 'armorTorso'
-        : def.category === 'armor' && def.armorSlot === 'legs' ? 'armorLegs'
-        : null;
+      const found0 = findCarried(s.inventory, uid);
+      const def = found0 ? ITEMS[found0.item.itemId] : undefined;
+      if (!found0 || !def) return;
+      // ONE equipment model: weapons route to their weapon slot,
+      // garments/armor to their garment slot (equipment.ts routing).
+      const slot = equipSlotForDef(def);
       if (!slot) { s.addToast(`${def.name} can't be equipped.`); return; }
+      if (s.equipped[slot] === uid) return; // already wearing/holding it
+      let inv = s.inventory;
       // a freshly equipped gun starts with a full magazine
-      if (slot === 'ranged' && def.magSize != null && it.loaded === undefined) {
-        set({
-          inventory: s.inventory.map((i) =>
-            i.uid === uid ? { ...i, loaded: magSizeOf(def.magSize!, i.mods ?? []) } : i,
-          ),
-        });
+      if (def.category === 'weapon-ranged' && def.magSize != null && found0.item.loaded === undefined) {
+        inv = updateCarried(inv, uid, (i) => ({ ...i, loaded: magSizeOf(def.magSize!, i.mods ?? []) }));
       }
-      set({ equipped: { ...get().equipped, [slot]: uid } });
+      const found = findCarried(inv, uid);
+      if (!found) return;
+      const item = found.item;
+      const occupantUid = s.equipped[slot];
+      let eq: Equipped = { ...s.equipped, [slot]: uid };
+      if (isWeaponSlot(slot)) eq = { ...eq, activeWeapon: slot };
+      if (occupantUid && occupantUid !== uid) {
+        // SWAP (a first-class op): the item leaves its grid for the
+        // slot; the occupant returns to the grid the item came from —
+        // or the first receive grid that fits. Nowhere fits → refuse,
+        // nothing moves (conservation by construction).
+        const occFound = findCarried(inv, occupantUid);
+        if (!occFound) return;
+        const r1 = removeCarried(inv, uid, item.qty, { allowContents: true });
+        if (!r1.ok) return;
+        const r2 = removeCarried(r1.inventory, occupantUid, occFound.item.qty, { allowContents: true });
+        if (!r2.ok) return;
+        const base = r2.inventory;
+        const candidates: CarriedDest[] = [];
+        if (found.containerUid) candidates.push({ type: 'container', uid: found.containerUid });
+        else if (item.loc === 'pockets') candidates.push(POCKETS);
+        for (const d of receiveDests(base, eq)) {
+          if (!candidates.some((c) => sameDest(c, d))) candidates.push(d);
+        }
+        let placedInv: InvItem[] | null = null;
+        for (const d of candidates) {
+          if (fitInDest(base, d, r2.removed, eq)) { placedInv = insertIntoDest(base, d, r2.removed, eq); break; }
+        }
+        if (!placedInv) {
+          s.addToast(`No room to swap the ${ITEMS[r2.removed.itemId]?.name ?? 'item'} out.`);
+          return;
+        }
+        inv = [...placedInv, r1.removed];
+      } else {
+        // simple equip: lift the instance out of its grid to top
+        // level — slotted/worn items live in their slot, in no grid.
+        // A garment's contents ride with it (they ARE its grid).
+        const r = removeCarried(inv, uid, item.qty, { allowContents: true });
+        if (!r.ok) return;
+        inv = [...r.inventory, r.removed];
+      }
+      eq = syncWeaponProjections(eq, inv);
+      set({ inventory: inv, equipped: eq });
       s.addToast(`Equipped ${def.name}.`);
     },
 
     setLoaded: (uid, n) => {
       const s = get();
-      set({ inventory: s.inventory.map((i) => (i.uid === uid ? { ...i, loaded: n } : i)) });
+      set({ inventory: updateCarried(s.inventory, uid, (i) => ({ ...i, loaded: n })) });
     },
 
     setCondition: (uid, n) => {
       const s = get();
       const v = Math.round(Math.max(0, Math.min(100, n)) * 100) / 100;
-      set({ inventory: s.inventory.map((i) => (i.uid === uid ? { ...i, condition: v } : i)) });
+      set({ inventory: updateCarried(s.inventory, uid, (i) => ({ ...i, condition: v })) });
     },
 
     setJammed: (uid, b) => {
       const s = get();
-      set({ inventory: s.inventory.map((i) => (i.uid === uid ? { ...i, jammed: b } : i)) });
+      set({ inventory: updateCarried(s.inventory, uid, (i) => ({ ...i, jammed: b })) });
     },
 
     /** Bench repair: gun_parts (ranged) or scrap (melee), 1 per 40 missing. */
@@ -1014,7 +1124,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         s.addToast('Repairs happen at a Weapons Bench.');
         return;
       }
-      const w = s.inventory.find((i) => i.uid === uid);
+      const w = findCarried(s.inventory, uid)?.item;
       const def = w ? ITEMS[w.itemId] : undefined;
       if (!w || !def) return;
       const cond = w.condition ?? 100;
@@ -1031,7 +1141,7 @@ export const useGameStore = create<GameState>()((set, get) => {
       }
       let left = units;
       while (left > 0) {
-        const stack = get().inventory.find((i) => i.itemId === costId && i.qty > 0);
+        const stack = walkCarried(get().inventory).find((i) => i.itemId === costId && i.qty > 0);
         if (!stack) break;
         const take = Math.min(stack.qty, left);
         get().removeItem(stack.uid, take);
@@ -1051,12 +1161,16 @@ export const useGameStore = create<GameState>()((set, get) => {
         s.addToast('Stripping for parts happens at a Weapons Bench.');
         return;
       }
-      const w = s.inventory.find((i) => i.uid === uid);
+      const w = findCarried(s.inventory, uid)?.item;
       const def = w ? ITEMS[w.itemId] : undefined;
       if (!w || !def?.disassembly) return;
-      // an equipped piece comes off the body first
-      if (s.equipped.melee === uid) s.unequipSlot('melee');
-      if (s.equipped.ranged === uid) s.unequipSlot('ranged');
+      // a slotted/worn piece comes off the body first
+      const wornSlot = slotOfUid(s.equipped, uid);
+      if (wornSlot) s.unequipSlot(wornSlot);
+      if ((w.contents?.length ?? 0) > 0) {
+        s.addToast(`Empty the ${def.name} before stripping it.`);
+        return;
+      }
       // attached mods and loaded rounds come back off before the strip
       for (const modId of w.mods ?? []) get().addItem(modId, 1, true);
       if ((w.loaded ?? 0) > 0 && def.ammoId) get().addItem(def.ammoId, w.loaded!, true);
@@ -1074,8 +1188,8 @@ export const useGameStore = create<GameState>()((set, get) => {
         s.addToast('Attachments are fitted at a Weapons Bench.');
         return;
       }
-      const w = s.inventory.find((i) => i.uid === weaponUid);
-      const m = s.inventory.find((i) => i.uid === modUid);
+      const w = findCarried(s.inventory, weaponUid)?.item;
+      const m = findCarried(s.inventory, modUid)?.item;
       const wdef = w ? ITEMS[w.itemId] : undefined;
       const mdef = m ? MODS_ALL[m.itemId] : undefined;
       if (!w || !m || !wdef || !mdef) return;
@@ -1105,9 +1219,7 @@ export const useGameStore = create<GameState>()((set, get) => {
       }
       s.removeItem(modUid, 1);
       set({
-        inventory: get().inventory.map((i) =>
-          i.uid === weaponUid ? { ...i, mods: [...(i.mods ?? []), m.itemId] } : i,
-        ),
+        inventory: updateCarried(get().inventory, weaponUid, (i) => ({ ...i, mods: [...(i.mods ?? []), m.itemId] })),
       });
       s.addToast(`Fitted the ${mdef.name} to the ${wdef.name}.`);
       s.addSkillXp('mechanics', 5);
@@ -1120,12 +1232,10 @@ export const useGameStore = create<GameState>()((set, get) => {
         s.addToast('Attachments come off at a Weapons Bench.');
         return;
       }
-      const w = s.inventory.find((i) => i.uid === weaponUid);
+      const w = findCarried(s.inventory, weaponUid)?.item;
       if (!w?.mods?.includes(modId)) return;
       set({
-        inventory: s.inventory.map((i) =>
-          i.uid === weaponUid ? { ...i, mods: (i.mods ?? []).filter((x) => x !== modId) } : i,
-        ),
+        inventory: updateCarried(s.inventory, weaponUid, (i) => ({ ...i, mods: (i.mods ?? []).filter((x) => x !== modId) })),
       });
       s.addItem(modId, 1, true);
       s.addToast(`Removed the ${MODS_ALL[modId]?.name ?? modId}.`);
@@ -1141,8 +1251,8 @@ export const useGameStore = create<GameState>()((set, get) => {
         s.addToast('Finishes are applied at a Weapons Bench.');
         return;
       }
-      const w = s.inventory.find((i) => i.uid === weaponUid);
-      const kit = s.inventory.find((i) => i.uid === finishUid);
+      const w = findCarried(s.inventory, weaponUid)?.item;
+      const kit = findCarried(s.inventory, finishUid)?.item;
       const wdef = w ? ITEMS[w.itemId] : undefined;
       const fdef = kit ? FINISHES[kit.itemId] : undefined;
       if (!w || !kit || !wdef || !fdef) return;
@@ -1156,9 +1266,7 @@ export const useGameStore = create<GameState>()((set, get) => {
       }
       s.removeItem(finishUid, 1);
       set({
-        inventory: get().inventory.map((i) =>
-          i.uid === weaponUid ? { ...i, finish: fdef.id } : i,
-        ),
+        inventory: updateCarried(get().inventory, weaponUid, (i) => ({ ...i, finish: fdef.id })),
       });
       s.addToast(`Refinished the ${wdef.name}: ${fdef.name}.`);
       s.addSkillXp('mechanics', 3);
@@ -1167,12 +1275,69 @@ export const useGameStore = create<GameState>()((set, get) => {
 
     unequipSlot: (slot) => {
       const s = get();
-      set({ equipped: { ...s.equipped, [slot]: null } });
+      // legacy slot names map onto the unified model
+      let target: SlotId | null = null;
+      if (slot === 'melee') target = slotOfUid(s.equipped, s.equipped.melee);
+      else if (slot === 'ranged') target = slotOfUid(s.equipped, s.equipped.ranged);
+      else if (slot === 'pack') target = 'backpack';
+      else target = slot;
+      if (!target) return;
+      const uid = s.equipped[target];
+      if (!uid) return;
+      const found = findCarried(s.inventory, uid);
+      if (!found) {
+        set({ equipped: syncWeaponProjections({ ...s.equipped, [target]: null }, s.inventory) });
+        return;
+      }
+      // The item leaves its slot for a grid (receive order). A worn
+      // garment's contents travel with it — unequipping never spills.
+      // No grid fits → it stays on (refused, nothing moves).
+      const eqNext: Equipped = { ...s.equipped, [target]: null };
+      const removed = removeCarried(s.inventory, uid, found.item.qty, { allowContents: true });
+      if (!removed.ok) return;
+      let placed: InvItem[] | null = null;
+      for (const d of receiveDests(removed.inventory, eqNext)) {
+        if (fitInDest(removed.inventory, d, removed.removed, eqNext)) {
+          placed = insertIntoDest(removed.inventory, d, removed.removed, eqNext);
+          break;
+        }
+      }
+      if (!placed) {
+        s.addToast(`No room to take off the ${ITEMS[found.item.itemId]?.name ?? 'item'}.`);
+        return;
+      }
+      set({ inventory: placed, equipped: syncWeaponProjections(eqNext, placed) });
+    },
+
+    selectWeaponSlot: (slot) => {
+      const s = get();
+      if (s.equipped.activeWeapon === slot) return;
+      set({ equipped: { ...s.equipped, activeWeapon: slot } });
+    },
+
+    transferItem: (uid, dest) => {
+      const s = get();
+      const res = transferCarried(s.inventory, s.equipped, uid, dest);
+      if (!res.ok) {
+        const msgs: Record<string, string> = {
+          'cycle': 'A container can’t go inside itself.',
+          'too-deep': 'That’s nested too deep.',
+          'no-fit': 'No room there.',
+          'slotted': 'Unequip it first.',
+          'not-a-container': 'That doesn’t open.',
+          'no-such-container': 'That container is gone.',
+          'not-carried': 'That item is gone.',
+        };
+        s.addToast(msgs[res.reason] ?? 'Can’t move that there.');
+        return;
+      }
+      set({ inventory: res.inventory });
+      sfx.play('pickup', { volume: 0.35 });
     },
 
     useItemUid: (uid) => {
       const s = get();
-      const it = s.inventory.find((i) => i.uid === uid);
+      const it = findCarried(s.inventory, uid)?.item;
       const def = it ? ITEMS[it.itemId] : undefined;
       if (!it || !def) return;
       if ((def.category === 'food' || def.category === 'medical') && def.heal) {
@@ -1182,9 +1347,9 @@ export const useGameStore = create<GameState>()((set, get) => {
         s.addToast(`Used ${def.name} (+${def.heal} HP).`);
         if (def.category === 'medical') s.addSkillXp('medicine', 4);
       } else if (it.itemId === 'cleaning_kit' || it.itemId === 'gun_oil') {
-        // field weapon care, applied to the gun in hand (else the melee)
-        const targetUid = s.equipped.ranged ?? s.equipped.melee;
-        const target = targetUid ? s.inventory.find((i) => i.uid === targetUid) : undefined;
+        // field weapon care, applied to the held weapon (else a slotted one)
+        const targetUid = heldWeaponUid(s.equipped) ?? s.equipped.ranged ?? s.equipped.melee;
+        const target = targetUid ? findCarried(s.inventory, targetUid)?.item : undefined;
         const tdef = target ? ITEMS[target.itemId] : undefined;
         if (!target || !tdef) { s.addToast('Equip a weapon to maintain it.'); return; }
         const cond = target.condition ?? 100;
@@ -1199,7 +1364,8 @@ export const useGameStore = create<GameState>()((set, get) => {
           s.removeItem(uid, 1);
           s.addToast(`Oiled the ${tdef.name} — condition ${Math.round(Math.min(100, cond + 25))}.`);
         }
-      } else if (def.category === 'weapon-melee' || def.category === 'weapon-ranged' || def.category === 'pack') {
+      } else if (equipSlotForDef(def)) {
+        // weapons slot, garments/packs/armor wear (one model)
         s.equipUid(uid);
       } else {
         s.addToast(`${def.name}: no use action here.`);
@@ -1208,10 +1374,19 @@ export const useGameStore = create<GameState>()((set, get) => {
 
     dropUid: (uid) => {
       const s = get();
-      const it = s.inventory.find((i) => i.uid === uid);
-      if (!it) return;
-      s.removeItem(uid, it.qty);
-      s.addToast(`Dropped ${ITEMS[it.itemId]?.name ?? 'item'}.`);
+      const found = findCarried(s.inventory, uid);
+      if (!found) return;
+      if (slotOfUid(s.equipped, uid) || s.hotbar.includes(uid)) {
+        s.addToast('Unequip it first.');
+        return;
+      }
+      // dropping a container drops the whole bag — contents and all
+      const res = removeCarried(s.inventory, uid, found.item.qty, { allowContents: true });
+      if (!res.ok) return;
+      set({ inventory: res.inventory });
+      // the deck follows the phone: it isn't on you, it isn't open
+      if (get().phoneOpen && !hasPhoneCarried(res.inventory)) set({ phoneOpen: false });
+      s.addToast(`Dropped ${ITEMS[found.item.itemId]?.name ?? 'item'}.`);
     },
 
     assignHotbar: (index, uid) => {
@@ -1223,6 +1398,14 @@ export const useGameStore = create<GameState>()((set, get) => {
 
     useHotbar: (index) => {
       const s = get();
+      // inventory v2: keys 1/2/3 ARE the weapon slots (the existing
+      // hotkey set — Digit1..4 already land here from Game's input).
+      // Selecting a slot makes it the held weapon. Key 4 keeps the
+      // legacy quick-use item.
+      if (index >= 0 && index < WEAPON_SLOTS.length) {
+        s.selectWeaponSlot(WEAPON_SLOTS[index]);
+        return;
+      }
       const uid = s.hotbar[index];
       if (uid) s.useItemUid(uid);
     },
@@ -1460,7 +1643,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         for (const c of packUpkeep.consumed) {
           let remaining = c.qty;
           while (remaining > 0) {
-            const stack = get().inventory.find((i) => i.itemId === c.itemId);
+            const stack = walkCarried(get().inventory).find((i) => i.itemId === c.itemId);
             if (!stack) break;
             const take = Math.min(remaining, stack.qty);
             if (!get().removeItem(stack.uid, take)) break;
@@ -1724,7 +1907,7 @@ export const useGameStore = create<GameState>()((set, get) => {
       const want = missing >= 35 ? ['medkit', 'bandage'] : ['bandage', 'medkit'];
       let used: string | null = null;
       for (const id of want) {
-        const it = s.inventory.find((i) => i.itemId === id);
+        const it = walkCarried(s.inventory).find((i) => i.itemId === id);
         if (it) { used = id; s.removeItem(it.uid, 1); break; }
       }
       if (!used) {
@@ -1879,23 +2062,31 @@ export const useGameStore = create<GameState>()((set, get) => {
 
     moveInvItem: (uid, gx, gy, rot) => {
       const s = get();
-      set({
-        inventory: s.inventory.map((i) => (i.uid === uid ? { ...i, gx, gy, rot } : i)),
-      });
+      set({ inventory: updateCarried(s.inventory, uid, (i) => ({ ...i, gx, gy, rot })) });
+    },
+
+    arrangeContainer: (dest, order) => {
+      const s = get();
+      const spec = specForDest(s.inventory, dest);
+      if (!spec) return;
+      const items = listInDest(s.inventory, dest, s.equipped);
+      const { placed } = arrangeGridItems(items, spec.cols, spec.rows, order);
+      let inv = s.inventory;
+      for (const it of items) {
+        const p = placed.get(it.uid);
+        inv = updateCarried(inv, it.uid, (i) => (p
+          ? { ...i, gx: p.gx, gy: p.gy, rot: p.rot }
+          : { ...i, gx: undefined, gy: undefined, rot: undefined }));
+      }
+      set({ inventory: inv });
+      s.addToast(order === 'size' ? 'Arranged by size.' : 'Sorted by category.');
     },
 
     arrangeInventory: (order) => {
       const s = get();
-      const packItem = s.inventory.find((i) => i.uid === s.equipped.pack);
-      const dims = packGridDims(packItem?.itemId);
-      const { placed } = arrangeGridItems(s.inventory, dims.cols, dims.rows, order);
-      set({
-        inventory: s.inventory.map((i) => {
-          const p = placed.get(i.uid);
-          return p ? { ...i, gx: p.gx, gy: p.gy, rot: p.rot } : { ...i, gx: undefined, gy: undefined, rot: undefined };
-        }),
-      });
-      s.addToast(order === 'size' ? 'Pack arranged by size.' : 'Pack sorted by category.');
+      // the classic pack arrange now targets the worn backpack's grid
+      if (!s.equipped.backpack) { s.addToast('No backpack to arrange.'); return; }
+      s.arrangeContainer({ type: 'container', uid: s.equipped.backpack }, order);
     },
 
     moveStorageItem: (index, gx, gy, rot) => {
@@ -1913,7 +2104,12 @@ export const useGameStore = create<GameState>()((set, get) => {
 
     openPhone: (tab) => {
       const s = get();
-      if (!s.phoneUnlocked) { s.addToast('You don’t have a phone yet.'); return; }
+      // PHONE RULE (inventory v2, explicit): the deck follows the
+      // ITEM. The phone UI opens only while the sat phone is carried
+      // on your person — pockets, a worn grid, or nested in a carried
+      // container. Drop it or trunk it and the deck is gone; the
+      // phone-free inventory overlay always works.
+      if (!hasPhoneCarried(s.inventory)) { s.addToast('Your sat phone isn’t on you.'); return; }
       if (s.battery <= 0) { s.addToast('Phone battery is dead.'); return; }
       set({ phoneOpen: true, phoneTab: tab ?? s.phoneTab });
     },
@@ -1971,7 +2167,7 @@ export const useGameStore = create<GameState>()((set, get) => {
       for (const c of recipe.components) {
         let left = c.qty;
         while (left > 0) {
-          const it = [...s.inventory].reverse().find((i) => i.itemId === c.itemId);
+          const it = [...walkCarried(s.inventory)].reverse().find((i) => i.itemId === c.itemId);
           if (!it) break;
           const take = Math.min(it.qty, left);
           s.removeItem(it.uid, take);
@@ -2122,6 +2318,12 @@ export const useGameStore = create<GameState>()((set, get) => {
       if (!snap) { s.addToast('No save in that slot.'); return false; }
       if (snap.version > 3) { s.addToast('Save is from a newer version.'); return false; }
       const cleanBase = sanitizeBase(snap.base);
+      // inventory v2 load migration (Ian 2026-10-21): unify the
+      // equipped record onto weapon slots + worn garments, land the
+      // legacy flat pack inside the backpack container, and grant the
+      // sat phone (into pockets) when the save predates carrying one.
+      const migratedEq = migrateEquipped(snap.equipped, snap.inventory);
+      const norm = normalizeCarried(snap.inventory, migratedEq, newUid);
       set({
         screen: 'game',
         difficulty: snap.difficulty,
@@ -2131,8 +2333,8 @@ export const useGameStore = create<GameState>()((set, get) => {
         pos: snap.player.pos,
         timeMinutes: snap.timeMinutes,
         playSeconds: snap.playSeconds,
-        inventory: snap.inventory,
-        equipped: snap.equipped,
+        inventory: norm.inventory,
+        equipped: syncWeaponProjections(norm.equipped, norm.inventory),
         // wave 3: quick-use row is 4 slots; older saves carry 3 — pad
         hotbar: [...snap.hotbar, null, null, null, null].slice(0, 4),
         quests: snap.quests,
@@ -2142,9 +2344,10 @@ export const useGameStore = create<GameState>()((set, get) => {
         // factions (pier/refuge/hollow) land in their absorbing faction
         // and missing canon factions take their STARTING_REP values.
         rep: foldLegacyRep(snap.rep),
-        phoneOpen: false, phoneTab: 'home', phoneUnlocked: snap.phoneUnlocked, battery: snap.battery,
+        phoneOpen: false, phoneTab: 'home', phoneUnlocked: snap.phoneUnlocked || norm.phoneGranted, battery: snap.battery,
         dialogue: null, interactPrompt: null,
         dead: false, deathCause: null, endingChoice: null, cutsceneLine: 0,
+        nearby: [],
         daysElapsed: snap.daysElapsed,
         skills: snap.skills as GameState['skills'],
         perkPoints: snap.perkPoints,
