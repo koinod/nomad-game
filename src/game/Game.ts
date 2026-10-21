@@ -666,21 +666,31 @@ export class Game {
     // cutscene camera path
     if (this.cutscene && this.world && this.camera) this.updateCutscene(dt);
 
+    // Weather ticks PER FRAME on a fractional game clock (Item 3):
+    // it used to tick inside the 4 Hz sky block off the whole-minute
+    // clock, so its eased factors (rain, fog, cloud) advanced in
+    // ~15-game-second chunks four times a second — transitions stepped
+    // instead of crossfading. The fractional clock (whole minutes +
+    // the in-progress minute accumulator) advances continuously, so
+    // the same total game time now flows smoothly. The state machine
+    // sees identical durations; only the sampling is finer.
+    if (this.world) {
+      const nowMinF = s.daysElapsed * 1440 + s.timeMinutes + this.timeT;
+      if (this.lastClockMin >= 0) {
+        this.weather.update(Math.max(0, nowMinF - this.lastClockMin) * 60, s.timeMinutes / 60);
+      }
+      this.lastClockMin = nowMinF;
+    }
     // sky at ~4Hz (avoids per-frame color allocations)
     this.skyT -= dt;
     if (this.skyT <= 0 && this.world) {
       this.skyT = 0.25;
-      // weather ticks on game-clock time, then bends the sky + grip
-      const nowMin = s.daysElapsed * 1440 + s.timeMinutes;
-      if (this.lastClockMin >= 0) {
-        this.weather.update(Math.max(0, nowMin - this.lastClockMin) * 60, s.timeMinutes / 60);
-      }
-      this.lastClockMin = nowMin;
       const wx = this.weather.snapshot();
       const sky = this.world.updateSky(s.timeMinutes, {
         cloudCover: wx.cloudCover,
         fog: wx.fog,
         precipitation: wx.precipitation,
+        wetness: wx.wetness,
         windX: Math.cos(wx.windDirRad) * wx.windSpeed * 14,
         windZ: Math.sin(wx.windDirRad) * wx.windSpeed * 14,
       });

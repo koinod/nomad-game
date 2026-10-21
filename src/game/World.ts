@@ -313,6 +313,11 @@ export interface SkyWeather {
   cloudCover: number; // 0..1
   fog: number; // 0..1
   precipitation: number; // 0..1
+  /** Ground wetness 0..1 (Item 3): the terrain must LOOK as wet as
+   *  the grip says it is — before this field existed, wetness fed the
+   *  tire model and the HUD but nothing rendered it, so the ground
+   *  looked bone dry while grip fell to 0.65x. */
+  wetness?: number; // 0..1
 }
 
 export interface SkyAdjust {
@@ -368,17 +373,74 @@ export const SKY_PALETTES: Record<SkyPhase, SkyPalette> = {
  *  phase palettes are three stops; the visible dome blends between
  *  them so dawn/dusk are gradients in time, not steps. Endpoints are
  *  the palettes themselves (elev ≥ 0.25 = day, 0 = golden,
- *  ≤ −0.06 = night — the skyPhase thresholds). */
-export function skyPaletteAt(elev: number): { zenith: number; horizon: number; ground: number; sun: number } {
+ *  ≤ −0.06 = night — the skyPhase thresholds).
+ *
+ *  Item 3 (2026-10-21): the INTENSITIES blend too. updateSky used to
+ *  read hemi/env straight from SKY_PALETTES[skyPhase(elev)], so the
+ *  whole scene's fill light stepped at the phase thresholds (hemi
+ *  0.45→0.55 at elev 0.25, 0.2→0.45 at −0.06; env 0.42→0.5 and
+ *  0.1→0.42) while the colors eased — a visible lighting pop twice a
+ *  day. The palettes themselves are unchanged (lighting.test pins
+ *  them); only their application is continuous now. */
+export function skyPaletteAt(elev: number): {
+  zenith: number; horizon: number; ground: number; sun: number;
+  envIntensity: number; hemiIntensity: number;
+} {
   const mix = (a: SkyPalette, b: SkyPalette, t: number) => {
     const c = (x: number, y: number) => new THREE.Color(x).lerp(new THREE.Color(y), t).getHex();
-    return { zenith: c(a.zenith, b.zenith), horizon: c(a.horizon, b.horizon), ground: c(a.ground, b.ground), sun: c(a.sun, b.sun) };
+    return {
+      zenith: c(a.zenith, b.zenith), horizon: c(a.horizon, b.horizon),
+      ground: c(a.ground, b.ground), sun: c(a.sun, b.sun),
+      envIntensity: a.envIntensity + (b.envIntensity - a.envIntensity) * t,
+      hemiIntensity: a.hemiIntensity + (b.hemiIntensity - a.hemiIntensity) * t,
+    };
   };
-  const pick = (p: SkyPalette) => ({ zenith: p.zenith, horizon: p.horizon, ground: p.ground, sun: p.sun });
+  const pick = (p: SkyPalette) => ({
+    zenith: p.zenith, horizon: p.horizon, ground: p.ground, sun: p.sun,
+    envIntensity: p.envIntensity, hemiIntensity: p.hemiIntensity,
+  });
   if (elev >= 0.25) return pick(SKY_PALETTES.day);
   if (elev >= 0) return mix(SKY_PALETTES.golden, SKY_PALETTES.day, elev / 0.25);
   if (elev >= -0.06) return mix(SKY_PALETTES.night, SKY_PALETTES.golden, (elev + 0.06) / 0.06);
   return pick(SKY_PALETTES.night);
+}
+
+/**
+ * Sun/moon crossfade (Item 3, 2026-10-21). updateSky used to switch
+ * light sources on a hard `elev > 0.02` branch: sun intensity jumped
+ * 0 → ~0.36, the moon fill 0.35 → 0, the fog colour snapped from
+ * night to day stock, and the sky disc teleported from the moon's
+ * fixed position to the sun's. This blend is the single continuous
+ * replacement: a smoothstep band across the horizon (elev −0.03 …
+ * +0.05) where the sun ramps in as the moon ramps out. Pure — tests
+ * pin continuity at the old branch line.
+ */
+export function sunMoonBlend(elev: number): { sun: number; moon: number } {
+  const t = clamp((elev + 0.03) / 0.08, 0, 1);
+  const s = t * t * (3 - 2 * t);
+  return { sun: s, moon: 1 - s };
+}
+
+/** Rain streak opacity from precipitation (Item 3): ramps from ZERO
+ *  with the eased precipitation factor. The old rule (visible at
+ *  p > 0.02, opacity instantly 0.16 + p·0.5) popped the whole rain
+ *  box in at ~0.17 opacity the moment a shower started. Same ceiling
+ *  (0.66 at p = 1), no step. */
+export function rainOpacity(precipitation: number): number {
+  return clamp(precipitation, 0, 1) * 0.66;
+}
+
+/**
+ * How soaked ground LOOKS (Item 3): wet terrain is darker and
+ * smoother (lower roughness — puddle sheen on the micro surface).
+ * `darken` multiplies the terrain material colour (the terrain uses
+ * vertex colours over a white base, so the multiplier darkens the
+ * baked biome colours without touching them). Grip and looks now
+ * read the same wetness number.
+ */
+export function terrainWetnessLook(wetness: number): { roughness: number; darken: number } {
+  const w = clamp(wetness, 0, 1);
+  return { roughness: 0.95 * (1 - 0.5 * w), darken: 1 - 0.28 * w };
 }
 
 /** The sky shader — ONE factory for the PMREM environment dome and
@@ -446,6 +508,14 @@ export class World {
   private wxPrecip = 0;
   private wxWindX = 0;
   private wxWindZ = 0;
+  /** Item 3: fog targets from the 4 Hz updateSky; World.update damps
+   *  the live fog toward them per frame (no 150 m steps at onsets). */
+  private fogNearT = 120;
+  private fogFarT = 900;
+  private fogInit = false;
+  /** Item 3: rain's display precipitation — damped toward the 4 Hz
+   *  wxPrecip per frame so opacity/density never step at tick rate. */
+  private rainPrecipCur = 0;
   private hemi!: THREE.HemisphereLight;
   private moonFill!: THREE.DirectionalLight;
   private stars!: THREE.Points;
@@ -732,10 +802,13 @@ export class World {
   /** Advance the rain box around a focus point (the player). */
   updateRain(dt: number, focusX: number, focusZ: number): void {
     if (!this.rain || !this.rainPos) return;
-    const p = this.wxPrecip;
-    this.rain.visible = p > 0.02;
+    const p = this.rainPrecipCur;
+    this.rain.visible = p > 0.01;
     if (!this.rain.visible) return;
-    (this.rain.material as THREE.PointsMaterial).opacity = 0.16 + p * 0.5;
+    // opacity ramps from zero with precipitation (rainOpacity) — the
+    // old 0.16 + p·0.5 popped the box in at ~0.17 the moment p crossed
+    // its 0.02 visibility threshold
+    (this.rain.material as THREE.PointsMaterial).opacity = rainOpacity(p);
     const fall = 23 * dt;
     const pos = this.rainPos;
     const n = pos.length / 3;
@@ -1318,10 +1391,18 @@ export class World {
     // Lane 12 fog tightening: on a clear sky the tuned range (95→620)
     // keeps the far shore a silhouette instead of melting into fog
     // colour; weather collapse is never loosened (tightenFog mins).
+    // Item 3: updateSky runs at 4 Hz, so these are TARGETS — World.
+    // update damps the live fog toward them every frame. Assigned
+    // directly, a rain onset stepped the far plane by ~150 m a tick.
     const fogF = wx ? clamp(wx.fog + wx.precipitation * 0.45, 0, 1) : 0;
     const tightened = tightenFog(this.skyAdj.fogNear, this.skyAdj.fogFar, fogF);
-    fog.near = tightened.fogNear;
-    fog.far = tightened.fogFar;
+    this.fogNearT = tightened.fogNear;
+    this.fogFarT = tightened.fogFar;
+    if (!this.fogInit) {
+      this.fogInit = true;
+      fog.near = this.fogNearT;
+      fog.far = this.fogFarT;
+    }
     const t01 = timeMinutes / 1440;
     const ang = (t01 - 0.25) * Math.PI * 2; // sunrise 06:00 at horizon
     const elev = Math.sin(ang);
@@ -1329,50 +1410,62 @@ export class World {
 
     const R = 600;
     this.sun.position.set(Math.cos(ang) * R, Math.max(elev, -0.2) * R, 220);
-    if (elev > 0.02) {
-      const dayness = clamp(elev * 2.2, 0, 1);
-      this.sun.intensity = (0.25 + dayness * 2.4) * this.skyAdj.sunScale;
-      this.sun.color.setHex(0xfff2dd).lerp(new THREE.Color(0xff9a4e), 1 - dayness);
-      this.moonFill.intensity = 0;
-      const sky = NIGHT_SKY.clone()
-        .lerp(SUNSET_SKY, clamp(1 - Math.abs(elev) * 4, 0, 1))
-        .lerp(DAY_SKY, dayness);
-      (this.scene.background as THREE.Color).copy(sky);
-      (this.scene.fog as THREE.Fog).color.copy(DAY_FOG).lerp(NIGHT_FOG, 1 - dayness);
-      this.starMat.opacity = 0;
-    } else {
-      // night: moonlight fill
-      this.sun.intensity = 0;
-      this.moonFill.intensity = 0.35;
-      (this.scene.background as THREE.Color).copy(NIGHT_SKY);
-      (this.scene.fog as THREE.Fog).color.copy(NIGHT_FOG);
-      this.starMat.opacity = clamp(-elev * 3, 0, 0.9);
-    }
+    // Sun/moon as ONE continuous system (Item 3): the old hard branch
+    // at elev 0.02 popped sun intensity, moon fill, background, fog
+    // colour and the sky disc simultaneously at dawn and dusk. Every
+    // term below is a continuous function of elevation — the blend
+    // ramps the sun in and the moon out across the horizon band, and
+    // the day-side colours (which already tend to the night values
+    // as dayness → 0) are mixed by the same factor.
+    const blend = sunMoonBlend(elev);
+    const dayness = clamp(elev * 2.2, 0, 1);
+    this.sun.intensity = (0.25 + dayness * 2.4) * this.skyAdj.sunScale * blend.sun;
+    this.sun.color.setHex(0xfff2dd).lerp(new THREE.Color(0xff9a4e), 1 - dayness);
+    this.moonFill.intensity = 0.35 * blend.moon;
+    const skyDay = NIGHT_SKY.clone()
+      .lerp(SUNSET_SKY, clamp(1 - Math.abs(elev) * 4, 0, 1))
+      .lerp(DAY_SKY, dayness);
+    (this.scene.background as THREE.Color).copy(NIGHT_SKY).lerp(skyDay, blend.sun);
+    const fogDay = DAY_FOG.clone().lerp(NIGHT_FOG, 1 - dayness);
+    (this.scene.fog as THREE.Fog).color.copy(NIGHT_FOG).lerp(fogDay, blend.sun);
+    this.starMat.opacity = clamp(-elev * 3, 0, 0.9) * blend.moon;
     // the VISIBLE sky (Item 7): continuous palette + the disc tracks
     // the sun (by day) or the moon fill (by night) — the sky the
-    // player sees is the sky the IBL is baked from
+    // player sees is the sky the IBL is baked from. The disc's
+    // direction now CROSSFADES between the two bodies through the
+    // horizon band instead of teleporting between them.
+    const pal = skyPaletteAt(elev);
     if (this.skyMat) {
-      const pal = skyPaletteAt(elev);
       const u = this.skyMat.uniforms;
       (u.zenith.value as THREE.Color).setHex(pal.zenith);
       (u.horizon.value as THREE.Color).setHex(pal.horizon);
       (u.ground.value as THREE.Color).setHex(pal.ground);
       (u.sunColor.value as THREE.Color).setHex(pal.sun);
-      const discDir = elev > 0.02
-        ? this.sun.position.clone().normalize()
-        : this.moonFill.position.clone().normalize();
+      const discDir = this.moonFill.position.clone().normalize()
+        .lerp(this.sun.position.clone().normalize(), blend.sun)
+        .normalize();
       (u.sunDir.value as THREE.Vector3).copy(discDir);
-      (u.sunBoost.value as number) = elev > 0.02 ? 1.6 : 0.7;
+      (u.sunBoost.value as number) = 0.7 + 0.9 * blend.sun;
     }
-    // lighting baseline: the environment follows the phase of day; the
-    // hemisphere is the interior guarantee (shaded, never black)
+    // lighting baseline: the environment bake still follows the phase
+    // of day (a PMREM rebake is a discrete asset swap by design), but
+    // the INTENSITIES the phases used to step are now the palette's
+    // continuous blends — no fill-light pop at the thresholds.
+    // The hemisphere is the interior guarantee (shaded, never black).
     const phase = skyPhase(elev);
     if (phase !== this.envPhase) {
       this.applyEnvironment(phase, this.sun.position.clone().normalize());
     }
-    this.hemi.intensity = SKY_PALETTES[phase].hemiIntensity * this.skyAdj.hemiScale;
+    this.hemi.intensity = pal.hemiIntensity * this.skyAdj.hemiScale;
     if (this.scene.environment) {
-      this.scene.environmentIntensity = SKY_PALETTES[phase].envIntensity * this.skyAdj.envScale;
+      this.scene.environmentIntensity = pal.envIntensity * this.skyAdj.envScale;
+    }
+    // wet ground looks wet (Item 3): the same wetness that cuts tire
+    // grip darkens the terrain and drops its roughness
+    if (wx?.wetness != null && this.terrainMat) {
+      const look = terrainWetnessLook(wx.wetness);
+      this.terrainMat.roughness = look.roughness;
+      this.terrainMat.color.setScalar(look.darken);
     }
     // lighthouse lamp burns at night
     const lampOn = isNight;
@@ -1411,6 +1504,17 @@ export class World {
     // the sky dome rides with the player — its edge is never reached
     if (this.skyDome) this.skyDome.position.set(focusX, 0, focusZ);
     this.beamPivot.rotation.y += dt * 0.5;
+    // Item 3: damp fog + rain toward the 4 Hz sky targets so weather
+    // transitions are continuous in real time, not stepped at tick
+    // rate (exponential, timestep-independent — same form as the
+    // weather system's own easing)
+    if (this.fogInit && this.scene.fog) {
+      const fog = this.scene.fog as THREE.Fog;
+      const k = 1 - Math.exp(-dt / 0.3);
+      fog.near += (this.fogNearT - fog.near) * k;
+      fog.far += (this.fogFarT - fog.far) * k;
+    }
+    this.rainPrecipCur += (this.wxPrecip - this.rainPrecipCur) * (1 - Math.exp(-dt / 0.25));
     this.updateRain(dt, focusX, focusZ);
     // cheap water shimmer
     this.waterMat.opacity = 0.8 + Math.sin(elapsed * 0.7) * 0.03;
