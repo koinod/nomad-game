@@ -296,7 +296,7 @@ export default function Backpack() {
                       <Act
                         label="Equip"
                         fn={() => equipUid(sel.uid)}
-                        disabled={selDef.category !== 'weapon-melee' && selDef.category !== 'weapon-ranged' && selDef.category !== 'pack'}
+                        disabled={selDef.category !== 'weapon-melee' && selDef.category !== 'weapon-ranged' && selDef.category !== 'pack' && selDef.category !== 'armor'}
                       />
                     )}
                     <Act label="Use" fn={() => useItemUid(sel.uid)} />

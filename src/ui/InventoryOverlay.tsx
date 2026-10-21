@@ -433,10 +433,9 @@ export default function InventoryOverlay() {
                     {selDef.blockPct ? ` · blocks ${selDef.blockPct}%` : ''}
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {/* armor-category items: worn via Lane 6's armor equip
-                        path at merge (equipUid routes only melee/ranged/
-                        pack today) — the armor slots display + unequip
-                        what's worn; Equip here covers the routed slots. */}
+                    {/* armor-category items wear via equipUid's armor
+                        routing (stage 7: head/torso/legs slots); Unequip
+                        covers every routed slot. */}
                     {equippedSlot ? (
                       <Act
                         label="Unequip"
@@ -452,7 +451,8 @@ export default function InventoryOverlay() {
                         disabled={
                           selDef.category !== 'weapon-melee' &&
                           selDef.category !== 'weapon-ranged' &&
-                          selDef.category !== 'pack'
+                          selDef.category !== 'pack' &&
+                          selDef.category !== 'armor'
                         }
                       />
                     )}

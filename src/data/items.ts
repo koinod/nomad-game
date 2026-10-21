@@ -348,11 +348,14 @@ export const ITEMS: Record<string, ItemDef> = {
     desc: 'Light and noise. Husks lose you for a while. Equip and left-click to throw.', damage: 0, thrown: { aoe: 12, dmg: 0, fuse: 0.8, blind: 6 },
   },
   armored_vest: {
-    id: 'armored_vest', name: 'Armored vest', category: 'material', weight: 2.4, slots: 2, stack: 1,
+    // RE-CATEGORIZED (stage 7): was 'material' like the plate carrier
+    // once was — now real armor with a torso slot; equipUid routes it.
+    // Mitigation still also runs while-carried (damagePlayer's rule).
+    id: 'armored_vest', name: 'Armored vest', category: 'armor', armorSlot: 'torso', weight: 2.4, slots: 2, stack: 1,
     desc: 'Kevlar panels under worn leather. Mitigates 25% of damage while carried.', armor: 0.25,
   },
   riot_helmet: {
-    id: 'riot_helmet', name: 'Riot helmet', category: 'material', weight: 1.1, slots: 1, stack: 1,
+    id: 'riot_helmet', name: 'Riot helmet', category: 'armor', armorSlot: 'head', weight: 1.1, slots: 1, stack: 1,
     desc: 'Hard shell, cracked visor. Mitigates 15% of damage while carried.', armor: 0.15,
   },
   // armor completion (SYSTEMS_SPEC §2.5): torso T3 + the legs slot.

@@ -946,7 +946,12 @@ export const useGameStore = create<GameState>()((set, get) => {
       const slot: keyof Equipped | null =
         def.category === 'weapon-melee' ? 'melee'
         : def.category === 'weapon-ranged' ? 'ranged'
-        : def.category === 'pack' ? 'pack' : null;
+        : def.category === 'pack' ? 'pack'
+        // worn armor (Lane 5's slots): route by the def's body slot
+        : def.category === 'armor' && def.armorSlot === 'head' ? 'armorHead'
+        : def.category === 'armor' && def.armorSlot === 'torso' ? 'armorTorso'
+        : def.category === 'armor' && def.armorSlot === 'legs' ? 'armorLegs'
+        : null;
       if (!slot) { s.addToast(`${def.name} can't be equipped.`); return; }
       // a freshly equipped gun starts with a full magazine
       if (slot === 'ranged' && def.magSize != null && it.loaded === undefined) {
