@@ -90,7 +90,7 @@ export const PROLOGUE_SCRIPT: Record<string, DialogueNode> = {
 };
 
 export const NPC_DIALOGUES: Record<
-  'npc:jonah' | 'npc:kowalski',
+  string,
   { start: string; nodes: Record<string, DialogueNode> }
 > = {
   'npc:jonah': {
@@ -188,6 +188,112 @@ export const NPC_DIALOGUES: Record<
             next: null,
           },
         ],
+      },
+    },
+  },
+  // W2 (stage 7): Lane 9's placed NPCs — one flavor node each, written
+  // from their worldWiring placement notes. Traders among them get the
+  // overlay's Trade button automatically (TRADERS resolves by npcKey);
+  // the Accountant is event-only by canon — a nod, never a shop.
+  'npc:boudreaux': {
+    start: 'start',
+    nodes: {
+      start: {
+        id: 'start',
+        speaker: 'Cpt. Idris Boudreaux',
+        lines: [
+          'Mind the lines, friend — a dock punishes the careless worse than the sea does.',
+          'Boudreaux. I keep the Union\u2019s harbor book: what comes off the water, what goes back on it, and what it costs.',
+          'The Drowned work the far pilings. The fold made us neighbors, not strangers — trade honest and the whole harbor stays honest.',
+        ],
+        next: null,
+      },
+    },
+  },
+  'npc:okonkwo': {
+    start: 'start',
+    nodes: {
+      start: {
+        id: 'start',
+        speaker: 'Sister Mariah Okonkwo',
+        lines: [
+          'Sit if you\u2019re bleeding. Stand if you\u2019re not — the cots are spoken for.',
+          'The clinic runs on bandages, boiled water and whatever the island gives up. If you need the stores, the bench is there — the Union keeps its prices plain.',
+          'Everyone who washes up here thinks they\u2019re the last one. You\u2019re not. That\u2019s the good news and the workload.',
+        ],
+        next: null,
+      },
+    },
+  },
+  'npc:quartermaster': {
+    start: 'start',
+    nodes: {
+      start: {
+        id: 'start',
+        speaker: 'Remnant Quartermaster',
+        lines: [
+          'State your business inside the wire, friend. The armory counter keeps army hours.',
+          'The Long Chain trades deep or not at all — earn the standing and the good crates open. Until then, the schedule on the board is the whole conversation.',
+        ],
+        next: null,
+      },
+    },
+  },
+  'npc:wraith': {
+    start: 'start',
+    nodes: {
+      start: {
+        id: 'start',
+        speaker: 'Wraith',
+        lines: [
+          'The gate is the gate. The schedule is the schedule.',
+          'Wraith, keeper of this crossing. The bridge east is priced by the table, not by the weather in your voice — haggling is not a concept we keep here.',
+          'Pay the toll, or walk the long water. Everyone chooses; nobody argues.',
+        ],
+        next: null,
+      },
+    },
+  },
+  'npc:vesper': {
+    start: 'start',
+    nodes: {
+      start: {
+        id: 'start',
+        speaker: 'Cpt. Selene Vesper',
+        lines: [
+          'You\u2019re standing on my dock, so mind the Wake\u2019s lines.',
+          'Selene Vesper. The flotilla answers to me, the chandlery trades through me, and the ferry runs when I say the water\u2019s honest.',
+          'Coin, salvage or favors — the sea takes all three currencies. So do I.',
+        ],
+        next: null,
+      },
+    },
+  },
+  'npc:relay_post_guard': {
+    start: 'start',
+    nodes: {
+      start: {
+        id: 'start',
+        speaker: 'Remnant Listener',
+        lines: [
+          'Quiet up here. The mast hears everything; I just write down the interesting parts.',
+          'Long Chain listening post, on paper and in fact. The Collective thinks it\u2019s theirs. Paper and thinking are different countries, friend.',
+        ],
+        next: null,
+      },
+    },
+  },
+  'npc:the_accountant': {
+    start: 'start',
+    nodes: {
+      start: {
+        id: 'start',
+        speaker: 'The Accountant',
+        lines: [
+          'You\u2019re lost. Everyone out here is lost — the dunes do that.',
+          'I keep no shop, friend, and I\u2019m not out here. If the Skulls ask, you saw weather. If anyone asks — weather.',
+        ],
+        next: null,
       },
     },
   },

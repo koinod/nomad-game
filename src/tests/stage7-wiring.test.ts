@@ -6,7 +6,10 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { useGameStore } from '../store/gameStore';
 import { ITEMS } from '../data/items';
 import { QUESTS } from '../data/quests';
-import { ENCLAVE_CACHES, ENCLAVE_RADIO_BURST, ROAD_GRAPH } from '../data/worldWiring';
+import { ENCLAVE_CACHES, ENCLAVE_RADIO_BURST, ROAD_GRAPH, NPC_PLACEMENTS } from '../data/worldWiring';
+import { NPC_DIALOGUES } from '../narrative/dialogue';
+import { NPC_LOOKS } from '../data/survivors';
+import { TRADERS } from '../data/traders';
 import { buildContainerDefs } from '../game/Interact';
 import { POI_DEFS } from '../game/World';
 import { MAP_MARKERS, territoryAt } from '../data/territory';
@@ -76,6 +79,37 @@ describe('stage 7 item 1 — W1 POIs + W4 markers', () => {
     }
     for (const id of ['tollgate', 'raider_fort', 'barn', 'warehouse', 'gas_station', 'strip_mall']) {
       expect(territoryAt(id)?.poiId).toBe(id);
+    }
+  });
+});
+
+describe('stage 7 item 2 — W2 NPC placements', () => {
+  it('every placed NPC has a dialogue entry and a figure look', () => {
+    for (const p of NPC_PLACEMENTS) {
+      expect(NPC_DIALOGUES[`npc:${p.key}`], p.key).toBeDefined();
+      expect(NPC_DIALOGUES[`npc:${p.key}`].nodes.start.speaker).toBe(p.name);
+      expect(NPC_LOOKS[p.key], p.key).toBeDefined();
+    }
+  });
+
+  it('placed traders resolve to TRADERS benches by npcKey; non-traders have none', () => {
+    for (const p of NPC_PLACEMENTS) {
+      const trader = TRADERS.find((t) => t.npcKey === p.key);
+      if (p.traderId) {
+        expect(trader?.id, p.key).toBe(p.traderId);
+      } else {
+        expect(trader, p.key).toBeUndefined();
+      }
+    }
+  });
+
+  it('every placement anchor resolves: poiId, the tollgate, or an approx', () => {
+    const poiIds = new Set(POI_DEFS.map((d) => d.id));
+    for (const p of NPC_PLACEMENTS) {
+      const ok = (p.poiId !== undefined && poiIds.has(p.poiId))
+        || (p.key === 'wraith' && poiIds.has('tollgate'))
+        || p.approx !== undefined;
+      expect(ok, p.key).toBe(true);
     }
   });
 });

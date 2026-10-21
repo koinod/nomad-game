@@ -688,7 +688,7 @@ function BaseSection() {
  * fronts no bench. Lane 9's W2 placements (Okonkwo, Quartermaster,
  * Vesper, Wraith) extend this list when the wiring train lands them.
  */
-const WORLD_TRADER_NPC_KEYS = ['kowalski'];
+const WORLD_TRADER_NPC_KEYS = ['kowalski', 'okonkwo', 'quartermaster', 'wraith', 'vesper'];
 
 function LogTab() {
   const [selectedTraderId, setSelectedTraderId] = useState<string | null>(null);

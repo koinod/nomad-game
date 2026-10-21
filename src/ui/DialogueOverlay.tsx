@@ -20,7 +20,7 @@ export default function DialogueOverlay() {
   const [selectedTraderId, setSelectedTraderId] = useState<string | null>(null);
 
   if (!dialogue || !dialogue.source.startsWith('npc:')) return null;
-  const key = dialogue.source as 'npc:jonah' | 'npc:kowalski';
+  const key = dialogue.source;
   const entry = NPC_DIALOGUES[key];
   if (!entry) return null;
 

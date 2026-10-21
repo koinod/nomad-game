@@ -172,6 +172,14 @@ export const SURVIVOR_LOOKS: Record<string, SurvivorLook> = {
 export const NPC_LOOKS: Record<string, SurvivorLook> = {
   jonah: { skin: 0x8a5a3b, jacket: 0x4a4438, pants: 0x35322c, build: 'standard', hair: 0x6e6a63, hairStyle: 'crop' },
   kowalski: { skin: 0xd8b596, jacket: 0xd8d8d0, pants: 0x2c3540, build: 'slim', hair: 0xb8b0a4, hairStyle: 'long' },
+  // W2 (stage 7): Lane 9's placed NPCs
+  boudreaux: { skin: 0x6e4526, jacket: 0x2e4a5a, pants: 0x2c2c30, build: 'heavy', hair: 0x1e1a16, hairStyle: 'crop' },
+  okonkwo: { skin: 0x5a3a22, jacket: 0xd8d8d0, pants: 0x4a4438, build: 'standard', hair: 0x14100c, hairStyle: 'long' },
+  quartermaster: { skin: 0xc9a180, jacket: 0x4a5240, pants: 0x3a4034, build: 'heavy', hair: 0x8a8078, hairStyle: 'crop' },
+  wraith: { skin: 0xb8b0a4, jacket: 0x2c2c30, pants: 0x232326, build: 'slim', hair: 0xd8d8d0, hairStyle: 'long' },
+  vesper: { skin: 0xa87850, jacket: 0x274b63, pants: 0x23282e, build: 'standard', hair: 0x3a2418, hairStyle: 'long' },
+  relay_post_guard: { skin: 0xd8b596, jacket: 0x53584c, pants: 0x3a4034, build: 'standard', hair: 0x4a3a28, hairStyle: 'crop' },
+  the_accountant: { skin: 0xc9a180, jacket: 0x585048, pants: 0x35322c, build: 'slim', hair: 0x2c2620, hairStyle: 'crop' },
 };
 
 export function traitName(id: string): string {

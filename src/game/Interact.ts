@@ -12,8 +12,8 @@ import { buildItemModel } from './itemModels';
 import { buildFurnitureMesh, applyDisturbed, applyRestored, FURNITURE_LABEL, type FurnitureKind } from './furnitureMeshes';
 import { sfx } from '../systems/audio';
 import { AlarmRegistry, type AlarmDef } from './alarm';
-import { CAMPFIRE_SPOTS, biomeAt } from './World';
-import { ENCLAVE_CACHES } from '../data/worldWiring';
+import { CAMPFIRE_SPOTS, biomeAt, findLandZ } from './World';
+import { ENCLAVE_CACHES, NPC_PLACEMENTS } from '../data/worldWiring';
 
 export interface LootEntry {
   id: string;
@@ -489,14 +489,38 @@ export class InteractSystem {
     }
 
     // ---- NPCs ----
-    const npcDefs: { id: string; poiId: string; label: string; jacket: number; dx?: number; dz?: number }[] = [
+    type NpcDef = {
+      id: string; poiId?: string; label: string; jacket: number;
+      dx?: number; dz?: number; ax?: number; az?: number;
+    };
+    const npcDefs: NpcDef[] = [
       { id: 'npc:jonah', poiId: 'jonah_camp', label: 'Talk to Jonah', jacket: 0x5a4632 },
       // Kowalski stands in the lighthouse watch room now (finished,
       // door-reachable — the kit building's npcPoint matches this spot)
       { id: 'npc:kowalski', poiId: 'lighthouse_base', label: 'Talk to Kowalski', jacket: 0x3c5a6e, dx: -1.8, dz: 1.0 },
     ];
+    // W2 (stage 7): Lane 9's placements. POI-anchored where the data
+    // gives a poiId; Wraith anchors to the tollgate POI W1 landed (his
+    // approx IS the tollgate); the Accountant stands free at his dune
+    // approx, z resolved by the same land scan the POIs use.
+    for (const p of NPC_PLACEMENTS) {
+      const def: NpcDef = {
+        id: `npc:${p.key}`,
+        label: `Talk to ${p.name}`,
+        jacket: 0x4a4438,
+        dx: p.dx,
+        dz: p.dz,
+      };
+      if (p.poiId) def.poiId = p.poiId;
+      else if (p.key === 'wraith') def.poiId = 'tollgate';
+      else if (p.approx) {
+        def.ax = p.approx[0];
+        def.az = findLandZ(p.approx[0], p.approx[1]);
+      }
+      npcDefs.push(def);
+    }
     for (const n of npcDefs) {
-      const [x, z] = at(n.poiId);
+      const [x, z] = n.ax !== undefined && n.az !== undefined ? [n.ax, n.az] : at(n.poiId!);
       const mx = x + (n.dx ?? 2.2);
       const mz = z + (n.dz ?? 1.5);
       const y = hooks.groundY(mx, mz);
@@ -514,9 +538,8 @@ export class InteractSystem {
         pos,
         label: n.label,
         use: () => {
-          const src = n.id as 'npc:jonah' | 'npc:kowalski';
           s.questEvent('talk', n.id, 1);
-          s.openDialogue(src, 'start');
+          s.openDialogue(n.id, 'start');
           sfx.play('ui', { volume: 0.5 });
         },
       });
