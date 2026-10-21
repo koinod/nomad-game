@@ -225,6 +225,7 @@ export interface DispatchVehicleData {
 
 export const DISPATCH_VEHICLE_DATA: Record<string, DispatchVehicleData> = {
   mustang: { tankLiters: 61, burnClass: 1.1 }, // Stallion FX
+  gt500: { tankLiters: 61, burnClass: 1.15 }, // Shelby GT500 (GT500_DEF: fuelMax 61, burnClass 1.15)
 };
 
 export const DISPATCH_VEHICLE_DEFAULT: DispatchVehicleData = { tankLiters: 60, burnClass: 1 };

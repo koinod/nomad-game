@@ -10,9 +10,10 @@
 //    with — what you see is what the run costs, fuel included;
 //  - honest blockers: every reason the store would refuse the run is
 //    listed before the player taps Send.
-// Until Lane 5 lands FleetEntry.instanceId + an instance-keyed
-// startDispatch, fleet rows are adapted with instanceId := defId (the
-// planner cannot tell the difference — that is the point of the design).
+// FleetEntry.instanceId has landed (Lane 5) and Game's fleet publisher
+// stamps it from the live Vehicle uid (== defId while the fleet runs one
+// instance per def); the adapter below still falls back to defId for any
+// unstamped row — the planner cannot tell the difference, by design.
 
 import { useMemo, useState } from 'react';
 import { useGameStore } from '../store/gameStore';
@@ -43,7 +44,9 @@ function vehicleOption(f: FleetEntry, playerVehicleUid: string | null): Dispatch
     instanceId,
     defId: f.defId,
     name: f.name,
-    fuelLiters: Math.round((f.fuelPct / 100) * data.tankLiters * 10) / 10,
+    // Prefer the publisher-stamped absolute (Game stamps live liters);
+    // fall back to deriving from fuelPct for unstamped rows.
+    fuelLiters: f.fuelLiters ?? Math.round((f.fuelPct / 100) * data.tankLiters * 10) / 10,
     tankLiters: data.tankLiters,
     burnClass: data.burnClass,
     conditionPct: f.condPct,

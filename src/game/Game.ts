@@ -786,6 +786,14 @@ export class Game {
         this.vehicles.vehicles.map((v) => ({
           defId: v.def.id,
           name: v.def.name + (v.variant === 'fx' ? ' FX' : ''),
+          // Lane 13 field, stamped: instance identity + absolute fuel
+          // (the Vehicle tracks liters aboard; uid == defId while the
+          // fleet runs one instance per def). BasePanel's garage view
+          // and DispatchPanel read these instead of re-deriving.
+          instanceId: v.uid,
+          fuelLiters: Math.round(v.fuel * 10) / 10,
+          tankLiters: v.def.fuelMax,
+          burnClass: v.def.burnClass,
           fuelPct: Math.round((v.fuel / v.def.fuelMax) * 100),
           condPct: Math.round(v.condition * 100),
           dist: Math.round(Math.hypot(v.group.position.x - player.pos.x, v.group.position.z - player.pos.z)),

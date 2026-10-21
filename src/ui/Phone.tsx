@@ -22,6 +22,7 @@ import { packGridDims, canPlace, layoutItems } from '../store/gridUtils';
 import GridInventory from './GridInventory';
 import SkillsPanel from './SkillsPanel';
 import { CraftPanel } from './CraftPanel';
+import DispatchPanel from './DispatchPanel';
 import { DIFFICULTIES, HAIR_COLORS, SKIN_TONES } from '../store/types';
 import type { BuildType, HairStyle } from '../store/types';
 import type { PhoneTab } from '../store/types';
@@ -1144,60 +1145,17 @@ function CharacterTab() {
 
 /* ---------------- TEAM app ---------------- */
 
-function DispatchSection() {
-  const survivors = useGameStore((s) => s.survivors);
-  const dispatches = useGameStore((s) => s.dispatches);
-  const recallDispatch = useGameStore((s) => s.recallDispatch);
-  const daysElapsed = useGameStore((s) => s.daysElapsed);
-  const timeMinutes = useGameStore((s) => s.timeMinutes);
-  const now = daysElapsed * 1440 + timeMinutes;
-
-  return (
-    <section className="rounded border border-[#232b36] bg-[#0b0e12] p-3">
-      <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Dispatch — crew runs</h3>
-      <p className="text-sm text-[#8a94a3]">
-        Dispatch is offline. There is exactly one car left on the island — the Stallion FX — and it
-        goes where its driver takes it. Crew runs return when there's a fleet to send.
-      </p>
-      {dispatches.map((d) => {
-        const who = survivors.find((x) => x.id === d.survivorId);
-        const pct = Math.max(0, Math.min(100, Math.round(((now - d.departMin) / Math.max(1, d.etaMin - d.departMin)) * 100)));
-        return (
-          <div key={d.id} className="mb-2 mt-2 rounded border border-[#232b36] bg-[#12161c] p-2.5">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-sm text-[#d7dde5]">
-                {who?.name ?? 'Crew'} — {d.task} · {poiName(d.destPoiId)} (sent before the purge)
-              </span>
-              <button
-                onClick={() => { sfx.play('ui'); recallDispatch(d.id); }}
-                className="shrink-0 rounded border border-[#232b36] px-2 py-0.5 text-[11px] text-[#d9534f] hover:border-[#d9534f]"
-              >
-                Recall
-              </button>
-            </div>
-            <div className="mt-1.5 h-1.5 overflow-hidden rounded bg-[#232b36]">
-              <div className="h-full bg-[#e8b34b]" style={{ width: `${pct}%` }} />
-            </div>
-            <div className="mt-1 text-[11px] text-[#8a94a3]">Back {fmtAbs(d.etaMin)} · {d.distM} m each way</div>
-          </div>
-        );
-      })}
-    </section>
-  );
-}
-
 function TeamTab() {
   return (
     <div className="nomad-scroll flex h-full flex-col gap-4 overflow-y-auto">
       <CrewSection />
-      {/* MERGE SLOT — Lane 13 DispatchPanel (src/ui/DispatchPanel.tsx on
-          lane/dispatch, default export, self-contained, no props). At
-          merge: import DispatchPanel from './DispatchPanel'; render
-          <DispatchPanel /> here and DELETE DispatchSection below —
-          including its "Dispatch is offline" copy. The panel plans by
-          vehicle instance id; FleetEntry.instanceId + the instance-keyed
-          startDispatch overload land with the same merge step. */}
-      <DispatchSection />
+      {/* MERGE SLOT — Lane 13 DispatchPanel: MOUNTED (Stage 6). The panel
+          is self-contained (store-driven, no props) and plans by vehicle
+          instance id (FleetEntry.instanceId, stamped by Game's fleet
+          publisher; defId until then). It carries its own active-run
+          progress + recall rows, replacing the old DispatchSection —
+          deleted below with its "Dispatch is offline" copy. */}
+      <DispatchPanel />
     </div>
   );
 }
