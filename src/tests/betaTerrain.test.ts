@@ -155,7 +155,7 @@ describe('Rapier identity (mesh == physics == sampler)', () => {
     const probes: [number, number][] = [];
     for (const s of BETA_SECTORS) probes.push([s.x + OX, s.z + OZ]);
     probes.push([-430 + OX, -168 + OZ], [-230 + OX, -190 + OZ], [272 + OX, -196 + OZ]); // extra pads
-    probes.push([75 + OX, -257.5 + OZ], [-360 + OX, 131 + OZ], [-469 + OX, 154 + OZ], [-548 + OX, 199 + OZ]); // channel
+    probes.push([-603 + OX, 287 + OZ], [-517 + OX, 162 + OZ], [-455 + OX, 143 + OZ], [-548 + OX, 199 + OZ]); // channel (new western-sound line)
     probes.push([-330 + OX, -165 + OZ], [-505 + OX, -230 + OZ]); // bluff face + high shoulder
     for (const r of BETA_ROADS) for (const [x, z] of r.points) probes.push([x + OX, z + OZ]);
     for (let j = 12; j < BETA_ROWS - 12; j += 53) {
@@ -332,10 +332,54 @@ describe('waterline sanity (spec §1.1 geography)', () => {
   });
 
   it('the dredged channel reads navigable depth along its line (§3.3)', () => {
-    for (const [x, z] of [[75, -257.5], [-20, -177.5], [-127.5, -100], [-223.5, -14], [-292, 72], [-360, 131], [-469, 154], [-548, 199], [-548, 270]] as const) {
+    // Segment midpoints of the Phase 1.5 western-sound line: south
+    // sound entrance → shoal bar → harbor mouth → estuary reach →
+    // estuary head. (The Phase 1 probes sat on the deleted strait.)
+    for (const [x, z] of [[-603, 287], [-561, 229.5], [-543, 189.5], [-517.5, 162], [-455, 143]] as const) {
       const h = betaHeightAt(x, z);
       expect(h).toBeLessThan(-3.6);
       expect(h).toBeGreaterThan(-4.8);
+    }
+  });
+
+  it('the island waist is dry land — the Ridge connects to the main island (Phase 1.5 shape law)', () => {
+    // The deleted strait's interior midpoints: where the old cut ran
+    // at −4.2 m, the landform now reads as the dry saddle it always
+    // was underneath — the spur climbs it overland the whole way.
+    // (The southern midpoint sits in tidal marsh: dry at marsh
+    // height, ~0.4 m, not saddle height.)
+    for (const [x, z] of [[-20, -177.5], [-127.5, -100], [-223.5, -14], [-292, 72]] as const) {
+      expect(betaHeightAt(x, z)).toBeGreaterThan(0);
+    }
+    expect(betaHeightAt(-127.5, -100)).toBeGreaterThan(1);
+    expect(betaHeightAt(-223.5, -14)).toBeGreaterThan(1);
+    // And the transect the shape gate rendered: no water anywhere
+    // across the waist band between the west block and the centre.
+    for (let x = -330; x <= -90; x += 15) {
+      expect(betaHeightAt(x, -40)).toBeGreaterThan(0);
+      expect(betaHeightAt(x, 20)).toBeGreaterThan(-0.1);
+    }
+  });
+
+  it('no road runs into water — every centerline stays dry (Phase 1.5 shape law)', () => {
+    // Phase 1's strait flooded two roads (the spur bottomed at
+    // −4.2 m, the west fork at −2.9 m). The only water crossing in
+    // the spec is the Citadel causeway, and §2 draws it as a LAND
+    // bridge — so the law is absolute: dry centerlines everywhere.
+    // (If a future route ever needs a true bridge, it gets flagged
+    // as a bridge site in the layout, not a road through water.)
+    for (const road of BETA_ROADS) {
+      let min = Infinity;
+      for (let s = 0; s + 1 < road.points.length; s++) {
+        const [ax, az] = road.points[s];
+        const [bx, bz] = road.points[s + 1];
+        const len = Math.hypot(bx - ax, bz - az);
+        const steps = Math.ceil(len / 5);
+        for (let k = 0; k <= steps; k++) {
+          min = Math.min(min, betaHeightAt(ax + (bx - ax) * (k / steps), az + (bz - az) * (k / steps)));
+        }
+      }
+      expect(min).toBeGreaterThan(0);
     }
   });
 

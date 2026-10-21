@@ -6,7 +6,7 @@ import {
   BETA_POI_PLACEMENTS, BETA_RESERVED_SITES, BETA_STRUCTURE_SETS, BETA_SCATTER,
   betaSector,
 } from '../data/betaLayout';
-import { betaHeightAt, betaChannelDistance, BETA_ZONE_COLORS } from '../game/betaTerrain';
+import { betaHeightAt, betaChannelDistance, betaMarshMask, BETA_ZONE_COLORS } from '../game/betaTerrain';
 
 // ─── BETA LAYOUT — placement canon checks ───────────────────────────────────
 // Every shipped POI has exactly one Beta home (spec sector or stated
@@ -157,11 +157,25 @@ describe('spec §2 road topology', () => {
 });
 
 describe('spec §3.3 channel + daymarkers', () => {
-  it('the channel runs the west sound, north bay to below the Pier', () => {
+  it('the channel is a western-sound feature: south sound → harbor → marsh estuary, never across the island', () => {
+    // DELIBERATE UPDATE (Phase 1.5 shape pass, Ty's gate 2026-10-21):
+    // Phase 1 pinned "north bay to below the Pier" — that route ran
+    // diagonally through the island's dry waist and read as a strait
+    // severing the Ridge from the main island, with two roads grading
+    // down into it. The law now: the cut lives in the western sound
+    // and its marsh estuary only.
     expect(BETA_SOUND_CHANNEL.length).toBeGreaterThanOrEqual(6);
-    expect(BETA_SOUND_CHANNEL[0][1]).toBeLessThan(-280);
+    const first = BETA_SOUND_CHANNEL[0];
     const last = BETA_SOUND_CHANNEL[BETA_SOUND_CHANNEL.length - 1];
-    expect(last[1]).toBeGreaterThan(250);
+    // Entrance in the south sound, below the Pier.
+    expect(first[1]).toBeGreaterThan(280);
+    // Every point stays in the west sound / marsh system — west of
+    // the island's dry waist, never in the interior.
+    for (const [x] of BETA_SOUND_CHANNEL) expect(x).toBeLessThan(-390);
+    // The line ends at the estuary head in the marsh NE of the wreck.
+    expect(last[1]).toBeGreaterThan(90);
+    expect(last[1]).toBeLessThan(180);
+    expect(betaMarshMask(last[0], last[1])).toBeGreaterThan(0.5);
     expect(BETA_CHANNEL_DEPTH).toBeLessThanOrEqual(-4);
   });
 
