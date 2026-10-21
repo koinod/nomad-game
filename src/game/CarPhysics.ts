@@ -80,6 +80,42 @@ const WHEEL_Z = 1.359; // half wheelbase (S650: 2718 mm)
 const REST_LEN = 0.32;
 const MAX_STEER = 0.55; // rad at standstill, tapering with speed
 
+/** Sea level — mirrors WORLD.waterY. */
+export const WATER_Y = 0;
+
+export interface WaterState {
+  /** Water depth over the seabed (0 on dry land). */
+  depth: number;
+  /** 0..1 — how much of the body is under the waterline. */
+  submerged: number;
+  /** Deep enough to float in (wheels off the bottom at the float line). */
+  floats: boolean;
+  /** Group-origin y the car settles at when floating. */
+  floatGroupY: number;
+  /** Water over the intake line — the engine is dead. */
+  stalled: boolean;
+}
+
+/** Water as a physical medium, computed honestly from the seabed (the
+ *  ground field — the same value the wheels stand on) and the car's
+ *  ground-plane origin. Pure: the steppers apply it, tests pin it.
+ *  The float line puts the water at the door sills (group y −0.43 for
+ *  these cars) with the keel ~0.38 under — a car floats low and
+ *  heavy, it does not bob like a boat. */
+export function waterStateAt(seabedY: number, groupY: number): WaterState {
+  const depth = Math.max(0, WATER_Y - seabedY);
+  const keelY = groupY + 0.05; // sill line above the ground-plane origin
+  const submerged = THREE.MathUtils.clamp((WATER_Y - keelY) / 0.75, 0, 1);
+  const floats = depth > 0.85;
+  return {
+    depth,
+    submerged,
+    floats,
+    floatGroupY: floats ? WATER_Y - 0.43 : seabedY,
+    stalled: submerged > 0.75,
+  };
+}
+
 /** Chassis geometry per def: collider half extents + wheel connection
  *  points (chassis space). The Mustang's values are the originals —
  *  its measured behavior does not move. Unknown defs use them too. */
@@ -122,6 +158,9 @@ export class CarPhysics {
   // shared state (both modes)
   speed = 0; // signed m/s along the car's forward
   steerAngle = 0;
+  /** Water interaction state, refreshed every step (Item 2). */
+  submerged = 0;
+  stalled = false;
   private spin = 0;
   private prevVel = new THREE.Vector3();
   private impactCooldown = 0;
@@ -366,7 +405,15 @@ export class CarPhysics {
     ctrl.setWheelSteering(0, this.steerAngle);
     ctrl.setWheelSteering(1, this.steerAngle);
 
-    const th = input.hasFuel ? input.throttle : 0;
+    // water state for this step: the seabed under the car is the
+    // ground field itself; a drowned engine makes no force
+    const tNow = body.translation();
+    const wsNow = waterStateAt(groundY(tNow.x, tNow.z), tNow.y - 0.55);
+    this.submerged = wsNow.submerged;
+    this.stalled = wsNow.stalled;
+    body.setAngularDamping(wsNow.submerged > 0.25 ? 2.2 : 0.9);
+
+    const th = input.hasFuel && !this.stalled ? input.throttle : 0;
     const { force } = this.gearAndForce(th);
     const braking = (th < 0 && this.speed >= 0.5) || (th > 0 && this.speed < -0.5);
     for (let i = 0; i < 4; i++) {
@@ -383,6 +430,20 @@ export class CarPhysics {
     const rollF = p.rollingCoef * p.massKg * 9.81 * Math.tanh(this.speed * 2);
     body.resetForces(true);
     body.addForce({ x: -fwd.x * (dragF + rollF), y: 0, z: -fwd.z * (dragF + rollF) }, true);
+
+    // WATER (Item 2): hydrodynamic drag on any submerged motion, and
+    // buoyancy-lite where the water is deep enough to float in — a PD
+    // spring on the keel's submergence that settles at the float line
+    // instead of the car sinking to the seabed like a stone.
+    if (wsNow.submerged > 0) {
+      const dampK = 2.2 * wsNow.submerged; // 1/s viscous coefficient
+      body.addForce({ x: -lv.x * p.massKg * dampK, y: 0, z: -lv.z * p.massKg * dampK }, true);
+      if (wsNow.floats) {
+        const keelDepth = Math.max(0, WATER_Y - (tNow.y - 0.55 + 0.05));
+        const buoyAccel = THREE.MathUtils.clamp(keelDepth * 26 - lv.y * 3.0, 0, 16);
+        body.addForce({ x: 0, y: buoyAccel * p.massKg, z: 0 }, true);
+      }
+    }
 
     // two physics substeps per frame step
     const sub = 2;
@@ -443,7 +504,7 @@ export class CarPhysics {
   // ------------------------------------------------------------ fallback
   private stepKinematic(dt: number, input: DriveInput, v: Vehicle, groundY: (x: number, z: number) => number): void {
     const p = this.params;
-    const th = input.hasFuel ? input.throttle : 0;
+    const th = input.hasFuel && !this.stalled ? input.throttle : 0;
     // reuse the 1-D longitudinal math (same as estimatePerformance)
     const circ = 2 * Math.PI * p.wheelRadiusM;
     const spd = Math.abs(this.speed);
@@ -463,6 +524,8 @@ export class CarPhysics {
       + p.rollingCoef * p.massKg * 9.81 * Math.tanh(this.speed * 2);
     const a = (force - resist) / p.massKg;
     this.speed += a * dt;
+    // water drag, same medium as the rigid path
+    if (this.submerged > 0) this.speed -= this.speed * Math.min(1, 2.0 * this.submerged * dt);
     if (th === 0 && Math.abs(this.speed) < 0.2) this.speed = 0;
     this.speed = Math.max(-13, this.speed);
     // bicycle yaw
@@ -473,7 +536,13 @@ export class CarPhysics {
     const pos = v.group.position;
     pos.x += Math.sin(v.heading) * this.speed * dt;
     pos.z += Math.cos(v.heading) * this.speed * dt;
-    pos.y = groundY(pos.x, pos.z);
+    // the seabed is the floor in shallow water; in deep water the
+    // hull floats at the sill line instead of resting on the bottom
+    const seabed = groundY(pos.x, pos.z);
+    const ws = waterStateAt(seabed, pos.y);
+    this.submerged = ws.submerged;
+    this.stalled = ws.stalled;
+    pos.y = ws.floats ? Math.max(seabed, ws.floatGroupY) : seabed;
     v.group.rotation.set(0, v.heading, 0);
     v.speed = this.speed;
     this.spin += (this.speed / p.wheelRadiusM) * dt;
