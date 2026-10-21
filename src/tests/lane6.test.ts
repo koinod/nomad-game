@@ -54,6 +54,9 @@ describe('catalog integrity', () => {
       'crossbow', 'bolts', 'smg', 'carbine', 'dmr', 'ammo_556', 'smoke',
       'rock', 'boombox', 'circuit_board', 'gunpowder', 'brass', 'lead',
       'plate_carrier', 'shin_guards', 'bp_turret', 'turret',
+      // §3.2 mods complete the roster (Lane 11 request): spec's
+      // mod_scope / mod_choke / mod_flashlight, canonical naming
+      'scope', 'choke', 'flashlight',
     ]) expect(has(id), id).toBe(true);
   });
 });

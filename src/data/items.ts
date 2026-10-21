@@ -306,6 +306,22 @@ export const ITEMS: Record<string, ItemDef> = {
     id: 'laser_sight', name: 'Laser sight', category: 'mod', weight: 0.2, slots: 1, stack: 3,
     desc: 'Underbarrel laser: hip-fire tightens up.',
   },
+  // §3.2 roster completion (Lane 11 data request): the spec's mod_scope /
+  // mod_choke / mod_flashlight under the shipped roster's canonical
+  // naming. Effects + MODS defs + mesh anchors are Lane 11's follow-up;
+  // the items, recipes, loot, prices, and yields live here.
+  scope: {
+    id: 'scope', name: '4× scope', category: 'mod', weight: 0.3, slots: 1, stack: 3,
+    desc: 'A real optic: reach out — 1.15× effective range, slower to shoulder, −12° of view.',
+  },
+  choke: {
+    id: 'choke', name: 'Choke', category: 'mod', weight: 0.2, slots: 1, stack: 3,
+    desc: 'Muzzle choke: patterns land tighter and hit harder at the edge.',
+  },
+  flashlight: {
+    id: 'flashlight', name: 'Tac light', category: 'mod', weight: 0.2, slots: 1, stack: 3,
+    desc: 'Underbarrel light, 12m cone. What you can see can see you — the visibility tradeoff, in your hand.',
+  },
   // wave 4: weapon finishes — lootable cosmetics, applied at a Weapons Bench
   finish_matte: {
     id: 'finish_matte', name: 'Finish kit — Matte Black', category: 'mod', weight: 0.3, slots: 1, stack: 3,
@@ -448,6 +464,7 @@ export const HUSK_LOOT: Record<string, HuskLootEntry[]> = {
     { id: 'cloth', min: 1, max: 1, chance: 0.15 },
     { id: 'chemicals', min: 1, max: 1, chance: 0.2 },
     { id: 'circuit_board', min: 1, max: 1, chance: 0.25 },
+    { id: 'scope', min: 1, max: 1, chance: 0.15 },
   ],
   dunes: [
     { id: 'water_bottle', min: 1, max: 2, chance: 0.35 },
@@ -619,6 +636,18 @@ export const STATION_RECIPES: Record<string, FieldRecipe> = {
     id: 'r_laser', name: 'Laser sight', station: 'workbench',
     components: [{ itemId: 'gun_parts', qty: 2 }, { itemId: 'wire', qty: 1 }],
     resultId: 'laser_sight', resultQty: 1,
+  },
+  r_choke: {
+    // SYSTEMS_SPEC §3.2: choke is a bench craft, gun_parts×2
+    id: 'r_choke', name: 'Choke', station: 'workbench',
+    components: [{ itemId: 'gun_parts', qty: 2 }],
+    resultId: 'choke', resultQty: 1,
+  },
+  r_flashlight: {
+    // SYSTEMS_SPEC §3.2 final cut: simple craft, no power cost in v1
+    id: 'r_flashlight', name: 'Tac light', station: 'workbench',
+    components: [{ itemId: 'gun_parts', qty: 1 }, { itemId: 'wire', qty: 1 }],
+    resultId: 'flashlight', resultQty: 1,
   },
   // --- Chemistry Station ---
   r_medkit: {
@@ -796,6 +825,7 @@ export const SAFE_LOOT: HuskLootEntry[] = [
   { id: 'medkit', min: 1, max: 1, chance: 0.3 },
   { id: 'lockpick', min: 1, max: 2, chance: 0.35 },
   { id: 'circuit_board', min: 1, max: 2, chance: 0.3 },
+  { id: 'scope', min: 1, max: 1, chance: 0.12 },
 ];
 
 /** Harvest nodes in the wild: fallen logs give wood, berry bushes give produce. */
@@ -846,6 +876,9 @@ const DISASSEMBLY: Record<string, { itemId: string; qty: number }[]> = {
   extended_mag: [{ itemId: 'gun_parts', qty: 1 }],
   foregrip: [{ itemId: 'wood', qty: 1 }],
   laser_sight: [{ itemId: 'gun_parts', qty: 1 }],
+  scope: [{ itemId: 'gun_parts', qty: 1 }],
+  choke: [{ itemId: 'gun_parts', qty: 1 }],
+  flashlight: [{ itemId: 'wire', qty: 1 }],
   tool_kit: [{ itemId: 'scrap', qty: 2 }],
   cleaning_kit: [{ itemId: 'cloth', qty: 1 }],
   riot_helmet: [{ itemId: 'scrap', qty: 1 }, { itemId: 'cloth', qty: 1 }],
@@ -885,6 +918,7 @@ const FOOTPRINTS: Record<string, [number, number]> = {
   valuables: [1, 1], lockpick: [1, 1], phone: [1, 1], relay_part: [1, 1], beacon_cell: [1, 1],
   flare: [1, 1], fire_starter: [1, 1], gun_oil: [1, 1], cleaning_kit: [1, 1],
   reflex_sight: [1, 1], suppressor: [1, 1], extended_mag: [1, 1], foregrip: [1, 1], laser_sight: [1, 1],
+  scope: [1, 1], choke: [1, 1], flashlight: [1, 1],
   finish_matte: [1, 1], finish_camo: [1, 1], finish_rust: [1, 1], finish_worn: [1, 1],
   // bulky goods
   fuel_can: [2, 2], tire: [2, 2], engine_part: [2, 2], armor_plate: [2, 2], tool_kit: [2, 2],
@@ -931,6 +965,7 @@ export const BARTER_VALUES: Record<string, number> = {
   molotov: 20, smoke: 25, flashbang: 40, frag: 45,
   // mods + finishes
   reflex_sight: 45, suppressor: 60, extended_mag: 40, foregrip: 35, laser_sight: 45,
+  scope: 70, choke: 40, flashlight: 35,
   finish_matte: 15, finish_camo: 15, finish_rust: 15, finish_worn: 15,
   // armor (interim while-carried pieces price like the gear they are)
   armored_vest: 90, riot_helmet: 55, shin_guards: 30, plate_carrier: 180,
