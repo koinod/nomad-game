@@ -1,4 +1,6 @@
 import type { VehicleSave } from '../store/types';
+import { ITEMS } from '../data/items';
+import type { Vehicle } from './Vehicles';
 
 /**
  * VEHICLE RESET + TOTAL PURGE save migration (2026-10-20), updated
@@ -62,4 +64,71 @@ export function restorableVehicleSave(
 export function sanitizeBase<B extends { poiId: string }>(base: B | null | undefined): B | null {
   if (!base) return null;
   return base.poiId === SURVIVING_BASE_POI ? base : null;
+}
+
+// ─── Fleet persistence (2026-10-21, generalized) ────────────────────────
+//
+// EVERY live vehicle persists and restores its full state — position,
+// heading, fuel, condition, storage, upgrades, flat tires, variant —
+// keyed by def id (uids are def ids: one instance per def). The
+// capture/apply pair used to live inline in Game (getVehicleStates +
+// the init restore loop), where the WebGL-bound engine made the round
+// trip untestable headless; it lives here now so the fleet round trip
+// is pinned by tests (vehicle-persistence.test.ts). Game calls these —
+// same semantics as the inline code, plus one fix: `variant` was
+// captured into the save but never restored; it round-trips now.
+
+/** A live vehicle's full persisted state (the save-side snapshot). */
+export function captureVehicleSave(v: Vehicle): VehicleSave {
+  return {
+    defId: v.def.id,
+    x: v.group.position.x,
+    y: v.group.position.y,
+    z: v.group.position.z,
+    heading: v.heading,
+    fuel: v.fuel,
+    condition: v.condition,
+    storage: v.storage.map((it) => ({ ...it })),
+    upgrades: [...v.upgrades],
+    tiresFlat: v.tiresFlat,
+    variant: v.variant,
+  };
+}
+
+/** Stamp one vehicle's saved state back onto it. Storage entries whose
+ *  items were deleted from the data tables are dropped, never fatal. */
+export function applyVehicleSave(v: Vehicle, vs: VehicleSave): void {
+  v.group.position.set(vs.x, vs.y, vs.z);
+  v.group.rotation.y = vs.heading;
+  v.heading = vs.heading;
+  v.fuel = vs.fuel;
+  v.condition = vs.condition;
+  v.speed = 0;
+  v.storage = (vs.storage ?? []).filter((it) => ITEMS[it.itemId]);
+  v.upgrades = vs.upgrades ?? [];
+  v.tiresFlat = vs.tiresFlat ?? 0;
+  v.variant = vs.variant;
+}
+
+/**
+ * Restore a whole save's vehicle list onto the live fleet: each live
+ * vehicle takes ONLY its own def-id save (restorableVehicleSave —
+ * deleted defs strip, deleted upgrade ids filter). Records for defs
+ * with no live vehicle (deleted content, future defs like a Dark Horse
+ * placeholder) are skipped, never fatal; a live vehicle with no record
+ * keeps its fresh spawn state. Returns the def ids that were restored,
+ * in live-fleet order.
+ */
+export function restoreVehicleFleet(
+  vehicles: readonly Vehicle[],
+  saves: VehicleSave[] | undefined | null,
+): string[] {
+  const restored: string[] = [];
+  for (const v of vehicles) {
+    const vs = restorableVehicleSave(saves, v.def.id);
+    if (!vs) continue;
+    applyVehicleSave(v, vs);
+    restored.push(v.def.id);
+  }
+  return restored;
 }

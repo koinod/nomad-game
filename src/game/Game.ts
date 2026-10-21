@@ -25,7 +25,7 @@ import { PostFX } from './PostFX';
 import { canInstallUpgrade, storageCapKg, collisionLossFactor, ramDamageFactor } from '../data/upgrades';
 import type { InvItem, TrailerSave } from '../store/types'; // TrailerSave: legacy snapshot field, always [] now
 import { floorYAt, floorYAtRef, resolveCollisions, type Collider, type FloorRect } from './Colliders';
-import { restorableVehicleSave } from './saveMigration';
+import { captureVehicleSave, restoreVehicleFleet } from './saveMigration';
 import { sfx, ambience } from '../systems/audio';
 import { useCraftQueue } from '../systems/crafting';
 import { XP_EVENTS } from '../systems/skills';
@@ -212,23 +212,13 @@ export class Game {
       for (const id of snap.world.deadHusks) this.deadHusks.add(id);
       for (const id of snap.world.cleared) this.cleared.add(id);
       // Save migration: each live vehicle restores ONLY its own
-      // def-id save — see saveMigration.ts. A saved Stallion FX is
-      // deleted content (Ian, 2026-10-21) and strips silently; it is
-      // never stamped onto the GT500. Trailer state is dropped
-      // entirely (snap.trailers never read).
+      // def-id save — see saveMigration.ts (restoreVehicleFleet). A
+      // saved Stallion FX is deleted content (Ian, 2026-10-21) and
+      // strips silently; it is never stamped onto the GT500. Trailer
+      // state is dropped entirely (snap.trailers never read).
+      const restoredIds = restoreVehicleFleet(this.vehicles.vehicles, snap.vehicles);
       for (const v of this.vehicles.vehicles) {
-        const vs = restorableVehicleSave(snap.vehicles, v.def.id);
-        if (!vs) continue;
-        v.group.position.set(vs.x, vs.y, vs.z);
-        v.group.rotation.y = vs.heading;
-        v.heading = vs.heading;
-        v.fuel = vs.fuel;
-        v.condition = vs.condition;
-        v.speed = 0;
-        v.storage = (vs.storage ?? []).filter((it) => ITEMS[it.itemId]);
-        v.upgrades = vs.upgrades ?? [];
-        v.tiresFlat = vs.tiresFlat ?? 0;
-        if (v.upgrades.length) applyUpgradeVisuals(v);
+        if (restoredIds.includes(v.def.id) && v.upgrades.length) applyUpgradeVisuals(v);
       }
     }
 
@@ -464,19 +454,7 @@ export class Game {
   /** Every vehicle's live state, for the save snapshot (v3). */
   getVehicleStates(): VehicleSave[] {
     if (!this.vehicles) return [];
-    return this.vehicles.vehicles.map((v) => ({
-      defId: v.def.id,
-      x: v.group.position.x,
-      y: v.group.position.y,
-      z: v.group.position.z,
-      heading: v.heading,
-      fuel: v.fuel,
-      condition: v.condition,
-      storage: v.storage.map((it) => ({ ...it })),
-      upgrades: [...v.upgrades],
-      tiresFlat: v.tiresFlat,
-      variant: v.variant,
-    }));
+    return this.vehicles.vehicles.map(captureVehicleSave);
   }
 
   getHeightAt(x: number, z: number): number {
