@@ -76,6 +76,23 @@ export interface HuskCtx {
   onBurstFx?: (x: number, y: number, z: number) => void;
   /** Wave 4: a screamer's shriek landed (Game hangs the sound off this). */
   onShriekFx?: (x: number, y: number, z: number) => void;
+  // ---- LANE 8 (skills) interface — visibility model inputs. Game
+  // supplies these now; the perception swap that consumes them is
+  // integration step L8-1 in the Lane 4 report (Lane 8 merges first, so
+  // src/game/visibility.ts exists in the tree when the step is applied).
+  /** Light level at the player, 0 (pitch black) .. 1 (full sun). */
+  playerLight?: number;
+  playerCrouched?: boolean;
+  playerMoving?: boolean;
+  playerFlashlight?: boolean;
+  playerInSmoke?: boolean;
+  /** Player's owned perk ids + stealth skill level (exposure math). */
+  playerPerks?: readonly string[];
+  playerStealthLevel?: number;
+  /** LANE 8 XP hook #10: this husk was hunting the player and lost the
+   *  trail. Fires exactly once per loss (at the hunt->investigate
+   *  transition). Game wires it to Lane 8's awardEvent('husk_lost'). */
+  onHuskLost?: (h: Husk) => void;
 }
 
 const _v1 = new THREE.Vector3();
@@ -416,6 +433,15 @@ export class Husk {
     if (distP < 6) {
       sees = true; // smell / hearing at close range
     } else {
+      // INTEGRATION STEP L8-1 (Lane 8 merges first): replace the flat
+      // night factor below with the visibility model —
+      //   const vis = computeVisibility({ lightLevel: ctx.playerLight ?? (ctx.isNight ? 0.3 : 1),
+      //     isNight: ctx.isNight, crouched: ctx.playerCrouched, moving: ctx.playerMoving,
+      //     flashlightOn: ctx.playerFlashlight, inSmoke: ctx.playerInSmoke }, ctx.playerPerks ?? []);
+      //   const sightRange = huskSightRange(25, vis.exposure, ctx.playerStealthLevel ?? 0);
+      // and gate the range check on canHuskSee({ baseRange: 25, distance: distP,
+      // visibility: vis, stealthLevel: ctx.playerStealthLevel ?? 0 }) so the
+      // gh_unseen capstone (crouched+still+shadow = invisible beyond 3m) holds.
       const sightRange = 25 * (ctx.isNight ? 0.55 : 1);
       if (distP < sightRange) {
         const fwd = _v2.set(Math.sin(g.rotation.y), 0, Math.cos(g.rotation.y));
@@ -434,6 +460,10 @@ export class Husk {
         this.state = 'investigate';
         this.target.set(pp.x, 0, pp.z);
         this.stateT = 0;
+        // LANE 8 hook #10 (husk_lost, stealth 6xp): the trail went cold.
+        // Fires once — the state has left hunt/attack, so this branch
+        // cannot re-enter until the husk hunts (and loses) again.
+        ctx.onHuskLost?.(this);
       }
     }
 

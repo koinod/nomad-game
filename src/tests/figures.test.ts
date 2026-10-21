@@ -195,6 +195,24 @@ describe('husk behavior parity after the figure swap', () => {
     expect(h.spitLaunch!.z).toBeCloseTo(12, 1);
   });
 
+  it('lane 8 hook #10: husk_lost fires exactly once when the trail goes cold', () => {
+    const h = new Husk('hl1', 'shambler', 0, 0, 'test', groundY);
+    let lost = 0;
+    const near = ctx(new THREE.Vector3(0, 0, 10));
+    near.onHuskLost = () => { lost++; };
+    h.update(0.1, near, rng); // sees the player -> hunt
+    expect(h.state).toBe('hunt');
+    // player breaks line of sight (far + behind): the 6s clock runs out
+    const far = ctx(new THREE.Vector3(0, 0, -40));
+    far.onHuskLost = near.onHuskLost;
+    for (let t = 0; t < 16 && h.state !== 'investigate'; t += 0.5) h.update(0.5, far, rng);
+    expect(h.state).toBe('investigate');
+    expect(lost).toBe(1);
+    // and it does not re-fire while it investigates / returns
+    for (let t = 0; t < 4; t += 0.5) h.update(0.5, far, rng);
+    expect(lost).toBe(1);
+  });
+
   it('bloater: death arms the burst', () => {
     const h = new Husk('bl1', 'bloater', 0, 0, 'test', groundY);
     const hp0 = h.hp;

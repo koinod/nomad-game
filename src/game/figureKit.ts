@@ -181,7 +181,7 @@ export function buildHumanFigure(spec: HumanSpec & { headCenterY?: number }): Fi
   const mkLeg = (side: number) => {
     const pivot = new THREE.Group();
     pivot.position.set(side * H * 0.095 * bw, hipY, 0);
-    const leg = limb(legLen, 0.085 * H * 0.55 * limbNarrow, 0.062 * H * 0.55, 0.05 * H * 0.55, pantsMat);
+    const leg = limb(legLen, H * 0.058 * limbNarrow, H * 0.046, H * 0.037, pantsMat);
     leg.scale.x = bw;
     pivot.add(leg);
     const boot = new THREE.Mesh(new THREE.BoxGeometry(0.11 * (H / 1.8), 0.07 * (H / 1.8), 0.24 * (H / 1.8)), darkMat);
@@ -219,7 +219,7 @@ export function buildHumanFigure(spec: HumanSpec & { headCenterY?: number }): Fi
   const mkArm = (side: number) => {
     const pivot = new THREE.Group();
     pivot.position.set(side * (chestW * 0.52 + 0.035), shoulderY, 0);
-    const arm = limb(armLen, 0.062 * (H / 1.8) * limbNarrow * bw, 0.05 * (H / 1.8), 0.042 * (H / 1.8), jacketMat);
+    const arm = limb(armLen, H * 0.04 * limbNarrow * bw, H * 0.033, H * 0.027, jacketMat);
     pivot.add(arm);
     const hand = ball(0.052 * (H / 1.8), skinMat, 0.85, 1.15, 0.9);
     hand.position.y = -armLen - 0.02;
@@ -240,12 +240,19 @@ export function buildHumanFigure(spec: HumanSpec & { headCenterY?: number }): Fi
   skull.name = 'skull';
   skull.position.y = headCenterLocal;
   head.add(skull);
+  // neck: a short column so the head never floats off the torso
+  const neckBase = new THREE.Mesh(
+    new THREE.CylinderGeometry(skullR * 0.4, skullR * 0.5, skullR * 1.1, 8), skinMat,
+  );
+  neckBase.position.y = headCenterLocal - skullR * 0.85;
+  neckBase.castShadow = true;
+  head.add(neckBase);
   // jaw: its own hinge so wind-ups and flinches can drop it
   const jaw = new THREE.Group();
   jaw.name = 'jaw';
   jaw.position.set(0, headCenterLocal - skullR * 0.55, skullR * 0.35);
-  const jawMesh = new THREE.Mesh(new THREE.BoxGeometry(skullR * 1.05, skullR * 0.62, skullR * 1.15), skinMat);
-  jawMesh.position.set(0, -skullR * 0.3, skullR * 0.18);
+  const jawMesh = new THREE.Mesh(new THREE.BoxGeometry(skullR * 0.92, skullR * 0.5, skullR * 0.95), skinMat);
+  jawMesh.position.set(0, -skullR * 0.22, skullR * 0.1);
   jawMesh.castShadow = true;
   jaw.add(jawMesh);
   head.add(jaw);
@@ -388,8 +395,8 @@ export function buildHuskFigure(kind: HuskFigureKind, o: HuskFigureOptions): Fig
       // shoulder pads ride the arm pivots (they swing with the arms)
       const plate = stdMat(rig.mats, 0x3f4750, 0.55, 0.45);
       for (const arm of [rig.armL, rig.armR]) {
-        const pad = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.12, 0.28), plate);
-        pad.position.y = -0.05;
+        const pad = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.09, 0.24), plate);
+        pad.position.y = -0.09;
         pad.castShadow = true;
         arm.add(pad);
       }
