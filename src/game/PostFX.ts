@@ -1,34 +1,42 @@
 /**
- * PostFX — the post stack for the Days Gone-tier target: depth of
- * field focused on the player, a cinematic grade + vignette, light
- * shafts at low sun, and a fog-tightening config for World to apply.
+ * PostFX — the post stack for the Days Gone-tier target: a cinematic
+ * grade + vignette, light shafts at low sun, and a fog-tightening
+ * config for World to apply.
+ *
+ * CAMERA BLUR — REMOVED (Ian's order, 2026-10-21: "remove camera
+ * blur"). The chain used to run a BokehPass depth-of-field step
+ * (RenderPass → Bokeh → grade → OutputPass) with per-tier dof flags,
+ * a dofFor() parameter function, and a focus-distance feed from Game.
+ * All of it is deleted — the pass is not in the chain, not disabled,
+ * GONE; no other blur lives in the chain either (the grade shader is
+ * pointwise color math; there is no bloom). The view is sharp at
+ * every tier.
  *
  * Hard rules:
- *  - Perf is a feature. Every tier below 'high' trades an effect for
+ *  - Perf is a feature. Every tier below 'high' trades resolution for
  *    frames, the grade pass is the LAST thing surrendered (one cheap
  *    fullscreen pass carries most of the look), and a governor steps
  *    quality down automatically when frames run long — the player
  *    never opens a settings menu to keep 60fps. Mobile starts low by
  *    device classification, not by failure.
- *  - The chain is linear-HDR: RenderPass → Bokeh (DoF) → grade →
- *    OutputPass. OutputPass applies the renderer's ACES tone mapping
- *    and color-space conversion, so grading happens on linear values
+ *  - The chain is linear-HDR: RenderPass → grade → OutputPass.
+ *    OutputPass applies the renderer's ACES tone mapping and
+ *    color-space conversion, so grading happens on linear values
  *    exactly like the no-composer path would finish.
- *  - All decision math (classification, governor, DoF params, grade
- *    values, fog tuning, shaft intensity) is pure and test-pinned.
- *    The GL classes are thin shells over it.
+ *  - All decision math (classification, governor, grade values, fog
+ *    tuning, shaft intensity) is pure and test-pinned. The GL
+ *    classes are thin shells over it.
  *
  * Integration (Game wiring — see lane report): construct after the
  * renderer exists, replace `renderer.render(scene, camera)` with
- * `postfx.render(dt)`, feed `setFocusDistance(camera↔player metres)`
- * and `setGradeInputs(sky.sunElevation, wx.precipitation)` per frame.
+ * `postfx.render(dt)` and feed `setGradeInputs(sky.sunElevation,
+ * wx.precipitation)` per frame.
  */
 
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
-import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { clamp, lerp, mulberry32, smoothstep } from './rng';
 import type { WeatherSnapshot } from './Weather';
@@ -43,15 +51,14 @@ export const TIER_ORDER: PostFxQuality[] = ['off', 'low', 'medium', 'high'];
 export interface PostFxTierConfig {
   /** Composer pixel-ratio multiplier (on top of the renderer's). */
   renderScale: number;
-  dof: boolean;
   grade: boolean;
 }
 
 export const POSTFX_TIERS: Record<PostFxQuality, PostFxTierConfig> = {
-  high: { renderScale: 1, dof: true, grade: true },
-  medium: { renderScale: 0.85, dof: true, grade: true },
-  low: { renderScale: 0.7, dof: false, grade: true },
-  off: { renderScale: 1, dof: false, grade: false },
+  high: { renderScale: 1, grade: true },
+  medium: { renderScale: 0.85, grade: true },
+  low: { renderScale: 0.7, grade: true },
+  off: { renderScale: 1, grade: false },
 };
 
 export function stepQuality(q: PostFxQuality, dir: 1 | -1): PostFxQuality {
@@ -185,33 +192,10 @@ export class PostFxGovernor {
   }
 }
 
-// ------------------------------------------------------------------- DoF
-
-export interface DofParams {
-  focus: number;
-  aperture: number;
-  maxblur: number;
-}
-
-/**
- * Bokeh parameters for a focus distance. The bokeh shader computes
- * blur as clamp((depth − focus) × aperture, ±maxblur) in METRES, so
- * aperture is tiny by design: at 0.0003 a wall 50m behind the player
- * sits at the maxblur cap while the player stays tack sharp. Returns
- * null when the tier carries no DoF (or focus is unknown).
- */
-export function dofFor(
-  focusDistance: number | null,
-  quality: PostFxQuality,
-): DofParams | null {
-  const cfg = POSTFX_TIERS[quality];
-  if (!cfg.dof || focusDistance == null) return null;
-  return {
-    focus: clamp(focusDistance, 2, 600),
-    aperture: quality === 'high' ? 0.0003 : 0.00022,
-    maxblur: quality === 'high' ? 0.009 : 0.007,
-  };
-}
+// -------------------------------------------------- DoF: REMOVED ---
+// dofFor / DofParams / the BokehPass chain step were deleted on
+// Ian's 2026-10-21 order ("remove camera blur") — see the module
+// header. postfx.test.ts pins the removal deliberately.
 
 // ----------------------------------------------------------------- grade
 
@@ -441,12 +425,9 @@ export class PostFX {
   private readonly scene: THREE.Scene;
   private readonly camera: THREE.Camera;
   private readonly composer: EffectComposer;
-  private readonly bokehPass: BokehPass;
   private readonly gradePass: ShaderPass;
   private readonly governor: PostFxGovernor;
   private appliedTier: PostFxQuality;
-  private focusTarget: number | null = null;
-  private focusCurrent = 6;
   private lastNow = -1;
   private readonly onResize = () => this.syncSize();
 
@@ -465,12 +446,6 @@ export class PostFX {
 
     this.composer = new EffectComposer(renderer);
     this.composer.addPass(new RenderPass(scene, camera));
-    this.bokehPass = new BokehPass(scene, camera, {
-      focus: this.focusCurrent,
-      aperture: 0.0003,
-      maxblur: 0.009,
-    });
-    this.composer.addPass(this.bokehPass);
     this.gradePass = new ShaderPass(GRADE_SHADER);
     this.composer.addPass(this.gradePass);
     this.composer.addPass(new OutputPass());
@@ -485,15 +460,6 @@ export class PostFX {
   /** Current effective tier (after the governor has had its say). */
   get quality(): PostFxQuality {
     return this.appliedTier;
-  }
-
-  /**
-   * Focus distance for the DoF pass, in metres (camera → player).
-   * Pass null in first person / menus: DoF stands down entirely —
-   * it is a third-person effect (ROADMAP Wave 1).
-   */
-  setFocusDistance(metres: number | null): void {
-    this.focusTarget = metres;
   }
 
   /** Feed the grade its sky inputs (World's sun elevation + weather). */
@@ -521,20 +487,6 @@ export class PostFX {
       this.renderer.render(this.scene, this.camera);
       return;
     }
-    const dof = dofFor(this.focusTarget, tier);
-    this.bokehPass.enabled = dof != null;
-    if (dof) {
-      // Ease the focus so camera-distance changes (scroll zoom,
-      // entering a vehicle) never snap the blur plane.
-      const k = 1 - Math.exp(-Math.max(dtSec, 0.0001) / 0.12);
-      this.focusCurrent += (dof.focus - this.focusCurrent) * k;
-      // @types/three leaves BokehPass.uniforms as {} — it is the
-      // cloned BokehShader uniform map at runtime.
-      const u = this.bokehPass.uniforms as Record<string, THREE.IUniform>;
-      if (u['focus']) u['focus'].value = this.focusCurrent;
-      if (u['aperture']) u['aperture'].value = dof.aperture;
-      if (u['maxblur']) u['maxblur'].value = dof.maxblur;
-    }
     this.composer.render();
   }
 
@@ -542,7 +494,6 @@ export class PostFX {
     this.appliedTier = tier;
     const cfg = POSTFX_TIERS[tier];
     this.gradePass.enabled = cfg.grade;
-    this.bokehPass.enabled = cfg.dof && this.focusTarget != null;
     this.syncSize();
   }
 
@@ -559,7 +510,6 @@ export class PostFX {
     if (typeof window !== 'undefined') {
       window.removeEventListener('resize', this.onResize);
     }
-    this.bokehPass.dispose();
     this.gradePass.dispose();
     this.composer.dispose();
   }

@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
+import * as PostFxModule from '../game/PostFX';
 import {
   POSTFX_TIERS,
   classifyDevicePostFx,
   stepQuality,
   PostFxGovernor,
   GOVERNOR,
-  dofFor,
   gradeFor,
   FOG_TUNING,
   tightenFog,
@@ -13,8 +13,15 @@ import {
 } from '../game/PostFX';
 
 // Lane 12: post-processing decisions are pure and pinned — device
-// classification, the adaptive governor, DoF params, grade, fog
-// tuning and shaft gating — so the GL shell can stay thin.
+// classification, the adaptive governor, grade, fog tuning and shaft
+// gating — so the GL shell can stay thin.
+//
+// CAMERA BLUR REMOVED on Ian's order (2026-10-21: "remove camera
+// blur") — the dofFor describe block that used to live here was
+// deleted DELIBERATELY with the feature: the BokehPass step, the
+// tier dof flags, dofFor/DofParams, and Game's focus feed are all
+// gone. The describe below pins the removal so the blur cannot
+// quietly grow back.
 describe('classifyDevicePostFx', () => {
   it('strong desktops start high, weak ones do not', () => {
     expect(classifyDevicePostFx({ isTouch: false, cores: 16, deviceMemoryGb: 16 })).toBe('high');
@@ -47,10 +54,25 @@ describe('stepQuality + tiers', () => {
 
   it('the grade is the last effect surrendered; off carries none', () => {
     expect(POSTFX_TIERS.low.grade).toBe(true);
-    expect(POSTFX_TIERS.low.dof).toBe(false);
     expect(POSTFX_TIERS.off.grade).toBe(false);
     expect(POSTFX_TIERS.high.renderScale).toBe(1);
     expect(POSTFX_TIERS.low.renderScale).toBeLessThan(1);
+  });
+});
+
+describe('camera blur removal (Ian order, 2026-10-21)', () => {
+  it('no tier carries a DoF flag and the module exports no DoF machinery', () => {
+    for (const tier of Object.values(POSTFX_TIERS)) {
+      expect('dof' in tier).toBe(false);
+    }
+    expect('dofFor' in PostFxModule).toBe(false);
+    expect('BokehPass' in PostFxModule).toBe(false);
+  });
+
+  it('the grade survives untouched: day vivid, night closed-in, storm greyed', () => {
+    // (the full grade pins live in the gradeFor describe below — this
+    // is the removal's regression sentinel)
+    expect(gradeFor(0.8, 0).saturation).toBeGreaterThan(gradeFor(-0.2, 0).saturation);
   });
 });
 
@@ -92,31 +114,6 @@ describe('PostFxGovernor', () => {
     expect(g.quality).toBe('off');
     feed(g, 90, GOVERNOR.evalFrames * 2);
     expect(g.quality).toBe('off');
-  });
-});
-
-describe('dofFor', () => {
-  it('null when the tier has no DoF or focus is unknown (first person)', () => {
-    expect(dofFor(6, 'low')).toBeNull();
-    expect(dofFor(6, 'off')).toBeNull();
-    expect(dofFor(null, 'high')).toBeNull();
-  });
-
-  it('focus clamps to sane distances; player distance stays sharp', () => {
-    const near = dofFor(1, 'high');
-    expect(near?.focus).toBe(2);
-    const far = dofFor(5000, 'high');
-    expect(far?.focus).toBe(600);
-    const tp = dofFor(6, 'high');
-    expect(tp?.focus).toBe(6);
-    // a background 100m behind focus reaches at least the maxblur cap
-    expect((100 - 6) * (tp?.aperture ?? 0)).toBeGreaterThanOrEqual(tp?.maxblur ?? 0);
-    expect(tp?.maxblur).toBeLessThanOrEqual(0.01);
-  });
-
-  it('medium is gentler than high', () => {
-    expect(dofFor(8, 'medium')?.aperture).toBeLessThan(dofFor(8, 'high')?.aperture ?? 1);
-    expect(dofFor(8, 'medium')?.maxblur).toBeLessThan(dofFor(8, 'high')?.maxblur ?? 1);
   });
 });
 

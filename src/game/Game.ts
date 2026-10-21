@@ -711,15 +711,9 @@ export class Game {
 
     // Render through the PostFX chain when built (the 'off' tier is a
     // plain renderer.render inside the chain; the governor evaluates
-    // per render). DoF focus = camera↔player in third person; null in
-    // first person stands DoF down entirely.
-    if (this.postfx && this.scene && this.camera) {
-      const p = this.player;
-      this.postfx.setFocusDistance(
-        p && !p.firstPerson && !this.cutscene
-          ? this.camera.position.distanceTo(p.pos)
-          : null,
-      );
+    // per render). No focus feed: depth of field was deleted on
+    // Ian's 2026-10-21 order ("remove camera blur").
+    if (this.postfx) {
       this.postfx.render(dt);
     } else {
       this.renderer?.render(this.scene!, this.camera!);
