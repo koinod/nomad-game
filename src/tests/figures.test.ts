@@ -445,6 +445,7 @@ const AUTHORED2: { kind: HuskKind; file: string; skullY: number; hipY: number; l
   { kind: 'bloater', file: 'husk_bloater_authored.glb', skullY: 1.76, hipY: 0.888, legX: 0.1201, extra: [] },
   { kind: 'stalker', file: 'husk_stalker_authored.glb', skullY: 1.85, hipY: 0.936, legX: 0.0922, extra: [] },
   { kind: 'armored', file: 'husk_armored_authored.glb', skullY: 1.82, hipY: 0.9216, legX: 0.1246, extra: [] },
+  { kind: 'brute', file: 'husk_brute_authored.glb', skullY: 2.26, hipY: 1.152, legX: 0.1558, extra: [] },
 ];
 
 describe('authored husk GLBs (wave 2)', () => {
@@ -565,5 +566,18 @@ describe('authored husk GLBs (wave 2)', () => {
     const rig = (ar as any).rig as FigureRig;
     expect(rig.pose.torsoX).toBe(0.14);
     expect(rig.torso.rotation.x).toBe(0.14);
+  });
+
+  it('brute swap applies the heavy stance AND the kit group breadth', () => {
+    const br = new Husk('auth2_br', 'brute', 0, 0, 'test', groundY);
+    expect(br.useAuthoredFigure(syntheticAuthoredTemplate())).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rig = (br as any).rig as FigureRig;
+    expect(rig.pose.torsoX).toBe(0.24);
+    expect(rig.head.rotation.x).toBe(0.28);
+    expect(rig.armL.rotation.x).toBe(-0.3);
+    // the runtime adds the breadth — the authored clay is built unscaled
+    expect(rig.group.scale.x).toBeCloseTo(1.22);
+    expect(rig.group.scale.z).toBeCloseTo(1.12);
   });
 });

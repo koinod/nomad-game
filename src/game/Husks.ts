@@ -890,6 +890,7 @@ const AUTHORED_GLB_BY_KIND: Partial<Record<HuskKind, string>> = {
   bloater: 'husk_bloater_authored',
   stalker: 'husk_stalker_authored',
   armored: 'husk_armored_authored',
+  brute: 'husk_brute_authored',
 };
 const authoredTemplates = new Map<HuskKind, THREE.Object3D>();
 const authoredLoading = new Set<HuskKind>();

@@ -33,6 +33,7 @@ husk classes, one class per commit (proofs in
 `authored_lib.py` clay kit). The swap is generalized: each kind's
 authored rig receives the exact base pose its procedural builder
 applies (`applyAuthoredPose` in `src/game/Husks.ts`). Runtime-loaded
-authored classes so far: shambler (wave 1), crawler (wave 2). All other
-classes remain procedural; their `.glb` files here stay posed proof
-artifacts.
+authored classes: shambler (wave 1) and ALL seven remaining husk
+classes (wave 2) — crawler, spitter, screamer, bloater, stalker,
+armored, brute. Every husk class now spawns authored; the procedural
+kit mesh remains the standing fallback for all of them.
