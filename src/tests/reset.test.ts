@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { VEHICLE_DEFS, VEHICLE_SPAWNS } from '../game/Vehicles';
-import { CLAIMABLE } from '../data/base';
+import { CLAIMABLE, CLAIM_SITES } from '../data/base';
 import { UPGRADES, canInstallUpgrade } from '../data/upgrades';
 import {
   DELETED_UPGRADE_IDS,
@@ -19,6 +19,15 @@ import type { VehicleSave } from '../store/types';
  * GT500 passed that gate (Lane 1, the benchmark model), so the fleet
  * is now exactly two — the one-car assertions below were updated
  * deliberately to pin the new roster, not loosened.
+ *
+ * SUPERSESSION (2026-10-21, merge stage 4): base claiming likewise
+ * returns as a system, not a scatter — Lane 10's tiered claims model
+ * (CLAIM_SITES in data/base.ts) un-parks claiming as data + logic.
+ * The purge-era assertions below still pin the LEGACY surface exactly
+ * (CLAIMABLE + sanitizeBase: the old claim posts and old saves), and a
+ * new assertion pins the tiered roster that supersedes it. In the
+ * tiered model the lighthouse is 'never' — the story home is the
+ * legacy claim, migrated into claims by claimsFromLegacyBase.
  */
 
 describe('the reset fleet', () => {
@@ -94,8 +103,16 @@ describe('save migration', () => {
 });
 
 describe('base claim migration (total purge)', () => {
-  it('only the lighthouse grounds claim survives', () => {
+  it('only the lighthouse grounds claim survives (legacy CLAIMABLE — the purge list)', () => {
     expect(CLAIMABLE).toEqual([{ poiId: 'lighthouse_base', name: 'Lighthouse Grounds' }]);
+  });
+
+  it('the tiered claims roster (Lane 10) is the deliberate supersession', () => {
+    const byClass = (k: string) => CLAIM_SITES.filter((s) => s.klass === k).map((s) => s.poiId);
+    expect(byClass('home')).toEqual(['shore_camp', 'jonah_camp', 'town', 'military_base']);
+    expect(byClass('outpost')).toEqual(['relay_station']);
+    expect(byClass('field')).toEqual(['forest_cache', 'dune_cache']);
+    expect(byClass('never')).toEqual(['lighthouse_base', 'wreck']);
   });
 
   it('claims at demolished POIs clear safely to null', () => {
