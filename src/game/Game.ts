@@ -616,7 +616,7 @@ export class Game {
         ambience.setNight(sky.isNight);
       }
     }
-    this.world?.update(dt, this.elapsed);
+    this.world?.update(dt, this.elapsed, s.pos[0], s.pos[2]);
     this.interact?.update(dt, this.elapsed);
 
     this.renderer?.render(this.scene!, this.camera!);

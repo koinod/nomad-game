@@ -75,10 +75,10 @@ def principled(name, color, metallic=0.0, roughness=0.5, alpha=1.0,
     return m
 
 
-PAINT = principled('FXDeepBluePaint', srgb(0x2E5A8C), metallic=0.15,
+PAINT = principled('FXDeepBluePaint', srgb(0x1E4A7A), metallic=0.15,
                    roughness=0.30, coat=0.7, coat_rough=0.06)
 GLASS = principled('TintedGlass', srgb(0x10181D), metallic=0.0,
-                   roughness=0.05, alpha=0.58)
+                   roughness=0.05, alpha=0.70)
 BLACK = principled('BlackTrim', srgb(0x0B0D0F), metallic=0.2, roughness=0.55)
 DARKMETAL = principled('DarkMetal', srgb(0x2A2E33), metallic=0.85, roughness=0.38)
 CHROME = principled('Chrome', srgb(0xC8CCD2), metallic=1.0, roughness=0.22)
@@ -243,7 +243,7 @@ def glass_loop(halfW, base, side, top):
         (0.45 * halfW, top - 0.015),
         (0.85 * halfW, side + 0.10),
         (1.00 * halfW, side),
-        (0.985 * halfW, base),
+        (0.95 * halfW, base),
     ]
     left = [(-y, z) for (y, z) in reversed(right[:-1])]
     return right + left
@@ -252,18 +252,21 @@ def glass_loop(halfW, base, side, top):
 glass_stations = [(x, glass_loop(w, b, s, t)) for (x, w, b, s, t) in GLASS_STATIONS]
 # black SEAL loft a hair larger than the glass: reads as the framed,
 # sealed edge around every pane — no floating-sheet gaps at the pillars
+seal_stations = [(x, glass_loop(w + 0.014, b - 0.012, s + 0.006, t + 0.005))
+                 for (x, w, b, s, t) in GLASS_STATIONS]
+loft('GlassSeal', seal_stations, BLACK, subsurf=1, cap=False)
 loft('Glasshouse', glass_stations, GLASS, subsurf=1, cap=False)
 # A-pillars: dark framed members running the windshield edges, sealing
 # glass to body (side-view slope: base front-low, top rear-high)
 def _pillar_loop(cy, cz):
-    return [(cy - 0.032, cz - 0.058), (cy + 0.032, cz - 0.058),
-            (cy + 0.032, cz + 0.058), (cy - 0.032, cz + 0.058)]
+    return [(cy - 0.023, cz - 0.045), (cy + 0.023, cz - 0.045),
+            (cy + 0.023, cz + 0.045), (cy - 0.023, cz + 0.045)]
 
 
 for side in (1, -1):
     loft('APillar', [
-        (0.68, _pillar_loop(side * 0.762, 0.99)),
-        (0.24, _pillar_loop(side * 0.560, 1.245)),
+        (0.68, _pillar_loop(side * 0.745, 0.97)),
+        (0.24, _pillar_loop(side * 0.545, 1.235)),
     ], BLACK, subsurf=0)
 
 # paint roof panel over the glass (FX: painted roof + glass sunroof inset)

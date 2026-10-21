@@ -60,7 +60,7 @@ export const VEHICLE_DEFS: VehicleDef[] = [
   // rally wheels, glass roof. Real S650 figures land with the rigid-body
   // build (1769 kg, ~500 hp, 267 km/h). Real performance lives in
   // carSpec.ts — this def carries identity + tank + storage only.
-  { id: 'mustang', name: 'Stallion FX', kind: 'car', length: 4.79, width: 1.92, fuelMax: 61, burnClass: 1.1, noiseDrive: 55, color: 0x2e5a8c, storageKg: 45 },
+  { id: 'mustang', name: 'Stallion FX', kind: 'car', length: 4.79, width: 1.92, fuelMax: 61, burnClass: 1.1, noiseDrive: 55, color: 0x1e4a7a, storageKg: 45 },
 ];
 
 /** Semi tractor paint rotation — the Stitch charcoal leads, fleets vary. */

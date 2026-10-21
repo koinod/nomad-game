@@ -201,6 +201,39 @@ const NIGHT_FOG = new THREE.Color(0x070b12);
  *  guarantees bounce fill so enclosed interiors at midday are SHADED,
  *  never pitch black (honest fake GI: hemisphere + env, no real GI).
  *  The directional sun + ACES tone mapping complete the baseline. */
+/** Weather's vote on the sky (the WeatherSystem snapshot, narrowed). */
+export interface SkyWeather {
+  cloudCover: number; // 0..1
+  fog: number; // 0..1
+  precipitation: number; // 0..1
+}
+
+export interface SkyAdjust {
+  sunScale: number;
+  hemiScale: number;
+  envScale: number;
+  fogNear: number;
+  fogFar: number;
+}
+
+/**
+ * How weather bends the lighting baseline: cloud cover eats the sun
+ * (and some bounce/IBL), fog + rain collapse the view distance. Pure —
+ * updateSky applies it; tests pin it.
+ */
+export function weatherSkyAdjust(wx: SkyWeather | undefined): SkyAdjust {
+  if (!wx) return { sunScale: 1, hemiScale: 1, envScale: 1, fogNear: 120, fogFar: 900 };
+  const cc = clamp(wx.cloudCover, 0, 1);
+  const fogF = clamp(wx.fog + wx.precipitation * 0.45, 0, 1);
+  return {
+    sunScale: 1 - 0.82 * cc,
+    hemiScale: 1 - 0.25 * cc,
+    envScale: 1 - 0.6 * cc,
+    fogNear: 120 + (6 - 120) * fogF,
+    fogFar: 900 + (55 - 900) * fogF,
+  };
+}
+
 export type SkyPhase = 'day' | 'golden' | 'night';
 
 export function skyPhase(sunElevation: number): SkyPhase {
@@ -240,6 +273,12 @@ export class World {
   stationColliders: Collider[] = [];
 
   private sun!: THREE.DirectionalLight;
+  private skyAdj: SkyAdjust = weatherSkyAdjust(undefined);
+  private rain?: THREE.Points;
+  private rainPos?: Float32Array;
+  private wxPrecip = 0;
+  private wxWindX = 0;
+  private wxWindZ = 0;
   private hemi!: THREE.HemisphereLight;
   private moonFill!: THREE.DirectionalLight;
   private stars!: THREE.Points;
@@ -318,7 +357,7 @@ export class World {
     if (this.envTex) this.envTex.dispose();
     this.envTex = tex;
     this.scene.environment = tex;
-    this.scene.environmentIntensity = pal.envIntensity;
+    this.scene.environmentIntensity = pal.envIntensity * this.skyAdj.envScale;
     this.envPhase = phase;
   }
 
@@ -430,6 +469,69 @@ export class World {
     this.scene.add(this.moonFill);
     this.scene.background = new THREE.Color(0x87b5d6);
     this.scene.fog = new THREE.Fog(0x9db8c8, 120, 900);
+    this.buildRain();
+  }
+
+  /** Rain: ~800 streaks in a box that follows the player (World.update
+   *  re-centers it), falling with the wind. Opacity follows the weather
+   *  snapshot's precipitation — dry sky, no rain mesh. */
+  private buildRain(): void {
+    const N = 800;
+    this.rainPos = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) {
+      this.rainPos[i * 3] = (this.rng() - 0.5) * 46;
+      this.rainPos[i * 3 + 1] = this.rng() * 26;
+      this.rainPos[i * 3 + 2] = (this.rng() - 0.5) * 46;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(this.rainPos, 3));
+    // a tiny vertical streak sprite, drawn once on a canvas
+    const cv = document.createElement('canvas');
+    cv.width = 4; cv.height = 32;
+    const cx = cv.getContext('2d')!;
+    const grad = cx.createLinearGradient(0, 0, 0, 32);
+    grad.addColorStop(0, 'rgba(190,215,235,0)');
+    grad.addColorStop(0.5, 'rgba(190,215,235,0.85)');
+    grad.addColorStop(1, 'rgba(190,215,235,0)');
+    cx.fillStyle = grad;
+    cx.fillRect(1, 0, 2, 32);
+    const tex = new THREE.CanvasTexture(cv);
+    const mat = new THREE.PointsMaterial({
+      size: 0.9, map: tex, transparent: true, opacity: 0,
+      depthWrite: false, sizeAttenuation: true, color: 0xcfe2f0,
+    });
+    this.rain = new THREE.Points(geo, mat);
+    this.rain.frustumCulled = false;
+    this.rain.visible = false;
+    this.rain.name = 'rain';
+    this.scene.add(this.rain);
+  }
+
+  /** Advance the rain box around a focus point (the player). */
+  updateRain(dt: number, focusX: number, focusZ: number): void {
+    if (!this.rain || !this.rainPos) return;
+    const p = this.wxPrecip;
+    this.rain.visible = p > 0.02;
+    if (!this.rain.visible) return;
+    (this.rain.material as THREE.PointsMaterial).opacity = 0.16 + p * 0.5;
+    const fall = 23 * dt;
+    const pos = this.rainPos;
+    const n = pos.length / 3;
+    for (let i = 0; i < n; i++) {
+      let y = pos[i * 3 + 1] - fall;
+      let x = pos[i * 3] + this.wxWindX * dt;
+      let z = pos[i * 3 + 2] + this.wxWindZ * dt;
+      if (y < 0) {
+        y = 24 + this.rng() * 3;
+        x = focusX + (this.rng() - 0.5) * 46;
+        z = focusZ + (this.rng() - 0.5) * 46;
+      }
+      // keep the box wrapped on the focus
+      if (x - focusX > 23) x -= 46; else if (x - focusX < -23) x += 46;
+      if (z - focusZ > 23) z -= 46; else if (z - focusZ < -23) z += 46;
+      pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z;
+    }
+    (this.rain.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
   }
 
   private buildStars(): void {
@@ -932,7 +1034,14 @@ export class World {
   // -- day/night -------------------------------------------------------------
 
   /** Drive sun, sky, fog, stars, lamp from the world clock. */
-  updateSky(timeMinutes: number): SkyState {
+  updateSky(timeMinutes: number, wx?: SkyWeather & { windX?: number; windZ?: number }): SkyState {
+    this.skyAdj = weatherSkyAdjust(wx);
+    this.wxPrecip = wx?.precipitation ?? 0;
+    this.wxWindX = wx?.windX ?? 0;
+    this.wxWindZ = wx?.windZ ?? 0;
+    const fog = this.scene.fog as THREE.Fog;
+    fog.near = this.skyAdj.fogNear;
+    fog.far = this.skyAdj.fogFar;
     const t01 = timeMinutes / 1440;
     const ang = (t01 - 0.25) * Math.PI * 2; // sunrise 06:00 at horizon
     const elev = Math.sin(ang);
@@ -942,7 +1051,7 @@ export class World {
     this.sun.position.set(Math.cos(ang) * R, Math.max(elev, -0.2) * R, 220);
     if (elev > 0.02) {
       const dayness = clamp(elev * 2.2, 0, 1);
-      this.sun.intensity = 0.25 + dayness * 2.4;
+      this.sun.intensity = (0.25 + dayness * 2.4) * this.skyAdj.sunScale;
       this.sun.color.setHex(0xfff2dd).lerp(new THREE.Color(0xff9a4e), 1 - dayness);
       this.moonFill.intensity = 0;
       const sky = NIGHT_SKY.clone()
@@ -965,7 +1074,10 @@ export class World {
     if (phase !== this.envPhase) {
       this.applyEnvironment(phase, this.sun.position.clone().normalize());
     }
-    this.hemi.intensity = SKY_PALETTES[phase].hemiIntensity;
+    this.hemi.intensity = SKY_PALETTES[phase].hemiIntensity * this.skyAdj.hemiScale;
+    if (this.scene.environment) {
+      this.scene.environmentIntensity = SKY_PALETTES[phase].envIntensity * this.skyAdj.envScale;
+    }
     // lighthouse lamp burns at night
     const lampOn = isNight;
     this.lampLight.intensity = lampOn ? 60 : 0;
@@ -998,9 +1110,10 @@ export class World {
     this.sun.position.set(sx + dir.x * 220, dir.y * 220, sz + dir.z * 220);
   }
 
-  /** Per-frame world animation (beam rotation, water shimmer). */
-  update(dt: number, elapsed: number): void {
+  /** Per-frame world animation (beam rotation, water shimmer, rain). */
+  update(dt: number, elapsed: number, focusX = 0, focusZ = 0): void {
     this.beamPivot.rotation.y += dt * 0.5;
+    this.updateRain(dt, focusX, focusZ);
     // cheap water shimmer
     this.waterMat.opacity = 0.8 + Math.sin(elapsed * 0.7) * 0.03;
   }
