@@ -9,9 +9,27 @@ import { ITEMS } from '../data/items';
 import type { InvItem } from '../store/types';
 import { buildStallion, applyStallionUpgrades } from './carModels';
 import { GT500_DEF, GT500_GLB_PATH, GT500_SPAWN, GT500_WHEEL_RIG } from './gt500Def';
+import { PRIME_DEF, PRIME_GLB_PATH, PRIME_SPAWN, PRIME_WHEEL_RIG } from './primeDef';
+import { SPRINTER_DEF, SPRINTER_GLB_PATH, SPRINTER_SPAWN, SPRINTER_WHEEL_RIG } from './sprinterDef';
 
 export { glassTint } from './modelKit';
 export { GT500_DEF, GT500_SPAWN } from './gt500Def';
+export { PRIME_DEF, PRIME_SPAWN } from './primeDef';
+export { SPRINTER_DEF, SPRINTER_SPAWN } from './sprinterDef';
+
+/**
+ * One visual wheel of a GLB rig: the GLB object name, the CarPhysics
+ * suspension corner it follows ([FR, FL, RR, RL] = 0..3), and whether
+ * it steers with the front axle. A def with more visual wheels than
+ * physics corners (the Prime's tandem duals) maps each extra wheel
+ * onto its axle's corner — every visual wheel spins, duals ride
+ * their corner's suspension travel.
+ */
+export interface GlbWheelSpec {
+  name: string;
+  wheelIdx: number;
+  steer?: boolean;
+}
 
 export interface VehicleDef {
   id: string;
@@ -26,6 +44,11 @@ export interface VehicleDef {
   storageKg: number; // trunk / bed / cargo capacity
   /** Collision/wear damage multiplier (default 1; >1 = fragile). */
   armorMul?: number;
+  /** Tow coupling fitted (Ian's fleet specs). Recorded data only —
+   *  trailers are not built yet, so nothing hitches to it. */
+  hitch?: 'fifth_wheel' | 'bumper_ball';
+  /** Rated tow capacity (kg) from the vehicle's spec sheet. */
+  maxTowKg?: number;
 }
 
 /** An animated door/ramp on a vehicle or trailer, driven by t 0→1. */
@@ -66,6 +89,11 @@ export const VEHICLE_DEFS: VehicleDef[] = [
   // FLEET RETURN (gate-approved, one at a time): the 2007 Shelby GT500 —
   // the benchmark model. Full def lives in gt500Def.ts.
   GT500_DEF,
+  // FLEET (Ian's dropped specs, approved as-is 2026-10-21): the Nomad
+  // Prime semi + the V-04 Sprinter. Full defs in primeDef.ts /
+  // sprinterDef.ts.
+  PRIME_DEF,
+  SPRINTER_DEF,
 ];
 
 /** Semi tractor paint rotation — the Stitch charcoal leads, fleets vary. */
@@ -116,6 +144,12 @@ export interface Vehicle {
   steerWheel?: THREE.Object3D;
   /** Model variant of one def (the Stallion's 'fx' hero build). */
   variant?: string;
+  /** Driver-seat anchor in vehicle-group space, read from the GLB's
+   *  driver_seat marker at attach time (the Vehicle Truth wave's
+   *  seat-fit machinery consumes it via Game's driveUpdate). Absent
+   *  until the GLB lands — and for GLBs without the marker — where
+   *  Player falls back to its length/width proportions. */
+  seatAnchor?: { lx: number; lz: number };
 }
 
 
@@ -163,6 +197,10 @@ export const VEHICLE_SPAWNS: SpawnDef[] = [
   // deleted content. (Dispatch's >=2-car unlock now waits for the
   // Dark Horse — the roster is honestly one car.)
   GT500_SPAWN,
+  // The fleet takes the field (2026-10-21): the Prime works the
+  // airbase apron, the Sprinter camps the marina.
+  PRIME_SPAWN,
+  SPRINTER_SPAWN,
 ];
 
 export class VehicleManager {
@@ -292,16 +330,26 @@ export function attachMustangGlb(v: Vehicle): void {
 }
 
 /**
- * The gate-approved Shelby GT500 (public/gt500.glb, built by
- * tools/gt500/build_gt500.py at real S197 dimensions). Same rig
- * contract as the Stallion GLB: nose +X, wheels as WheelFL/FR/RL/RR
- * objects with axle-centre origins. Loads async; the procedural
- * stand-in stays if it fails. No upgrade morphs exist for this body —
- * applyStallionUpgrades is Stallion sheet-metal and is NOT applied.
+ * The shared GLB rig core (fleet integration, 2026-10-21): every
+ * vehicle GLB follows the same contract — nose +X, up +Y in model
+ * space, wheels as named objects with axle-centre origins, a -90°
+ * wrapper yaw onto the game's +Z forward. Each wheel gets a
+ * suspension pivot (rides its physics corner's travel) wrapping a
+ * spin pivot; the front pair also steers. Headlights are real
+ * spotlights seated at the lenses — light only, no glow shells.
+ * Loads async; the procedural stand-in stays if the load fails.
  */
-export function attachGt500Glb(v: Vehicle): void {
+interface GlbAttachCfg {
+  path: string;
+  logName: string;
+  wheels: GlbWheelSpec[];
+  /** Spotlight seats in GLB space (they ride the wrapper's yaw). */
+  headlights: (model: THREE.Object3D) => { pos: [number, number, number]; target: [number, number, number] }[];
+}
+
+function attachVehicleGlb(v: Vehicle, cfg: GlbAttachCfg): void {
   import('three/addons/loaders/GLTFLoader.js')
-    .then(({ GLTFLoader }) => new GLTFLoader().loadAsync(GT500_GLB_PATH))
+    .then(({ GLTFLoader }) => new GLTFLoader().loadAsync(cfg.path))
     .then((gltf) => {
       const model = gltf.scene;
       const wrapper = new THREE.Group();
@@ -318,13 +366,11 @@ export function attachGt500Glb(v: Vehicle): void {
           o.receiveShadow = true;
         }
       });
-      // wheel rig: GT500_WHEEL_RIG is already in CarPhysics suspension
-      // order [FR, FL, RR, RL] (see gt500Def.ts)
       const steerPivots: THREE.Object3D[] = [];
       const spinPivots: THREE.Object3D[] = [];
       const suspPivots: { obj: THREE.Object3D; baseY: number; wheelIdx: number }[] = [];
-      for (const [name, wheelIdx] of GT500_WHEEL_RIG) {
-        const wheel = model.getObjectByName(name);
+      for (const spec of cfg.wheels) {
+        const wheel = model.getObjectByName(spec.name);
         if (!wheel || !wheel.parent) continue;
         const susp = new THREE.Group();
         susp.position.copy(wheel.position);
@@ -336,26 +382,94 @@ export function attachGt500Glb(v: Vehicle): void {
         susp.add(spin);
         spin.add(wheel);
         wheel.position.set(0, 0, 0);
-        suspPivots.push({ obj: susp, baseY: susp.position.y, wheelIdx });
+        suspPivots.push({ obj: susp, baseY: susp.position.y, wheelIdx: spec.wheelIdx });
         spinPivots.push(spin);
-        if (wheelIdx <= 1) steerPivots.push(susp);
+        if (spec.steer) steerPivots.push(susp);
       }
-      // headlights: real spotlights seated at the S197 lenses (glTF
-      // space: nose +X, up +Y, width on Z) — light only, no glow shell
       const headLights: THREE.SpotLight[] = [];
-      for (const sz of [-0.62, 0.62]) {
+      for (const h of cfg.headlights(model)) {
         const spot = new THREE.SpotLight(0xffeec4, 0, 60, 0.46, 0.55, 1.2);
-        spot.position.set(2.38, 0.66, sz);
-        spot.target.position.set(14, 0, sz * 1.25);
+        spot.position.set(h.pos[0], h.pos[1], h.pos[2]);
+        spot.target.position.set(h.target[0], h.target[1], h.target[2]);
         wrapper.add(spot);
         wrapper.add(spot.target);
         headLights.push(spot);
       }
+      // driver-seat anchor: the GLB's driver_seat marker, converted
+      // into vehicle-group space for the seat-fit machinery. GLBs
+      // without the marker (the GT500) keep the proportional anchor.
+      const seatObj = model.getObjectByName('driver_seat');
+      if (seatObj) {
+        v.group.updateMatrixWorld(true);
+        const wp = new THREE.Vector3();
+        seatObj.getWorldPosition(wp);
+        const local = v.group.worldToLocal(wp);
+        v.seatAnchor = { lx: local.x, lz: local.z };
+      }
       v.glb = { wrapper, steerPivots, spinPivots, suspPivots, headLights };
     })
     .catch((err) => {
-      console.warn('[Vehicles] gt500.glb failed to load; procedural body stands:', err);
+      console.warn(`[Vehicles] ${cfg.logName} failed to load; procedural body stands:`, err);
     });
+}
+
+/**
+ * The gate-approved Shelby GT500 (public/gt500.glb, built by
+ * tools/gt500/build_gt500.py at real S197 dimensions). No upgrade
+ * morphs exist for this body — applyStallionUpgrades is Stallion
+ * sheet-metal and is NOT applied.
+ */
+export function attachGt500Glb(v: Vehicle): void {
+  attachVehicleGlb(v, {
+    path: GT500_GLB_PATH,
+    logName: 'gt500.glb',
+    wheels: GT500_WHEEL_RIG.map(([name, wheelIdx]) => ({ name, wheelIdx, steer: wheelIdx <= 1 })),
+    // spotlights seated at the S197 lenses (measured from the mesh)
+    headlights: () => [-0.62, 0.62].map((sz) => ({
+      pos: [2.38, 0.66, sz] as [number, number, number],
+      target: [14, 0, sz * 1.25] as [number, number, number],
+    })),
+  });
+}
+
+/**
+ * The Nomad Prime semi (public/models/nomad-prime.glb). Ten visual
+ * wheels on the 4-corner physics rig (PRIME_WHEEL_RIG); headlights
+ * seat on the GLB's own headlight_*_projector markers.
+ */
+export function attachPrimeGlb(v: Vehicle): void {
+  attachVehicleGlb(v, {
+    path: PRIME_GLB_PATH,
+    logName: 'nomad-prime.glb',
+    wheels: PRIME_WHEEL_RIG,
+    headlights: (model) => {
+      const out: { pos: [number, number, number]; target: [number, number, number] }[] = [];
+      for (const name of ['headlight_left_projector', 'headlight_right_projector']) {
+        const m = model.getObjectByName(name);
+        if (!m) continue;
+        const p = m.position;
+        out.push({ pos: [p.x, p.y, p.z], target: [p.x + 14, 0, p.z * 1.25] });
+      }
+      return out;
+    },
+  });
+}
+
+/**
+ * The V-04 Sprinter (public/models/sprinter.glb). Four beadlock
+ * pivots direct; headlight seats measured from the lens meshes'
+ * bounds (x 3.47, y 1.20, z ±0.70 in GLB space).
+ */
+export function attachSprinterGlb(v: Vehicle): void {
+  attachVehicleGlb(v, {
+    path: SPRINTER_GLB_PATH,
+    logName: 'sprinter.glb',
+    wheels: SPRINTER_WHEEL_RIG,
+    headlights: () => [-0.7, 0.7].map((sz) => ({
+      pos: [3.47, 1.2, sz] as [number, number, number],
+      target: [15, 0, sz * 1.25] as [number, number, number],
+    })),
+  });
 }
 
 export const SEAHAWK_GLB_PATH = '/seahawk.glb';
