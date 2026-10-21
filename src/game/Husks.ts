@@ -10,7 +10,7 @@ import {
   shriekAlertRadius, shriekNoiseLevel, shouldBruteCharge, specialChance, spitFlightTime, spitVelocity,
   SPIT_GRAVITY,
 } from './huskMath';
-import { loftMesh } from './modelKit';
+import { buildHuskFigure, type FigureRig } from './figureKit';
 import { resolveCollisions, type Collider } from './Colliders';
 import { sfx } from '../systems/audio';
 import { useGameStore } from '../store/gameStore';
@@ -76,6 +76,23 @@ export interface HuskCtx {
   onBurstFx?: (x: number, y: number, z: number) => void;
   /** Wave 4: a screamer's shriek landed (Game hangs the sound off this). */
   onShriekFx?: (x: number, y: number, z: number) => void;
+  // ---- LANE 8 (skills) interface — visibility model inputs. Game
+  // supplies these now; the perception swap that consumes them is
+  // integration step L8-1 in the Lane 4 report (Lane 8 merges first, so
+  // src/game/visibility.ts exists in the tree when the step is applied).
+  /** Light level at the player, 0 (pitch black) .. 1 (full sun). */
+  playerLight?: number;
+  playerCrouched?: boolean;
+  playerMoving?: boolean;
+  playerFlashlight?: boolean;
+  playerInSmoke?: boolean;
+  /** Player's owned perk ids + stealth skill level (exposure math). */
+  playerPerks?: readonly string[];
+  playerStealthLevel?: number;
+  /** LANE 8 XP hook #10: this husk was hunting the player and lost the
+   *  trail. Fires exactly once per loss (at the hunt->investigate
+   *  transition). Game wires it to Lane 8's awardEvent('husk_lost'). */
+  onHuskLost?: (h: Husk) => void;
 }
 
 const _v1 = new THREE.Vector3();
@@ -90,7 +107,6 @@ function hashId(id: string): () => number {
 
 const JACKETS = [0x5a4632, 0x3c5a6e, 0x6e3c3c, 0x4a5a3c, 0x555555, 0x6b5a2e, 0x2e4a4e];
 const PANTS = [0x35322c, 0x2c3540, 0x404040, 0x3a3230, 0x4a3b2c];
-const HATS = [0x2c2c30, 0x5a4632, 0x6e6e6e, 0x3c3c3c];
 
 export class Husk {
   readonly id: string;
@@ -133,7 +149,7 @@ export class Husk {
   burstDone = false;
   private crawlT = 0; // crawler: swerve clock
   private torsoBaseRotX = 0.14; // flinch returns the torso to ITS slump, not a constant
-  private jawMesh: THREE.Mesh | null = null;
+  private jawMesh: THREE.Object3D | null = null;
   private sacMesh: THREE.Mesh | null = null; // spitter throat sac (pulses on telegraph)
   private eyeMat: THREE.MeshBasicMaterial | null = null;
   limpT = 0; // walk-cycle clock for the shuffle animation
@@ -141,10 +157,11 @@ export class Husk {
   knock = new THREE.Vector3();
   removed = false;
   killReported = false;
-  private mats: THREE.MeshStandardMaterial[] = [];
+  private mats: THREE.Material[] = [];
   private bodyMat!: THREE.MeshStandardMaterial;
-  private headMesh: THREE.Mesh | null = null;
-  private torsoMesh: THREE.Mesh | null = null;
+  private headMesh: THREE.Object3D | null = null;
+  private torsoMesh: THREE.Object3D | null = null;
+  private rig: FigureRig | null = null; // LANE 4: the figureKit rig (pivots posed by update)
 
   constructor(id: string, kind: HuskKind, x: number, z: number, zoneId: string, groundY: (x: number, z: number) => number) {
     this.id = id;
@@ -159,372 +176,39 @@ export class Husk {
     this.stateT = 1 + Math.random() * 3;
   }
 
-  /** Shared per-husk wardrobe: deterministic from the id, like the loot. */
-  private palette() {
+  /**
+   * LANE 4 REBUILD: every husk is a figureKit rig — lofted segments on
+   * joint pivots, the kind's HitProfile headY placing the skull exactly
+   * on its hit window. The deterministic wardrobe (id-hashed jacket /
+   * pants) survives from the old box builders; the behavior code below
+   * poses the pivots (flinch -> head/torso, wind-up -> jaw, telegraph
+   * -> sac, walk cycle -> limb swing around rig.pose bases).
+   */
+  private buildMesh(color: number, height: number): void {
+    void color; // the kind color no longer paints the body — the wardrobe does
     const vrnd = hashId(this.id);
     const pick = (arr: number[]): number => arr[Math.floor(vrnd() * arr.length)];
-    const jacketMat = new THREE.MeshStandardMaterial({ color: pick(JACKETS), roughness: 1 });
-    const pantsMat = new THREE.MeshStandardMaterial({ color: pick(PANTS), roughness: 1 });
-    const skinMat = new THREE.MeshStandardMaterial({ color: 0x8a7a68, roughness: 1 });
-    const darkMat = new THREE.MeshStandardMaterial({ color: 0x2c2c30, roughness: 1 });
-    this.bodyMat = jacketMat;
-    this.mats.push(jacketMat, pantsMat, skinMat, darkMat);
-    return { vrnd, pick, jacketMat, pantsMat, skinMat, darkMat };
-  }
-
-  /** Glowing eye pits at a given height/face offset — night readability. */
-  private addEyes(y: number, z: number, spread = 0.09, xOff = 0.05): void {
-    const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffd76a });
-    this.eyeMat = eyeMat;
-    for (const sx of [-spread, spread]) {
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.028, 6, 6), eyeMat);
-      eye.position.set(xOff + sx, y, z);
-      this.group.add(eye);
-    }
-  }
-
-  /**
-   * A vertical torso from loftMesh: sections are stations along Z
-   * (z = height up the body, w = width, h = depth). The sweep is
-   * recentered and stood upright; the flinch system rocks it around
-   * torsoBaseRotX, which this sets to the upright orientation.
-   */
-  private loftTorso(sections: { z: number; w: number; h: number }[], m: THREE.Material): THREE.Mesh {
-    const zc = (sections[0].z + sections[sections.length - 1].z) / 2;
-    const mesh = loftMesh(sections.map((s) => ({ ...s, y: 0 })), m);
-    mesh.geometry.translate(0, 0, -zc);
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.position.y = zc;
-    this.torsoBaseRotX = -Math.PI / 2;
-    return mesh;
-  }
-
-  private finishMesh(height: number): void {
+    const rig = buildHuskFigure(this.kind, {
+      height,
+      headCenterY: KIND_STATS[this.kind].profile.headY,
+      palette: { skin: 0x8a7a68, jacket: pick(JACKETS), pants: pick(PANTS), dark: 0x2c2c30 },
+      vrnd,
+    });
+    this.rig = rig;
+    this.group.add(rig.group);
+    this.mats.push(...rig.mats);
+    this.bodyMat = rig.bodyMat;
+    this.headMesh = rig.head;
+    this.torsoMesh = rig.torso;
+    this.torsoBaseRotX = rig.pose.torsoX;
+    this.jawMesh = rig.jaw;
+    this.sacMesh = rig.sac;
+    this.eyeMat = rig.eyeMat;
+    this.group.userData.limpPhase = vrnd() * Math.PI * 2; // asymmetric walk limp
     this.group.traverse((o) => {
       if (o instanceof THREE.Mesh) o.castShadow = true;
     });
     this.group.userData.headY = KIND_STATS[this.kind].profile.headY;
-    void height;
-  }
-
-  private buildMesh(color: number, height: number): void {
-    switch (this.kind) {
-      case 'screamer': this.buildScreamer(height); return;
-      case 'brute': this.buildBrute(height); return;
-      case 'crawler': this.buildCrawler(height); return;
-      case 'bloater': this.buildBloater(height); return;
-      case 'spitter': this.buildSpitter(height); return;
-      default: this.buildCommon(color, height);
-    }
-  }
-
-  private buildCommon(color: number, height: number): void {
-    // Husks as infected people, not robots: slumped torso, head tilted and
-    // lolling, arms hanging forward like a sleepwalker's, torn clothes in
-    // zone palettes, glowing eyes for night readability.
-    const { vrnd, pick, jacketMat, pantsMat, skinMat, darkMat } = this.palette();
-    void color;
-    // torso slumps forward
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.68, height * 0.58, 0.4), jacketMat);
-    body.position.y = height * 0.55;
-    body.rotation.x = 0.14;
-    this.torsoMesh = body;
-    // head lolls to the side, jaw dropped
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 10, 8), skinMat);
-    head.position.set(0.05, height * 0.95, 0.05);
-    head.rotation.z = 0.18;
-    head.name = 'head';
-    this.headMesh = head;
-    const jaw = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.08, 0.14), darkMat);
-    jaw.position.set(0.05, height * 0.95 - 0.24, 0.12);
-    jaw.rotation.x = 0.35;
-    this.jawMesh = jaw;
-    this.addEyes(height * 0.95 + 0.03, 0.2);
-    // arms hang forward, slightly uneven, claws out
-    const armL = new THREE.Mesh(new THREE.BoxGeometry(0.19, height * 0.52, 0.19), jacketMat);
-    armL.position.set(-0.46, height * 0.52, 0.2);
-    armL.rotation.x = -0.5;
-    const armR = new THREE.Mesh(new THREE.BoxGeometry(0.19, height * 0.52, 0.19), jacketMat);
-    armR.position.set(0.46, height * 0.5, 0.16);
-    armR.rotation.x = -0.35;
-    const clawL = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.1, 0.16), skinMat);
-    clawL.position.set(-0.46, height * 0.52 - height * 0.27, 0.33);
-    const clawR = clawL.clone();
-    clawR.position.x = 0.46;
-    clawR.position.z = 0.29;
-    const legL = new THREE.Mesh(new THREE.BoxGeometry(0.23, height * 0.44, 0.23), pantsMat);
-    legL.position.set(-0.18, height * 0.22, 0);
-    const legR = legL.clone();
-    legR.position.x = 0.18;
-    this.group.add(body, head, jaw, armL, armR, clawL, clawR, legL, legR);
-    this.group.userData.limpPhase = vrnd() * Math.PI * 2; // asymmetric walk limp
-    if (this.kind === 'armored') {
-      // plate carrier over the torso, a helmet shell, shoulder pads —
-      // the silhouette reads MILITARY before it reads infected
-      const plateMat = new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.45 });
-      this.mats.push(plateMat);
-      const vest = new THREE.Mesh(new THREE.BoxGeometry(0.76, height * 0.42, 0.52), plateMat);
-      vest.position.set(0, height * 0.58, 0.02);
-      vest.rotation.x = 0.14;
-      this.group.add(vest);
-      const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.27, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), plateMat);
-      helmet.position.set(0.05, height * 0.95 + 0.03, 0.05);
-      helmet.rotation.z = 0.18;
-      this.group.add(helmet);
-      for (const sx of [-0.46, 0.46]) {
-        const pad = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.14, 0.3), plateMat);
-        pad.position.set(sx, height * 0.78, 0.08);
-        this.group.add(pad);
-      }
-    }
-    if (vrnd() < 0.35) {
-      const hat = new THREE.Mesh(
-        new THREE.BoxGeometry(0.34, 0.11, 0.32),
-        new THREE.MeshStandardMaterial({ color: pick(HATS), roughness: 1 }),
-      );
-      hat.position.set(0.05, height * 0.95 + 0.24, 0.05);
-      hat.rotation.z = 0.2;
-      this.group.add(hat);
-      this.mats.push(hat.material as THREE.MeshStandardMaterial);
-    }
-    if (vrnd() < 0.25) {
-      const tool = new THREE.Mesh(
-        new THREE.BoxGeometry(0.09, 0.55, 0.09),
-        new THREE.MeshStandardMaterial({ color: 0x6e6a63, roughness: 1 }),
-      );
-      tool.position.set(0.46, height * 0.32, 0.34);
-      tool.rotation.x = 0.5;
-      this.group.add(tool);
-      this.mats.push(tool.material as THREE.MeshStandardMaterial);
-    }
-    this.finishMesh(height);
-  }
-
-  // ------------------------------------------------------ special kinds ---
-  // Each special is built like the vehicles are: proportioned lofted forms
-  // first, details second — a silhouette you can name at 40 meters.
-
-  /** Screamer: all ribs and throat — a lofted, tapered torso, a long neck,
-   *  an elongated skull, and a jaw that unhinges when the wind-up starts. */
-  private buildScreamer(height: number): void {
-    const { vrnd, jacketMat, pantsMat, skinMat, darkMat } = this.palette();
-    // lofted torso: narrow waist swelling into a ribcage, pinched shoulders
-    const torso = this.loftTorso([
-      { z: height * 0.36, w: 0.34, h: 0.3 },
-      { z: height * 0.52, w: 0.54, h: 0.44 },
-      { z: height * 0.66, w: 0.58, h: 0.42 },
-      { z: height * 0.78, w: 0.36, h: 0.28 },
-    ], jacketMat);
-    this.torsoMesh = torso;
-    // exposed ribs: bone rings riding proud of the cage
-    const boneMat = new THREE.MeshStandardMaterial({ color: 0xb8ab90, roughness: 0.9 });
-    this.mats.push(boneMat);
-    for (let i = 0; i < 3; i++) {
-      const rib = new THREE.Mesh(new THREE.TorusGeometry(0.3 - i * 0.03, 0.022, 6, 18), boneMat);
-      rib.position.set(0, height * (0.54 + i * 0.06), 0);
-      rib.rotation.x = Math.PI / 2;
-      this.group.add(rib);
-    }
-    // long neck + elongated skull thrown back
-    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.34, 8), skinMat);
-    neck.position.set(0, height * 0.86, 0.02);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.21, 12, 10), skinMat);
-    head.scale.set(0.85, 1.4, 0.95);
-    head.position.set(0, height * 0.99, 0.03);
-    head.rotation.x = -0.25;
-    head.name = 'head';
-    this.headMesh = head;
-    // the jaw hangs from a stretched hinge — it drops further mid-wind-up
-    const jaw = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.26, 0.12), darkMat);
-    jaw.position.set(0, height * 0.99 - 0.3, 0.1);
-    jaw.rotation.x = 0.5;
-    this.jawMesh = jaw;
-    this.addEyes(height * 0.99 + 0.05, 0.2, 0.08, 0);
-    // arms too long for the body, fingers nearly at the knees
-    for (const sx of [-1, 1]) {
-      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.13, height * 0.62, 0.13), jacketMat);
-      arm.position.set(sx * 0.34, height * 0.48, 0.14);
-      arm.rotation.x = -0.4;
-      const claw = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.16, 0.12), skinMat);
-      claw.position.set(sx * 0.34, height * 0.48 - height * 0.36, 0.26);
-      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.17, height * 0.4, 0.17), pantsMat);
-      leg.position.set(sx * 0.13, height * 0.2, 0);
-      this.group.add(arm, claw, leg);
-    }
-    this.group.add(torso, neck, head, jaw);
-    this.group.userData.limpPhase = vrnd() * Math.PI * 2;
-    this.finishMesh(height);
-  }
-
-  /** Brute: a lofted mass of shoulders and back — the head is an afterthought
-   *  sunk between traps, arms like wrecking bars knuckling the ground. */
-  private buildBrute(height: number): void {
-    const { vrnd, jacketMat, pantsMat, skinMat } = this.palette();
-    const torso = this.loftTorso([
-      { z: height * 0.34, w: 0.66, h: 0.5 },
-      { z: height * 0.52, w: 0.98, h: 0.68 },
-      { z: height * 0.68, w: 1.12, h: 0.66 },
-      { z: height * 0.8, w: 0.72, h: 0.45 },
-    ], jacketMat);
-    this.torsoMesh = torso;
-    // the hump: a squashed dome of muscle over the upper back
-    const hump = new THREE.Mesh(new THREE.SphereGeometry(0.42, 12, 10), jacketMat);
-    hump.scale.set(1.25, 0.7, 1);
-    hump.position.set(0, height * 0.8, -0.12);
-    // small head, sunk low and forward between the shoulders
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 10), skinMat);
-    head.position.set(0, height * 0.86, 0.22);
-    head.rotation.x = 0.3;
-    head.name = 'head';
-    this.headMesh = head;
-    const jaw = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.18), skinMat);
-    jaw.position.set(0, height * 0.86 - 0.2, 0.3);
-    this.jawMesh = jaw;
-    this.addEyes(height * 0.86 + 0.03, 0.4, 0.09, 0);
-    for (const sx of [-1, 1]) {
-      // arms thick as legs, hanging to the knuckles
-      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.3, height * 0.55, 0.3), jacketMat);
-      arm.position.set(sx * 0.62, height * 0.48, 0.18);
-      arm.rotation.x = -0.3;
-      const fist = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.22, 0.3), skinMat);
-      fist.position.set(sx * 0.62, height * 0.16, 0.3);
-      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.3, height * 0.42, 0.3), pantsMat);
-      leg.position.set(sx * 0.24, height * 0.21, 0);
-      this.group.add(arm, fist, leg);
-    }
-    this.group.add(torso, hump, head, jaw);
-    this.group.userData.limpPhase = vrnd() * Math.PI * 2;
-    this.finishMesh(height);
-  }
-
-  /** Crawler: the body rides horizontal and low — spine parallel to the
-   *  ground, head thrust forward, limbs bent for scuttling. */
-  private buildCrawler(height: number): void {
-    const { vrnd, jacketMat, pantsMat, skinMat, darkMat } = this.palette();
-    // horizontal torso: a box pitched nearly flat, slung between shoulders and hips
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.34, 1.0), jacketMat);
-    torso.position.set(0, height * 0.52, -0.05);
-    torso.rotation.x = 0.12;
-    this.torsoMesh = torso;
-    this.torsoBaseRotX = 0.12;
-    // spine ridges down the back
-    for (let i = 0; i < 4; i++) {
-      const ridge = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.14, 6), darkMat);
-      ridge.position.set(0, height * 0.52 + 0.2, 0.28 - i * 0.22);
-      this.group.add(ridge);
-    }
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.19, 12, 10), skinMat);
-    head.scale.set(0.9, 0.85, 1.15);
-    head.position.set(0, height * 0.6, 0.58);
-    head.name = 'head';
-    this.headMesh = head;
-    const jaw = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.06, 0.2), darkMat);
-    jaw.position.set(0, height * 0.6 - 0.16, 0.66);
-    this.jawMesh = jaw;
-    this.addEyes(height * 0.6 + 0.03, 0.76, 0.08, 0);
-    for (const sx of [-1, 1]) {
-      // forelimbs bent down-forward, hindlimbs trailing bent
-      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.55, 0.14), jacketMat);
-      arm.position.set(sx * 0.32, height * 0.3, 0.38);
-      arm.rotation.x = 0.5;
-      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.6, 0.16), pantsMat);
-      leg.position.set(sx * 0.3, height * 0.3, -0.45);
-      leg.rotation.x = -0.7;
-      this.group.add(arm, leg);
-    }
-    this.group.add(torso, head, jaw);
-    this.group.userData.limpPhase = vrnd() * Math.PI * 2;
-    this.finishMesh(height);
-  }
-
-  /** Bloater: the belly IS the model — a lofted sac that swells past the
-   *  jacket, weeping pustules, the head riding small on top of the mass. */
-  private buildBloater(height: number): void {
-    const { vrnd, jacketMat, pantsMat, skinMat, darkMat } = this.palette();
-    const belly = this.loftTorso([
-      { z: height * 0.26, w: 0.52, h: 0.45 },
-      { z: height * 0.44, w: 0.98, h: 0.85 },
-      { z: height * 0.58, w: 1.02, h: 0.88 },
-      { z: height * 0.74, w: 0.6, h: 0.5 },
-    ], jacketMat);
-    this.torsoMesh = belly;
-    // pustules: glossy sick-green blisters across the sac and shoulders
-    const pusMat = new THREE.MeshStandardMaterial({ color: 0x9aa84e, roughness: 0.25, emissive: 0x2a3305, emissiveIntensity: 0.7 });
-    this.mats.push(pusMat);
-    const pusSpots: [number, number, number, number][] = [
-      [0.3, 0.52, 0.42, 0.09], [-0.34, 0.44, 0.36, 0.07], [0.1, 0.62, 0.46, 0.06],
-      [-0.2, 0.6, -0.4, 0.08], [0.38, 0.68, -0.1, 0.06], [0, 0.36, 0.5, 0.07],
-    ];
-    for (const [px, py, pz, pr] of pusSpots) {
-      const p = new THREE.Mesh(new THREE.SphereGeometry(pr, 8, 8), pusMat);
-      p.position.set(px, height * py, pz);
-      this.group.add(p);
-    }
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 10), skinMat);
-    head.position.set(0, height * 0.93, 0.06);
-    head.rotation.z = 0.12;
-    head.name = 'head';
-    this.headMesh = head;
-    const jaw = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.07, 0.13), darkMat);
-    jaw.position.set(0, height * 0.93 - 0.22, 0.14);
-    this.jawMesh = jaw;
-    this.addEyes(height * 0.93 + 0.03, 0.24);
-    for (const sx of [-1, 1]) {
-      // arms dangle useless at the sides of the mass
-      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.16, height * 0.44, 0.16), jacketMat);
-      arm.position.set(sx * 0.56, height * 0.5, 0.05);
-      arm.rotation.z = sx * 0.25;
-      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.2, height * 0.4, 0.2), pantsMat);
-      leg.position.set(sx * 0.2, height * 0.2, 0);
-      this.group.add(arm, leg);
-    }
-    this.group.add(belly, head, jaw);
-    this.group.userData.limpPhase = vrnd() * Math.PI * 2;
-    this.finishMesh(height);
-  }
-
-  /** Spitter: a rangy frame carrying a translucent acid sac under the jaw —
-   *  it swells bright on the telegraph, so the lob is always fair warning. */
-  private buildSpitter(height: number): void {
-    const { vrnd, jacketMat, pantsMat, skinMat, darkMat } = this.palette();
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.6, height * 0.56, 0.36), jacketMat);
-    body.position.y = height * 0.56;
-    body.rotation.x = 0.14;
-    this.torsoMesh = body;
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.23, 12, 10), skinMat);
-    head.position.set(0.03, height * 0.95, 0.06);
-    head.rotation.z = 0.1;
-    head.name = 'head';
-    this.headMesh = head;
-    // the sac: a glossy green bulb slung from jaw to chest
-    const sacMat = new THREE.MeshStandardMaterial({
-      color: 0x7d9b3a, roughness: 0.2, emissive: 0x33450a, emissiveIntensity: 0.8,
-      transparent: true, opacity: 0.88,
-    });
-    this.mats.push(sacMat);
-    const sac = new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 10), sacMat);
-    sac.scale.set(0.9, 1.25, 0.9);
-    sac.position.set(0.03, height * 0.95 - 0.3, 0.16);
-    this.sacMesh = sac;
-    // nozzle lips at the mouth
-    const nozzle = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.16, 8), darkMat);
-    nozzle.rotation.x = Math.PI / 2;
-    nozzle.position.set(0.03, height * 0.95 - 0.05, 0.28);
-    const jaw = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.06, 0.12), darkMat);
-    jaw.position.set(0.03, height * 0.95 - 0.2, 0.14);
-    this.jawMesh = jaw;
-    this.addEyes(height * 0.95 + 0.03, 0.24, 0.09, 0.03);
-    for (const sx of [-1, 1]) {
-      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.16, height * 0.5, 0.16), jacketMat);
-      arm.position.set(sx * 0.4, height * 0.52, 0.18);
-      arm.rotation.x = -0.45;
-      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.2, height * 0.44, 0.2), pantsMat);
-      leg.position.set(sx * 0.16, height * 0.22, 0);
-      this.group.add(arm, leg);
-    }
-    this.group.add(body, head, sac, nozzle, jaw);
-    this.group.userData.limpPhase = vrnd() * Math.PI * 2;
-    this.finishMesh(height);
   }
 
   get alive(): boolean {
@@ -749,6 +433,15 @@ export class Husk {
     if (distP < 6) {
       sees = true; // smell / hearing at close range
     } else {
+      // INTEGRATION STEP L8-1 (Lane 8 merges first): replace the flat
+      // night factor below with the visibility model —
+      //   const vis = computeVisibility({ lightLevel: ctx.playerLight ?? (ctx.isNight ? 0.3 : 1),
+      //     isNight: ctx.isNight, crouched: ctx.playerCrouched, moving: ctx.playerMoving,
+      //     flashlightOn: ctx.playerFlashlight, inSmoke: ctx.playerInSmoke }, ctx.playerPerks ?? []);
+      //   const sightRange = huskSightRange(25, vis.exposure, ctx.playerStealthLevel ?? 0);
+      // and gate the range check on canHuskSee({ baseRange: 25, distance: distP,
+      // visibility: vis, stealthLevel: ctx.playerStealthLevel ?? 0 }) so the
+      // gh_unseen capstone (crouched+still+shadow = invisible beyond 3m) holds.
       const sightRange = 25 * (ctx.isNight ? 0.55 : 1);
       if (distP < sightRange) {
         const fwd = _v2.set(Math.sin(g.rotation.y), 0, Math.cos(g.rotation.y));
@@ -767,6 +460,10 @@ export class Husk {
         this.state = 'investigate';
         this.target.set(pp.x, 0, pp.z);
         this.stateT = 0;
+        // LANE 8 hook #10 (husk_lost, stealth 6xp): the trail went cold.
+        // Fires once — the state has left hunt/attack, so this branch
+        // cannot re-enter until the husk hunts (and loses) again.
+        ctx.onHuskLost?.(this);
       }
     }
 
@@ -982,8 +679,29 @@ export class Husk {
       g.position.y += Math.abs(Math.sin(this.limpT + limp)) * 0.06 * amp;
       g.rotation.z = Math.sin(this.limpT + limp) * 0.05 * amp;
       g.rotation.y += Math.sin(this.limpT * 0.5 + limp) * 0.03 * amp; // wobble, not drift
+      // LANE 4: the rig's limbs actually swing now — legs stride, arms
+      // counter-swing around their hang, all around the posed bases.
+      // The crawler is exempt: its pivots ARE the scuttle pose.
+      if (this.rig && this.kind !== 'crawler') {
+        const swAmp = (this.kind === 'brute' ? 0.2 : 0.36) * amp;
+        const sw = Math.sin(this.limpT + limp) * swAmp;
+        this.rig.legL.rotation.x = this.rig.pose.legLX + sw;
+        this.rig.legR.rotation.x = this.rig.pose.legRX - sw;
+        this.rig.armL.rotation.x = this.rig.pose.armLX - sw * 0.65;
+        this.rig.armR.rotation.x = this.rig.pose.armRX + sw * 0.65;
+      }
     } else {
       g.rotation.z *= 0.9;
+      // limbs settle back to their posed bases when the husk stops
+      if (this.rig && this.kind !== 'crawler') {
+        const relax = (o: THREE.Object3D, base: number) => {
+          o.rotation.x += (base - o.rotation.x) * 0.12;
+        };
+        relax(this.rig.legL, this.rig.pose.legLX);
+        relax(this.rig.legR, this.rig.pose.legRX);
+        relax(this.rig.armL, this.rig.pose.armLX);
+        relax(this.rig.armR, this.rig.pose.armRX);
+      }
     }
   }
 }
