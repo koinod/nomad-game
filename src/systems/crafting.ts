@@ -29,7 +29,7 @@ import {
   hasTurretHost,
   type CraftStationId,
 } from '../data/stations';
-import { useGameStore } from '../store/gameStore';
+import { useGameStore, craftQueueBridge } from '../store/gameStore';
 
 // ---------------------------------------------------------------------------
 // Recipe metadata overlay (§4.1 timers + §4.2/§6.1 gates)
@@ -471,3 +471,12 @@ export const useCraftQueue = create<CraftQueueState>()((set, get) => ({
     set({ jobs: [...active, ...undelivered] });
   },
 }));
+
+// ---------------------------------------------------------------------------
+// Merge wiring — persistence bridge registration (Lane 5 field contract).
+// gameStore must not import this module (it would close a cycle), so the
+// queue registers itself here: saves harvest the live jobs bridge-first,
+// loads and new games push the restored/cleared array back through write.
+// ---------------------------------------------------------------------------
+craftQueueBridge.read = () => useCraftQueue.getState().jobs;
+craftQueueBridge.write = (jobs) => useCraftQueue.setState({ jobs: [...jobs] });
