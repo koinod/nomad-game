@@ -19,7 +19,6 @@ export interface VehicleDef {
   width: number;
   fuelMax: number; // L
   burnClass: number;
-  topSpeed: number; // m/s
   noiseDrive: number; // meters at speed
   color: number;
   storageKg: number; // trunk / bed / cargo capacity
@@ -59,8 +58,9 @@ export function stepDoors(doors: DoorAnim[], dt: number): void {
 export const VEHICLE_DEFS: VehicleDef[] = [
   // THE car. FX Package spec (design-refs/stallion): Adriatic teal, white
   // rally wheels, glass roof. Real S650 figures land with the rigid-body
-  // build (1769 kg, ~500 hp, 267 km/h); topSpeed is the interim cap.
-  { id: 'mustang', name: 'Stallion FX', kind: 'car', length: 4.79, width: 1.92, fuelMax: 61, burnClass: 1.1, topSpeed: 42, noiseDrive: 55, color: 0x0d9488, storageKg: 45 },
+  // build (1769 kg, ~500 hp, 267 km/h). Real performance lives in
+  // carSpec.ts — this def carries identity + tank + storage only.
+  { id: 'mustang', name: 'Stallion FX', kind: 'car', length: 4.79, width: 1.92, fuelMax: 61, burnClass: 1.1, noiseDrive: 55, color: 0x2e5a8c, storageKg: 45 },
 ];
 
 /** Semi tractor paint rotation — the Stitch charcoal leads, fleets vary. */
