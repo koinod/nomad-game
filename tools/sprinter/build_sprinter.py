@@ -190,7 +190,11 @@ for ax in (FAX, RAX):
         c = cyl("archcut", (ax, sy * HALF_W, WHEEL_R), 0.56, 0.30,
                 rot=(math.radians(90), 0, 0))
         bool_cut(chassis, c)
-door_cut = box("doorcut", (0.30, HALF_W, 1.38), (1.30, 0.30, 1.62))
+# NOTE: the cutter must span the FULL body width — the prism is a closed
+# volume to the boolean, so a shallow cutter leaves a membrane at its back
+# face sealing the doorway. The far-side opening is covered by the starboard
+# cladding plate (outside) and the interior liner wall (inside).
+door_cut = box("doorcut", (0.30, 0, 1.38), (1.30, 2.40, 1.62))
 bool_cut(chassis, door_cut)
 # dark inner arch tubs
 for ax in (FAX, RAX):
