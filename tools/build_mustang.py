@@ -2,17 +2,23 @@
 """
 NOMAD — Stallion FX (S650 Mustang) authored in Blender Python.
 
+ROUND 3 (render gate): the body is ONE unified loft whose cross-section
+RING runs underbody -> sill -> lower bulge -> character line -> beltline
+-> glass -> cantrail -> crown, so the greenhouse is part of the body
+surface (glass faces are a material band of the same loft), never a
+separate bubble. Every station carries its own width / crown / tuck:
+narrow low nose -> fender swell -> DOOR TUCK -> REAR HAUNCH PEAK ->
+tapered Kamm tail. Wheel wells are BOOLEAN-CUT into the loft and the
+subsurf rounds the cut edge into the arch flare (no lip rings).
+
 Real dimensions (S650): L 4794mm x W 1916mm x H 1381mm, wheelbase 2718mm.
 Axes: X = length (nose +X), Y = width (driver's left +Y), Z = up.
-The body is a true loft: cross-sections at real stations, subdivision
-smoothed. Glasshouse is a separate loft (FX glass roof). Wheels are
-separate named objects (WheelFL/FR/RL/RR) so the game can spin/steer
-them. Head/tail lights are seated geometry in housings — no fake glow.
+Wheels are separate named objects (WheelFL/FR/RL/RR) for the game.
 
 Usage:
   blender --background --python tools/build_mustang.py -- \
       --out ~/workspace/nomad/design-refs/proof-mustang \
-      --glb ~/workspace/nomad/public/mustang.glb
+      --glb /tmp/mustang-round3.glb
 """
 import argparse
 import math
@@ -78,7 +84,7 @@ def principled(name, color, metallic=0.0, roughness=0.5, alpha=1.0,
 PAINT = principled('FXDeepBluePaint', srgb(0x1E4A7A), metallic=0.15,
                    roughness=0.30, coat=0.7, coat_rough=0.06)
 GLASS = principled('TintedGlass', srgb(0x10181D), metallic=0.0,
-                   roughness=0.05, alpha=0.70)
+                   roughness=0.08, alpha=0.86)
 BLACK = principled('BlackTrim', srgb(0x0B0D0F), metallic=0.2, roughness=0.55)
 DARKMETAL = principled('DarkMetal', srgb(0x2A2E33), metallic=0.85, roughness=0.38)
 CHROME = principled('Chrome', srgb(0xC8CCD2), metallic=1.0, roughness=0.22)
@@ -89,59 +95,16 @@ LENS_F = principled('HeadlightLens', srgb(0xBFD9E8), metallic=0.1, roughness=0.1
 LENS_R = principled('TailLens', srgb(0x7A0E14), metallic=0.1, roughness=0.2,
                     emission=srgb(0xD21F26), emission_strength=0.8)
 CABIN = principled('CabinDark', srgb(0x1B1E22), metallic=0.0, roughness=0.9)
+CABIN2 = principled('CabinTrim', srgb(0x3A3F46), metallic=0.25, roughness=0.6)
 SEAT = principled('SeatCloth', srgb(0x2E3138), metallic=0.0, roughness=0.95)
+SEATIN = principled('SeatInsert', srgb(0x274B73), metallic=0.0, roughness=0.9)
 SCREEN = principled('DashScreen', srgb(0x0A1420), metallic=0.2, roughness=0.25,
                     emission=srgb(0x1D4E6B), emission_strength=0.7)
 ARCH = principled('ArchTub', srgb(0x0A0A0B), metallic=0.0, roughness=1.0)
+CARPET = principled('Carpet', srgb(0x101114), metallic=0.0, roughness=1.0)
 
 
 # ---------------------------------------------------------------- helpers
-def loft(name, stations, material, subsurf=1, cap=True):
-    """stations: list of (x, [(y, z), ...]) — same count per station,
-    ordered around the loop. Builds a smooth lofted shell."""
-    n = len(stations[0][1])
-    verts = []
-    for x, loop in stations:
-        for (y, z) in loop:
-            verts.append((x, y, z))
-    faces = []
-    S = len(stations)
-    for s in range(S - 1):
-        for i in range(n):
-            a = s * n + i
-            b = s * n + (i + 1) % n
-            c = (s + 1) * n + (i + 1) % n
-            d = (s + 1) * n + i
-            faces.append((a, b, c, d))
-    if cap:
-        # end caps as fans around each end loop's centroid
-        for s, flip in ((0, True), (S - 1, False)):
-            loop = stations[s][1]
-            cx = stations[s][0]
-            cy = sum(p[0] for p in loop) / n
-            cz = sum(p[1] for p in loop) / n
-            ci = len(verts)
-            verts.append((cx, cy, cz))
-            for i in range(n):
-                a = s * n + i
-                b = s * n + (i + 1) % n
-                faces.append((ci, b, a) if flip else (ci, a, b))
-    mesh = bpy.data.meshes.new(name)
-    mesh.from_pydata(verts, [], faces)
-    mesh.update()
-    obj = bpy.data.objects.new(name, mesh)
-    link(obj)
-    if material:
-        mesh.materials.append(material)
-    if subsurf:
-        mod = obj.modifiers.new('smooth', 'SUBSURF')
-        mod.levels = subsurf
-        mod.render_levels = subsurf + 1
-    for poly in mesh.polygons:
-        poly.use_smooth = True
-    return obj
-
-
 def box(name, loc, size, material, rot=(0, 0, 0), bevel=0.0):
     bpy.ops.mesh.primitive_cube_add(location=loc, rotation=rot)
     obj = bpy.context.object
@@ -183,218 +146,325 @@ def torus(name, loc, major, minor, material, rot=(0, 0, 0), major_seg=32, minor_
 
 
 # ================================================================ BODY LOFT
-# Station params: (x, halfW, sillY, shoulderY, topY) — front (nose) to rear.
+# Unified ring loft. Each station:
+#   (x, W, zSill, zLow, wLow, zChar, wChar, zBelt, wBelt,
+#    zGlass, wGlass, zCant, wCant, zTop)
+# widths w* are fractions of the station half-width W (absolute for
+# belt/glass/cant where tumblehome matters). Ring (half, bottom->top):
+#   0 (0, .06)  1 (.55W, .085)  2 (.90W, zSill)  3 (wLow*W, zLow)
+#   4 (wChar*W, zChar)  5 (wBelt*W, zBelt)  6 (wGlass*W, zGlass)
+#   7 (wCant*W, zCant)  8 (.45*wCant*W, zTop-.012)  9 (0, zTop)
+# Glass bands (face strips between ring points): right 5,6 / left 12,11
+# = side glass; 7,8,9,10 = windshield / backlight center band.
 BODY_STATIONS = [
-    # v3 (render-gate round 2): profile matched to the FX sheet — SHORT
-    # UPRIGHT nose (tall face, high flat hood), fender swell over the
-    # front axle, a real HAUNCH over the rear axle, short deck, ducktail.
-    (2.40, 0.830, 0.30, 0.55, 0.76),
-    (2.32, 0.885, 0.22, 0.60, 0.79),
-    (2.10, 0.930, 0.16, 0.66, 0.81),
-    (1.70, 0.950, 0.14, 0.69, 0.83),
-    (1.36, 0.968, 0.13, 0.71, 0.845),
-    (0.85, 0.955, 0.12, 0.72, 0.855),
-    (0.30, 0.952, 0.12, 0.74, 0.875),
-    (-0.45, 0.955, 0.12, 0.76, 0.90),
-    (-1.10, 0.968, 0.12, 0.815, 0.945),
-    (-1.45, 0.972, 0.13, 0.825, 0.96),
-    (-1.95, 0.955, 0.15, 0.78, 0.965),
-    (-2.30, 0.925, 0.24, 0.75, 0.965),
-    (-2.40, 0.900, 0.33, 0.74, 0.955),
+    # nose face — blunt, narrow, low crown (hood line stays FLAT per the
+    # sheet: the nose barely drops, it is not a wedge)
+    (2.397, 0.800, 0.28, 0.42, 0.97, 0.58, 0.99, 0.66, 0.93, 0.715, 0.80, 0.75, 0.55, 0.775),
+    # hood leading edge
+    (2.28, 0.885, 0.20, 0.40, 0.99, 0.60, 1.00, 0.70, 0.95, 0.755, 0.82, 0.775, 0.58, 0.795),
+    # front fender rising
+    (2.02, 0.928, 0.155, 0.42, 1.00, 0.63, 1.00, 0.735, 0.96, 0.785, 0.84, 0.80, 0.60, 0.812),
+    (1.66, 0.947, 0.14, 0.44, 1.00, 0.66, 1.00, 0.76, 0.96, 0.80, 0.85, 0.815, 0.62, 0.828),
+    # front axle — fender swell
+    (1.359, 0.952, 0.135, 0.45, 1.00, 0.68, 1.00, 0.775, 0.965, 0.815, 0.85, 0.832, 0.63, 0.845),
+    # door lead — TUCK begins (lower flank pulls in)
+    (0.95, 0.946, 0.13, 0.46, 0.940, 0.70, 0.965, 0.80, 0.95, 0.83, 0.84, 0.85, 0.63, 0.862),
+    # cowl / windshield base — deepest tuck
+    (0.55, 0.944, 0.13, 0.47, 0.935, 0.71, 0.960, 0.815, 0.945, 0.845, 0.83, 0.868, 0.62, 0.885),
+    # roof front (header) — cabin begins
+    (0.05, 0.946, 0.13, 0.48, 0.95, 0.72, 0.98, 0.83, 0.86, 1.10, 0.80, 1.335, 0.75, 1.372),
+    # roof peak / B-pillar
+    (-0.45, 0.950, 0.13, 0.49, 0.955, 0.73, 0.985, 0.845, 0.855, 1.12, 0.795, 1.345, 0.745, 1.381),
+    # roof rear — fastback starts
+    (-0.90, 0.954, 0.13, 0.50, 0.97, 0.75, 0.99, 0.86, 0.85, 1.10, 0.79, 1.30, 0.74, 1.352),
+    # rear axle — HAUNCH PEAK (max width, bulge low), deck above
+    (-1.359, 0.964, 0.135, 0.52, 1.00, 0.79, 1.00, 0.90, 0.94, 0.935, 0.86, 0.958, 0.62, 0.975),
+    (-1.75, 0.952, 0.14, 0.50, 0.995, 0.78, 1.00, 0.885, 0.945, 0.925, 0.85, 0.945, 0.60, 0.962),
+    # taper to the Kamm tail
+    (-2.10, 0.933, 0.16, 0.46, 0.98, 0.75, 0.99, 0.865, 0.94, 0.905, 0.83, 0.928, 0.58, 0.945),
+    (-2.397, 0.898, 0.30, 0.44, 0.96, 0.70, 0.985, 0.83, 0.93, 0.875, 0.80, 0.905, 0.55, 0.925),
 ]
+WINDSHIELD_SEG = 6    # station segment cowl -> roof front
+ROOF_SEGS = (7, 8)    # cabin side-glass segments
+BACKLIGHT_SEG = 9     # roof rear -> deck
 
 
-def body_loop(halfW, sill, shoulder, top):
+def body_ring(st):
+    (x, W, zSill, zLow, wLow, zChar, wChar, zBelt, wBelt,
+     zGlass, wGlass, zCant, wCant, zTop) = st
     right = [
-        (0.00, sill),
-        (0.55 * halfW, sill + 0.005),
-        (0.88 * halfW, sill + 0.10),
-        (1.00 * halfW, shoulder),
-        (0.99 * halfW, top - 0.05),
-        (0.72 * halfW, top - 0.005),
-        (0.35 * halfW, top + 0.012),
-        (0.00, top + 0.02),
+        (0.00, 0.06),
+        (0.55 * W, 0.085),
+        (0.90 * W, zSill),
+        (wLow * W, zLow),
+        (wChar * W, zChar),
+        (wBelt * W, zBelt),
+        (wGlass * W, zGlass),
+        (wCant * W, zCant),
+        (0.45 * wCant * W, zTop - 0.012),
+        (0.00, zTop),
     ]
     left = [(-y, z) for (y, z) in reversed(right[1:-1])]
     return right + left
 
 
-body_stations = [(x, body_loop(w, s, sh, t)) for (x, w, s, sh, t) in BODY_STATIONS]
-loft('Body', body_stations, PAINT, subsurf=1)
+def build_body():
+    stations = [(st[0], body_ring(st)) for st in BODY_STATIONS]
+    n = len(stations[0][1])
+    verts = []
+    for x, loop in stations:
+        for (y, z) in loop:
+            verts.append((x, y, z))
+    faces = []
+    S = len(stations)
+    for s in range(S - 1):
+        for i in range(n):
+            a = s * n + i
+            b = s * n + (i + 1) % n
+            c = (s + 1) * n + (i + 1) % n
+            d = (s + 1) * n + i
+            faces.append((a, b, c, d))
+    for s, flip in ((0, True), (S - 1, False)):
+        loop = stations[s][1]
+        cx = stations[s][0]
+        cy = sum(p[0] for p in loop) / n
+        cz = sum(p[1] for p in loop) / n
+        ci = len(verts)
+        verts.append((cx, cy, cz))
+        for i in range(n):
+            a = s * n + i
+            b = s * n + (i + 1) % n
+            faces.append((ci, b, a) if flip else (ci, a, b))
+    mesh = bpy.data.meshes.new('Body')
+    mesh.from_pydata(verts, [], faces)
+    mesh.update()
+    obj = bpy.data.objects.new('Body', mesh)
+    link(obj)
+    mesh.materials.append(PAINT)
+    mesh.materials.append(GLASS)
+    mesh.materials.append(BLACK)
+    # material bands: face index = s * n + i for loft faces (caps after).
+    # Segment indices shift +1 for the nose guard station. Center glass
+    # is ONLY the crown strip {8,9} — bands 7/10 are the pillar frame,
+    # so the windshield reads framed, not wraparound.
+    SIDE_GLASS = {5, 6, 11, 12}
+    CENTER_GLASS = {6, 7, 8, 9, 10, 11}
+    PILLAR = {5, 12}
+    for s in range(S - 1):
+        for i in range(n):
+            fi = s * n + i
+            if s == WINDSHIELD_SEG:
+                # glass over the crown bands; the belt->glass slope faces
+                # are PAINT (the A-pillar sail is bodywork — as black trim
+                # it rendered as a huge gray wedge, diagnostic-verified)
+                mesh.polygons[fi].material_index = 1 if i in CENTER_GLASS else 0
+            elif s in ROOF_SEGS:
+                mesh.polygons[fi].material_index = 1 if i in SIDE_GLASS else 0
+            elif s == BACKLIGHT_SEG:
+                mesh.polygons[fi].material_index = 1 if i in CENTER_GLASS else 0
+    for poly in mesh.polygons:
+        poly.use_smooth = True
+    # CREASES — the difference between a car and a balloon. The end-ring
+    # loops crease at 1.0 so the subsurf holds the nose/tail FACES as
+    # planes (a fan cap alone always melts into a bullet); the
+    # longitudinal feature lines (character, belt, fender shoulder) take
+    # partial creases so the flanks have edges to catch light on.
+    if 'crease_edge' not in mesh.attributes:
+        mesh.attributes.new('crease_edge', 'FLOAT', 'EDGE')
+    cattr = mesh.attributes['crease_edge']
+    ncreased = 0
+    for e in mesh.edges:
+        va, vb = e.vertices[0], e.vertices[1]
+        if va >= S * n or vb >= S * n:
+            continue  # cap centers: leave the fan soft
+        sa, sb, ia, ib = va // n, vb // n, va % n, vb % n
+        val = 0.0
+        if sa == sb and (abs(ia - ib) == 1 or abs(ia - ib) == n - 1):
+            if sa == 0 or sa == S - 1:
+                val = 1.0  # end face perimeters: hard
+        elif ia == ib and abs(sa - sb) == 1:
+            val = {4: 0.65, 5: 0.50, 7: 0.35, 3: 0.25}.get(ia, 0.0)
+        if val:
+            cattr.data[e.index].value = val
+            ncreased += 1
+    print('CREASED EDGES', ncreased)
+    # wheel wells: boolean-cut, then subsurf rounds the arch edge
+    for (wx, wz) in ((1.359, 0.345), (-1.359, 0.345)):
+        bpy.ops.mesh.primitive_cylinder_add(radius=0.40, depth=2.30,
+                                            location=(wx, 0, wz),
+                                            rotation=(math.pi / 2, 0, 0),
+                                            vertices=36)
+        cut = bpy.context.object
+        cut.name = 'ArchCut'
+        mod = obj.modifiers.new('arch', 'BOOLEAN')
+        mod.operation = 'DIFFERENCE'
+        mod.solver = 'EXACT'
+        mod.object = cut
+        bpy.context.view_layer.objects.active = obj
+        bpy.ops.object.modifier_apply(modifier='arch')
+        bpy.data.objects.remove(cut, do_unlink=True)
+    sub = obj.modifiers.new('smooth', 'SUBSURF')
+    sub.levels = 1
+    sub.render_levels = 2
+    return obj
 
-# ================================================================ GLASSHOUSE
-# (x, halfW, baseY, sideY, topY) windshield base -> backlight bottom.
-GLASS_STATIONS = [
-    # v4 (blue sheet 05): cabin sits ~0.24 further aft — the Mustang's
-    # long dash-to-axle. Flatter fuller canopy, long straight fastback.
-    (0.68, 0.775, 0.845, 0.97, 1.00),
-    (0.30, 0.762, 0.855, 1.17, 1.27),
-    (-0.20, 0.748, 0.865, 1.265, 1.360),
-    (-0.70, 0.755, 0.875, 1.275, 1.382),
-    (-1.18, 0.782, 0.885, 1.20, 1.29),
-    (-1.62, 0.820, 0.900, 1.06, 1.10),
-    (-1.88, 0.845, 0.915, 0.99, 1.00),
-]
+
+build_body()
+
+# ================================================================ SEATED DETAILS
+# Every surface detail is placed by RAYCAST against the evaluated body:
+# the subsurfed surface never sits exactly on the station planes, so
+# parts are seated on the REAL surface (measured, not guessed) — the
+# floating/swallowed-detail disease dies here.
+_DEPS = bpy.context.evaluated_depsgraph_get()
+_BODY = bpy.data.objects['Body']
 
 
-def glass_loop(halfW, base, side, top):
-    right = [
-        (0.00, top),
-        (0.45 * halfW, top - 0.015),
-        (0.85 * halfW, side + 0.10),
-        (1.00 * halfW, side),
-        (0.95 * halfW, base),
-    ]
-    left = [(-y, z) for (y, z) in reversed(right[:-1])]
-    return right + left
+def surf(origin, direction):
+    hit, loc, _n, _i, _o, _m = bpy.context.scene.ray_cast(
+        _DEPS, Vector(origin), Vector(direction))
+    return loc if hit else None
 
 
-glass_stations = [(x, glass_loop(w, b, s, t)) for (x, w, b, s, t) in GLASS_STATIONS]
-# black SEAL loft a hair larger than the glass: reads as the framed,
-# sealed edge around every pane — no floating-sheet gaps at the pillars
-seal_stations = [(x, glass_loop(w + 0.014, b - 0.012, s + 0.006, t + 0.005))
-                 for (x, w, b, s, t) in GLASS_STATIONS]
-loft('GlassSeal', seal_stations, BLACK, subsurf=1, cap=False)
-loft('Glasshouse', glass_stations, GLASS, subsurf=1, cap=False)
-# A-pillars: dark framed members running the windshield edges, sealing
-# glass to body (side-view slope: base front-low, top rear-high)
-def _pillar_loop(cy, cz):
-    return [(cy - 0.023, cz - 0.045), (cy + 0.023, cz - 0.045),
-            (cy + 0.023, cz + 0.045), (cy - 0.023, cz + 0.045)]
+def cast_x(y, z, sign):
+    """Surface point on the nose (sign=+1) or tail (sign=-1) at (y, z)."""
+    p = surf((sign * 3.4, y, z), (-sign, 0, 0))
+    return p.x if p else sign * 2.36
 
 
+def cast_z(x, y):
+    p = surf((x, y, 2.4), (0, 0, -1))
+    return p.z if p else 0.9
+
+
+def cast_y(x, z, side):
+    p = surf((x, side * 2.4, z), (0, -side, 0))
+    return p.y if p else side * 0.93
+
+
+# glass sunroof inset in the painted roof (FX sheet), seated on the crown
+_sz = cast_z(-0.42, 0)
+box('Sunroof', (-0.42, 0, _sz - 0.002), (0.85, 0.74, 0.012), GLASS, rot=(0, 0.05, 0), bevel=0.01)
+# shark-fin antenna on the roof's rear edge
+_az = cast_z(-0.80, 0)
+box('AntennaFin', (-0.80, 0, _az + 0.010), (0.13, 0.026, 0.045), PAINT, rot=(0, -0.25, 0), bevel=0.01)
+# B-pillar strips on the side glass
 for side in (1, -1):
-    loft('APillar', [
-        (0.68, _pillar_loop(side * 0.745, 0.97)),
-        (0.24, _pillar_loop(side * 0.545, 1.235)),
-    ], BLACK, subsurf=0)
+    _by = cast_y(-0.50, 1.10, side)
+    box('BPillar', (-0.50, _by + side * 0.004, 1.10), (0.07, 0.018, 0.44), BLACK,
+        rot=(side * -0.20, 0, 0))
 
-# paint roof panel over the glass (FX: painted roof + glass sunroof inset)
-ROOF_STATIONS = [
-    (0.08, 0.720, 1.352),
-    (-0.40, 0.730, 1.376),
-    (-0.75, 0.730, 1.384),
-    (-1.05, 0.715, 1.338),
-]
-
-
-def roof_loop(halfW, top):
-    return [(0.0, top), (0.6 * halfW, top - 0.010), (halfW, top - 0.078),
-            (-halfW, top - 0.078), (-0.6 * halfW, top - 0.010)]
-
-
-loft('RoofPanel', [(x, roof_loop(w, t)) for (x, w, t) in ROOF_STATIONS], PAINT, subsurf=1, cap=False)
-# glass sunroof inset in the painted roof frame (FX sheet)
-box('Sunroof', (-0.50, 0, 1.381), (0.95, 0.80, 0.012), GLASS, bevel=0.01)
-# shark-fin antenna — sits ON the roof panel's rear edge, not in the glass
-box('AntennaFin', (-1.00, 0, 1.344), (0.14, 0.028, 0.06), PAINT, rot=(0, -0.30, 0), bevel=0.01)
-# B-pillar strips on the glass sides
+# ---------------------------------------------------------------- face
+_gx = cast_x(0, 0.52, 1)
+box('Grille', (_gx - 0.012, 0, 0.52), (0.06, 1.04, 0.32), BLACK, bevel=0.03)
+box('GrilleRecess', (_gx + 0.012, 0, 0.52), (0.02, 0.92, 0.26), ARCH, bevel=0.01)
+box('GrilleBar', (_gx + 0.026, 0, 0.53), (0.015, 0.88, 0.045), DARKMETAL)
+box('GrilleBadge', (_gx + 0.031, 0, 0.53), (0.02, 0.15, 0.06), CHROME, bevel=0.005)
+_ix = cast_x(0, 0.30, 1)
+box('LowerIntake', (_ix - 0.020, 0, 0.30), (0.05, 1.28, 0.13), BLACK, bevel=0.02)
+box('FrontSplitter', (_gx - 0.06, 0, 0.155), (0.20, 1.54, 0.04), BLACK, bevel=0.01)
 for side in (1, -1):
-    box('BPillar', (-0.46, side * 0.752, 1.17), (0.07, 0.015, 0.34), BLACK, rot=(0, 0.06, 0))
-
-# ================================================================ FACE / TAIL
-# v3: identity assemblies, seated in the upright front clip / tail —
-# grille OPENING (frame + recess + bar + pony), slim headlight units,
-# the sheet's vertical DRL FANGS inboard of them, wide lower intake.
-box('Grille', (2.405, 0, 0.50), (0.05, 1.18, 0.34), BLACK, bevel=0.03)
-box('GrilleRecess', (2.432, 0, 0.50), (0.02, 1.04, 0.27), ARCH, bevel=0.01)
-box('GrilleBar', (2.445, 0, 0.52), (0.015, 0.98, 0.045), DARKMETAL)
-box('GrilleBadge', (2.45, 0, 0.52), (0.02, 0.15, 0.06), CHROME, bevel=0.005)
-box('LowerIntake', (2.40, 0, 0.295), (0.05, 1.32, 0.13), BLACK, bevel=0.02)
-box('FrontSplitter', (2.38, 0, 0.155), (0.30, 1.56, 0.04), BLACK, bevel=0.01)
-for side in (1, -1):
-    # slim headlight unit: housing seated in the clip corner + full lens
-    box('HeadlightHousing', (2.395, side * 0.685, 0.70), (0.09, 0.36, 0.13), BLACK,
-        rot=(0, 0, side * -0.10), bevel=0.02)
-    box('HeadlightLens', (2.445, side * 0.685, 0.707), (0.02, 0.28, 0.075), LENS_F,
-        rot=(0, 0, side * -0.10), bevel=0.008)
-    # DRL fang: the tall slim blade inboard of the unit (FX signature)
-    box('DRLFang', (2.425, side * 0.465, 0.585), (0.025, 0.055, 0.30), LENS_F,
-        rot=(0, 0.10, 0), bevel=0.008)
-    # corner intake under the unit
-    box('CornerIntake', (2.36, side * 0.74, 0.33), (0.14, 0.26, 0.22), BLACK, bevel=0.02)
-# hood vent (FX signature) — raised black louver panel, front half of hood
-box('HoodVent', (1.55, 0, 0.849), (0.55, 0.48, 0.025), BLACK, rot=(0, 0.03, 0), bevel=0.01)
+    _hx = cast_x(side * 0.60, 0.685, 1)
+    box('HeadlightHousing', (_hx - 0.065, side * 0.60, 0.685), (0.15, 0.29, 0.09), BLACK,
+        rot=(0, -0.10, 0), bevel=0.02)
+    box('HeadlightLens', (_hx + 0.008, side * 0.60, 0.692), (0.02, 0.23, 0.06), LENS_F,
+        rot=(0, -0.10, 0), bevel=0.008)
+    for k in range(3):
+        box('DRLBar', (_hx + 0.016, side * (0.535 + k * 0.065), 0.696), (0.018, 0.04, 0.05),
+            LENS_F, rot=(0, -0.10, 0), bevel=0.004)
+    _fx = cast_x(side * 0.44, 0.545, 1)
+    box('DRLFang', (_fx + 0.002, side * 0.44, 0.545), (0.025, 0.05, 0.24), LENS_F,
+        rot=(0, 0.08, 0), bevel=0.008)
+    _cx = cast_x(side * 0.70, 0.33, 1)
+    box('CornerIntake', (_cx - 0.030, side * 0.70, 0.33), (0.13, 0.24, 0.20), BLACK, bevel=0.02)
+# hood vent seated on the crowned hood
+_vz = cast_z(1.50, 0)
+box('HoodVent', (1.50, 0, _vz + 0.000), (0.55, 0.48, 0.022), BLACK, rot=(0, 0.018, 0), bevel=0.01)
 for i in range(3):
-    box('HoodVentSlat', (1.44 + i * 0.11, 0, 0.866), (0.05, 0.42, 0.012), DARKMETAL,
-        rot=(0, 0.03, 0))
-# tail: ONE black panel spanning the tail, tri-bar HOUSINGS with real
-# lens bars, decklid lip, finned diffuser, QUAD tips with dark bores
-box('TailPanel', (-2.415, 0, 0.815), (0.05, 1.66, 0.21), BLACK, bevel=0.02)
-box('DecklidLip', (-2.395, 0, 0.958), (0.09, 1.50, 0.04), PAINT, rot=(0, 0.15, 0), bevel=0.01)
+    box('HoodVentSlat', (1.395 + i * 0.11, 0, _vz + 0.013), (0.05, 0.42, 0.012), DARKMETAL,
+        rot=(0, 0.018, 0))
+
+# ---------------------------------------------------------------- tail
+_tx = cast_x(0, 0.79, -1)
+box('TailPanel', (_tx + 0.012, 0, 0.79), (0.05, 1.58, 0.20), BLACK, bevel=0.02)
+_lz = cast_z(-2.28, 0)
+box('DecklidLip', (-2.28, 0, _lz + 0.004), (0.17, 1.44, 0.03), PAINT, rot=(0, -0.12, 0), bevel=0.01)
 for side in (1, -1):
-    box('TailHousing', (-2.435, side * 0.55, 0.815), (0.04, 0.54, 0.17), ARCH, bevel=0.01)
+    _txs = cast_x(side * 0.52, 0.79, -1)
+    box('TailHousing', (_txs - 0.008, side * 0.52, 0.79), (0.04, 0.52, 0.165), ARCH, bevel=0.01)
     for i in range(3):
-        box('TailLens', (-2.46, side * (0.395 + i * 0.15), 0.82), (0.025, 0.088, 0.135),
+        box('TailLens', (_txs - 0.026, side * (0.375 + i * 0.145), 0.795), (0.025, 0.085, 0.13),
             LENS_R, bevel=0.008)
-box('Diffuser', (-2.36, 0, 0.26), (0.20, 1.52, 0.14), BLACK, bevel=0.02)
+_dx = cast_x(0, 0.26, -1)
+box('Diffuser', (_dx + 0.03, 0, 0.26), (0.20, 1.50, 0.14), BLACK, bevel=0.02)
 for fy in (0.24, -0.24, 0.55, -0.55):
-    box('DiffuserFin', (-2.42, fy, 0.245), (0.10, 0.02, 0.13), BLACK)
+    box('DiffuserFin', (_dx - 0.03, fy, 0.245), (0.10, 0.02, 0.13), BLACK)
 for side in (1, -1):
     for j in range(2):
-        ey = side * (0.60 + j * 0.155)
-        cyl('ExhaustTip', (-2.45, ey, 0.26), 0.034, 0.12, CHROME,
+        ey = side * (0.58 + j * 0.15)
+        cyl('ExhaustTip', (_tx - 0.05, ey, 0.26), 0.034, 0.12, CHROME,
             rot=(0, math.pi / 2, 0), vertices=16)
-        cyl('ExhaustBore', (-2.505, ey, 0.26), 0.025, 0.02, ARCH,
+        cyl('ExhaustBore', (_tx - 0.105, ey, 0.26), 0.025, 0.02, ARCH,
             rot=(0, math.pi / 2, 0), vertices=12)
-# pedestal rear wing (FX sheet): uprights LAND on the decklid (base
-# plates on the surface), blade low over the trailing edge
+# pedestal rear wing: bases seated on the deck surface by raycast
+_wz0 = cast_z(-2.08, 0)
 for side in (1, -1):
-    box('WingBase', (-2.10, side * 0.44, 0.962), (0.16, 0.20, 0.015), BLACK)
-    box('WingUpright', (-2.10, side * 0.44, 1.03), (0.09, 0.13, 0.15), BLACK)
-box('RearWing', (-2.13, 0, 1.115), (0.26, 1.36, 0.032), PAINT, rot=(0, 0.10, 0), bevel=0.01)
+    _wz = cast_z(-2.08, side * 0.44)
+    box('WingBase', (-2.08, side * 0.44, _wz + 0.004), (0.17, 0.20, 0.015), BLACK)
+    box('WingUpright', (-2.08, side * 0.44, _wz + 0.060), (0.09, 0.13, 0.11), BLACK)
+box('RearWing', (-2.11, 0, _wz0 + 0.128), (0.26, 1.36, 0.032), PAINT, rot=(0, 0.10, 0), bevel=0.01)
 for side in (1, -1):
-    box('WingEndplate', (-2.13, side * 0.685, 1.10), (0.24, 0.015, 0.09), BLACK, rot=(0, 0.10, 0))
-# rocker skirts
+    box('WingEndplate', (-2.11, side * 0.685, _wz0 + 0.120), (0.24, 0.015, 0.07), BLACK, rot=(0, 0.10, 0))
+# rocker skirts + small side details, all seated by side raycast
 for side in (1, -1):
-    box('RockerSkirt', (0.05, side * 0.925, 0.175), (2.15, 0.045, 0.08), BLACK, bevel=0.01)
-    # mirrors: stalk + housing at the A-pillars
-    box('MirrorStalk', (0.58, side * 0.815, 1.02), (0.05, 0.10, 0.03), BLACK)
-    box('Mirror', (0.56, side * 0.90, 1.06), (0.13, 0.07, 0.09), BLACK, bevel=0.02)
-    # door handle + fuel door (right rear quarter)
-    box('DoorHandle', (-0.18, side * 0.962, 0.80), (0.16, 0.012, 0.03), BLACK)
-    # fender badge (the sheet's 5.0 callout position)
-    box('FenderBadge', (1.02, side * 0.963, 0.70), (0.11, 0.012, 0.045), CHROME, bevel=0.004)
-    # side marker
-    box('SideMarker', (1.98, side * 0.935, 0.42), (0.03, 0.02, 0.06), LENS_R)
-box('FuelDoor', (-1.78, -0.927, 0.86), (0.15, 0.012, 0.15), PAINT, bevel=0.02)
+    _ry = cast_y(0.05, 0.165, side)
+    box('RockerSkirt', (0.05, _ry + side * 0.006, 0.165), (2.10, 0.035, 0.075), BLACK, bevel=0.01)
+    _my = cast_y(0.44, 1.00, side)
+    box('MirrorStalk', (0.44, _my + side * 0.03, 1.00), (0.05, 0.10, 0.03), BLACK)
+    box('Mirror', (0.42, _my + side * 0.085, 1.04), (0.13, 0.06, 0.09), BLACK, bevel=0.02)
+    _hy = cast_y(-0.25, 0.79, side)
+    box('DoorHandle', (-0.25, _hy + side * 0.003, 0.79), (0.16, 0.012, 0.03), BLACK)
+    _by2 = cast_y(1.02, 0.685, side)
+    box('FenderBadge', (1.02, _by2 + side * 0.003, 0.685), (0.11, 0.012, 0.045), CHROME, bevel=0.004)
+    _sy = cast_y(1.98, 0.42, side)
+    box('SideMarker', (1.98, _sy + side * 0.004, 0.42), (0.03, 0.02, 0.06), LENS_R)
+_fy = cast_y(-1.80, 0.845, -1)
+box('FuelDoor', (-1.80, _fy - 0.003, 0.845), (0.15, 0.012, 0.15), PAINT, bevel=0.02)
 
-# ================================================================ WHEEL ARCHES
-for (wx, side) in [(1.359, 1), (1.359, -1), (-1.359, 1), (-1.359, -1)]:
-    # dark tub disc behind the wheel
-    cyl('ArchTub', (wx, side * 0.845, 0.345), 0.40, 0.06, ARCH, rot=(math.pi / 2, 0, 0), vertices=28)
-    # arch lip: half-torus hugging the opening
-    t = torus('ArchLip', (wx, side * 0.938, 0.345), 0.408, 0.026, BLACK,
-              rot=(math.pi / 2, 0, 0), major_seg=28, minor_seg=8)
-    # keep only the upper half: scale trick not needed — full ring reads as
-    # arch trim behind the tire at the bottom; acceptable and tidy.
+# ================================================================ WHEEL TUBS
+# dark discs recessed inside the boolean-cut wells — reads as well depth
+for (wx, wy) in [(1.359, 0.78), (1.359, -0.78), (-1.359, 0.78), (-1.359, -0.78)]:
+    cyl('ArchTub', (wx, wy, 0.345), 0.408, 0.30, ARCH, rot=(math.pi / 2, 0, 0), vertices=32)
 
 # ================================================================ INTERIOR
-box('CabinFloor', (0, 0, 0.30), (3.30, 1.46, 0.07), CABIN)
-box('Dash', (0.60, 0, 0.875), (0.32, 1.40, 0.13), CABIN, rot=(0, -0.18, 0), bevel=0.03)
-box('DashScreen', (0.48, -0.05, 0.965), (0.03, 0.34, 0.15), SCREEN, rot=(0, -0.35, 0))
-# v3 interior readability: cluster brow + screen in front of the driver,
-# door cards, so the cabin reads as a cabin through the glass
-box('ClusterBrow', (0.55, 0.38, 0.955), (0.30, 0.44, 0.05), CABIN, rot=(0, -0.18, 0), bevel=0.02)
-box('ClusterScreen', (0.425, 0.38, 0.925), (0.02, 0.32, 0.11), SCREEN, rot=(0, -0.35, 0))
+box('CabinFloor', (0, 0, 0.295), (3.30, 1.44, 0.07), CARPET)
+box('Dash', (0.58, 0, 0.875), (0.32, 1.38, 0.13), CABIN, rot=(0, -0.18, 0), bevel=0.03)
+box('DashPad', (0.565, 0, 0.945), (0.30, 1.36, 0.035), CABIN2, rot=(0, -0.18, 0), bevel=0.015)
+box('DashTrim', (0.435, 0, 0.885), (0.02, 1.30, 0.028), DARKMETAL, rot=(0, -0.18, 0))
+box('DashScreen', (0.46, -0.05, 0.97), (0.03, 0.36, 0.16), SCREEN, rot=(0, -0.35, 0))
+box('ClusterBrow', (0.53, 0.38, 0.955), (0.30, 0.44, 0.05), CABIN, rot=(0, -0.18, 0), bevel=0.02)
+box('ClusterScreen', (0.405, 0.38, 0.925), (0.02, 0.32, 0.11), SCREEN, rot=(0, -0.35, 0))
 for side in (1, -1):
-    box('DoorCard', (-0.12, side * 0.685, 0.70), (1.20, 0.04, 0.44), CABIN, bevel=0.02)
+    box('DoorCard', (-0.12, side * 0.68, 0.70), (1.20, 0.04, 0.44), CABIN, bevel=0.02)
+    box('DoorArmrest', (-0.10, side * 0.645, 0.66), (0.62, 0.07, 0.06), CABIN2, bevel=0.02)
+    cyl('DoorSpeaker', (0.28, side * 0.655, 0.52), 0.075, 0.02, DARKMETAL,
+        rot=(math.pi / 2, 0, 0), vertices=20)
 box('Console', (-0.02, 0, 0.52), (0.85, 0.30, 0.17), CABIN, bevel=0.03)
-cyl('Shifter', (0.06, 0, 0.65), 0.022, 0.12, DARKMETAL, vertices=10)
-# steering wheel (driver = left, +Y): torus in the YZ plane + column + hub
+box('ConsoleTrim', (-0.02, 0, 0.615), (0.80, 0.20, 0.015), CABIN2, bevel=0.005)
+cyl('Shifter', (0.06, 0, 0.66), 0.022, 0.12, DARKMETAL, vertices=10)
 torus('SteeringWheel', (0.36, 0.38, 0.97), 0.185, 0.021, CABIN, rot=(0, math.pi / 2 - 0.35, 0))
-box('SteeringHub', (0.365, 0.38, 0.97), (0.05, 0.13, 0.09), CABIN, rot=(0, -0.35, 0))
-# wheel spokes (in the wheel's tilted YZ plane)
-box('SteeringSpokeH', (0.358, 0.38, 0.965), (0.02, 0.30, 0.035), CABIN, rot=(0.35, 0, 0))
-box('SteeringSpokeV', (0.358, 0.38, 0.965), (0.02, 0.035, 0.30), CABIN, rot=(0.35, 0, 0))
+box('SteeringHub', (0.365, 0.38, 0.97), (0.05, 0.13, 0.09), CABIN2, rot=(0, -0.35, 0))
+box('SteeringSpokeH', (0.358, 0.38, 0.965), (0.02, 0.30, 0.035), DARKMETAL, rot=(0.35, 0, 0))
+box('SteeringSpokeV', (0.358, 0.38, 0.965), (0.02, 0.035, 0.30), DARKMETAL, rot=(0.35, 0, 0))
 cyl('SteeringColumn', (0.46, 0.38, 0.93), 0.025, 0.22, DARKMETAL, rot=(0, math.pi / 2 - 0.35, 0), vertices=10)
 
 
 def seat(name, x, y):
     box(name + 'Base', (x, y, 0.47), (0.52, 0.54, 0.13), SEAT, bevel=0.04)
+    box(name + 'BaseInsert', (x, y, 0.545), (0.42, 0.36, 0.02), SEATIN, bevel=0.01)
     box(name + 'Back', (x - 0.30, y, 0.78), (0.14, 0.54, 0.62), SEAT, rot=(0, 0.22, 0), bevel=0.05)
+    box(name + 'BackInsert', (x - 0.225, y, 0.80), (0.03, 0.34, 0.44), SEATIN, rot=(0, 0.22, 0), bevel=0.01)
     box(name + 'Headrest', (x - 0.40, y, 1.09), (0.11, 0.30, 0.16), SEAT, bevel=0.04)
-    # side bolsters: the shaping that makes a seat read as a seat
     for s2 in (1, -1):
         box(name + 'Bolster', (x - 0.29, y + s2 * 0.245, 0.80), (0.15, 0.085, 0.52), SEAT,
             rot=(0, 0.22, 0), bevel=0.035)
@@ -402,55 +472,55 @@ def seat(name, x, y):
 
 seat('SeatL', -0.15, 0.38)
 seat('SeatR', -0.15, -0.38)
-# rear bench
 box('BenchBase', (-1.12, 0, 0.47), (0.45, 1.30, 0.13), SEAT, bevel=0.04)
+box('BenchInsert', (-1.12, 0, 0.545), (0.36, 1.05, 0.02), SEATIN, bevel=0.01)
 box('BenchBack', (-1.38, 0, 0.76), (0.13, 1.30, 0.55), SEAT, rot=(0, 0.25, 0), bevel=0.05)
 
 # ================================================================ WHEELS
-def build_wheel(name, width):
+# Built at origin with LOCAL coordinates, group placed once — the face
+# sits flush on the outer side; dark hole discs read as the rally holes.
+def build_wheel(name, width, outer):
     g = bpy.data.objects.new(name, None)
     link(g)
-    # tire: cylinder axis along Y
+    parts = []
     tire = cyl('Tire', (0, 0, 0), 0.345, width, RUBBER, rot=(math.pi / 2, 0, 0), vertices=36)
-    tire.parent = g
-    # rounded shoulder rings
+    parts.append(tire)
     for s in (1, -1):
         ring = torus('TireShoulder', (0, s * (width / 2 - 0.012), 0), 0.298, 0.048, RUBBER,
                      rot=(math.pi / 2, 0, 0), major_seg=28, minor_seg=10)
-        ring.parent = g
-    # rim barrel + white multi-hole rally face
-    barrel = cyl('RimBarrel', (0, 0, 0), 0.262, width - 0.03, DARKMETAL, rot=(math.pi / 2, 0, 0), vertices=28)
-    barrel.parent = g
+        parts.append(ring)
+    barrel = cyl('RimBarrel', (0, 0, 0), 0.235, width - 0.04, DARKMETAL,
+                 rot=(math.pi / 2, 0, 0), vertices=28)
+    parts.append(barrel)
+    face = cyl('RimFace', (0, outer * (width / 2 - 0.012), 0), 0.232, 0.024, RIMWHITE,
+               rot=(math.pi / 2, 0, 0), vertices=28)
+    parts.append(face)
+    for i in range(12):
+        a = (i / 12) * math.pi * 2
+        hole = cyl('RimHole', (math.cos(a) * 0.158, outer * (width / 2 - 0.012),
+                              math.sin(a) * 0.158), 0.034, 0.028, ARCH,
+                   rot=(math.pi / 2, 0, 0), vertices=14)
+        parts.append(hole)
+    hub = cyl('Hub', (0, outer * (width / 2 - 0.010), 0), 0.062, 0.028, DARKMETAL,
+              rot=(math.pi / 2, 0, 0), vertices=16)
+    parts.append(hub)
+    disc = cyl('BrakeDisc', (0, outer * (width / 2 - 0.05), 0), 0.185, 0.018, DARKMETAL,
+               rot=(math.pi / 2, 0, 0), vertices=24)
+    parts.append(disc)
+    for p in parts:
+        p.parent = g
     return g
 
 
 WHEEL_POS = [
-    ('WheelFL', 1.359, 0.80, 0.275),
-    ('WheelFR', 1.359, -0.80, 0.275),
-    ('WheelRL', -1.359, 0.795, 0.305),
-    ('WheelRR', -1.359, -0.795, 0.305),
+    ('WheelFL', 1.359, 0.80, 0.275, 1),
+    ('WheelFR', 1.359, -0.80, 0.275, -1),
+    ('WheelRL', -1.359, 0.795, 0.305, 1),
+    ('WheelRR', -1.359, -0.795, 0.305, -1),
 ]
-for (name, wx, wy, ww) in WHEEL_POS:
-    g = build_wheel(name, ww)
+for (name, wx, wy, ww, outer) in WHEEL_POS:
+    g = build_wheel(name, ww, outer)
     g.location = (wx, wy, 0.345)
-    # face details parented to the group, on the OUTER side
-    outer = 1 if wy > 0 else -1
-    face = cyl('RimFace', (wx, wy + outer * (ww / 2 - 0.012), 0.345), 0.252, 0.024,
-               RIMWHITE, rot=(math.pi / 2, 0, 0), vertices=28)
-    face.parent = g
-    face.location = (0, outer * (ww / 2 - 0.012), 0)
-    for i in range(12):
-        a = (i / 12) * math.pi * 2
-        hole = cyl('RimHole', (wx, wy, 0.345), 0.036, 0.03, ARCH, rot=(math.pi / 2, 0, 0), vertices=14)
-        hole.parent = g
-        hole.location = (math.cos(a) * 0.160, outer * (ww / 2 - 0.006), math.sin(a) * 0.160)
-    hub = cyl('Hub', (wx, wy, 0.345), 0.068, 0.034, DARKMETAL, rot=(math.pi / 2, 0, 0), vertices=16)
-    hub.parent = g
-    hub.location = (0, outer * (ww / 2 - 0.004), 0)
-    # brake disc glimpse behind the holes
-    disc = cyl('BrakeDisc', (wx, wy, 0.345), 0.19, 0.018, CHROME, rot=(math.pi / 2, 0, 0), vertices=24)
-    disc.parent = g
-    disc.location = (0, outer * (ww / 2 - 0.045), 0)
 
 # ================================================================ STUDIO + RENDERS
 world = bpy.data.worlds.new('Studio')
@@ -490,11 +560,15 @@ look_at(fill, (0, 0, 0.5))
 top = area_light('Top', (0.5, 0.5, 7.5), 900, 5.0)
 look_at(top, (0, 0, 0))
 
+# Cycles only (EEVEE needs libEGL, which does not survive this VM's
+# rootfs resets). Iteration checks drop samples/resolution via
+# RENDER_SAMPLES / RENDER_SCALE; the gate set uses the defaults.
 scene.render.engine = 'CYCLES'
-scene.cycles.samples = 96
+scene.cycles.samples = int(os.environ.get('RENDER_SAMPLES', '64'))
 scene.cycles.use_denoising = True
-scene.render.resolution_x = 1152
-scene.render.resolution_y = 832
+_scale = float(os.environ.get('RENDER_SCALE', '1.0'))
+scene.render.resolution_x = int(1152 * _scale)
+scene.render.resolution_y = int(832 * _scale)
 scene.render.film_transparent = False
 scene.view_settings.view_transform = 'Filmic'
 scene.view_settings.look = 'Medium High Contrast'
@@ -507,48 +581,38 @@ scene.collection.objects.link(cam)
 scene.camera = cam
 
 SHOTS = [
-    ('01_front34', (5.6, -4.9, 1.55), (0, 0, 0.55)),
-    ('02_rear34', (-5.7, -4.7, 1.75), (0, 0, 0.55)),
-    ('03_side', (0, -8.2, 0.72), (0, 0, 0.55)),
-    ('04_front', (7.8, 0, 0.80), (0, 0, 0.58)),
-    ('05_rear', (-7.8, 0, 0.95), (0, 0, 0.60)),
-    ('06_top', (0.6, -0.9, 9.4), (0.2, 0, 0.3)),
-    ('07_interior', (-2.0, -2.3, 1.65), (0.35, 0.05, 0.92)),
+    ('01_front34', (5.6, -4.9, 1.55), (0, 0, 0.55), 42),
+    ('02_rear34', (-5.7, -4.7, 1.75), (0, 0, 0.55), 42),
+    ('03_side', (0, -8.2, 0.72), (0, 0, 0.55), 42),
+    ('04_front', (7.8, 0, 0.80), (0, 0, 0.58), 42),
+    ('05_rear', (-7.8, 0, 0.95), (0, 0, 0.60), 42),
+    ('06_top', (0.6, -0.9, 9.4), (0.2, 0, 0.3), 50),
+    # interior proof: camera INSIDE the cabin, rear-seat POV to the dash —
+    # no hidden panels, the cabin proves itself through its own glass line
+    ('07_interior', (-0.28, 0.38, 1.20), (1.40, 0.30, 0.82), 24),
 ]
-for (name, loc, tgt) in SHOTS:
-    cam.location = loc
-    cabin_fill = None
+only = os.environ.get('SHOTS_ONLY', '')
+for (name, loc, tgt, lens) in SHOTS:
+    if only and name not in only.split(','):
+        continue
     if name == '07_interior':
-        cam_data.lens = 24
-        # the studio rig can't see into a closed cabin: lift the roof
-        # panel for this shot only and add a soft cabin fill, so the
-        # interior proof actually proves the interior
-        for nm in ('RoofPanel', 'Sunroof', 'AntennaFin', 'Glasshouse', 'GlassSeal'):
-            if nm in bpy.data.objects:
-                bpy.data.objects[nm].hide_render = True
-        ld = bpy.data.lights.new('CabinFill', 'POINT')
-        ld.energy = 60
-        ld.shadow_soft_size = 0.4
-        try:
-            ld.cycles.cast_shadow = False  # proof fill must not shadow the dash
-        except Exception:
-            pass
-        cabin_fill = bpy.data.objects.new('CabinFill', ld)
-        cabin_fill.location = (0.6, 0, 1.5)
-        scene.collection.objects.link(cabin_fill)
-    elif name == '06_top':
-        cam_data.lens = 50
-    else:
-        cam_data.lens = 42
+        # interior proof: tint dropped + a soft cabin fill so the finish
+        # materials read (the 0.86 tint + enclosed cabin render as murk
+        # in a sun studio; exterior shots keep the full tint)
+        _bsdf = GLASS.node_tree.nodes['Principled BSDF']
+        _bsdf.inputs['Alpha'].default_value = 0.25
+        _fl = bpy.data.lights.new('CabinFill', 'POINT')
+        _fl.energy = 9
+        _fl.color = (1.0, 0.96, 0.90)
+        _fo = bpy.data.objects.new('CabinFill', _fl)
+        _fo.location = (-0.35, 0, 1.22)
+        link(_fo)
+    cam.location = loc
+    cam_data.lens = lens
     look_at(cam, tgt)
     scene.render.filepath = os.path.join(args.out, name + '.png')
     bpy.ops.render.render(write_still=True)
     print('RENDERED', name)
-    if cabin_fill is not None:
-        bpy.data.objects.remove(cabin_fill, do_unlink=True)
-        for nm in ('RoofPanel', 'Sunroof', 'AntennaFin', 'Glasshouse', 'GlassSeal'):
-            if nm in bpy.data.objects:
-                bpy.data.objects[nm].hide_render = False
 
 # ================================================================ EXPORT
 bpy.ops.wm.save_as_mainfile(filepath=os.path.join(args.out, 'mustang.blend'))
