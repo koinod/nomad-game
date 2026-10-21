@@ -392,3 +392,114 @@ describe('authored shambler GLB (wave 1)', () => {
     expect(st.useAuthoredShambler(tmpl)).toBe(false);
   });
 });
+
+// ------------------------------------------------ authored figures, wave 2 ---
+
+/** A synthetic template in the authored shape (the bind contract). */
+function syntheticAuthoredTemplate(withSac = false): THREE.Group {
+  const tmpl = new THREE.Group();
+  const mk = (name: string, parent: THREE.Object3D) => {
+    const o = new THREE.Group();
+    o.name = name;
+    parent.add(o);
+    return o;
+  };
+  const torso = mk('torso', tmpl);
+  const head = mk('head', torso);
+  mk('jaw', head);
+  mk('armL', torso);
+  mk('armR', torso);
+  mk('legL', tmpl);
+  mk('legR', tmpl);
+  const tm = new THREE.Mesh(
+    new THREE.BoxGeometry(0.3, 0.6, 0.2),
+    new THREE.MeshStandardMaterial({ color: 0x776655 }),
+  );
+  tm.name = 'torsoMesh';
+  torso.add(tm);
+  const em = new THREE.Mesh(
+    new THREE.SphereGeometry(0.02, 6, 6),
+    new THREE.MeshBasicMaterial({ color: 0xffd76a }),
+  );
+  em.name = 'eyes';
+  head.add(em);
+  if (withSac) {
+    const sac = new THREE.Mesh(
+      new THREE.SphereGeometry(0.14, 8, 8),
+      new THREE.MeshStandardMaterial({ color: 0x7d9b3a }),
+    );
+    sac.name = 'sac';
+    torso.add(sac);
+  }
+  return tmpl;
+}
+
+/** Per-class artifact expectations. skullY is the UNPOSED skull-center
+ *  height the class builder targets: the HitProfile headY for every
+ *  kind except the crawler, whose kit build stands at 1.62 and is
+ *  re-posed quadruped at runtime. Rows land one class per commit. */
+const AUTHORED2: { kind: HuskKind; file: string; skullY: number; hipY: number; legX: number; extra: string[] }[] = [
+  { kind: 'crawler', file: 'husk_crawler_authored.glb', skullY: 1.62, hipY: 0.864, legX: 0.0851, extra: [] },
+];
+
+describe('authored husk GLBs (wave 2)', () => {
+  for (const row of AUTHORED2) {
+    it(`${row.kind}: the shipped artifact honors the bindFigureGLB node contract`, () => {
+      const path = join(
+        dirname(fileURLToPath(import.meta.url)), '..', '..',
+        'public', 'figures', row.file,
+      );
+      const g = gltfJson(path);
+      const names = g.nodes.map((n) => n.name);
+      for (const req of ['torso', 'head', 'jaw', 'armL', 'armR', 'legL', 'legR', 'torsoMesh', 'eyes', 'skull', ...row.extra]) {
+        expect(names, req).toContain(req);
+      }
+      const parent = new Map<number, number>();
+      g.nodes.forEach((n, i) => (n.children ?? []).forEach((c) => parent.set(c, i)));
+      const idx = (name: string) => names.indexOf(name);
+      expect(g.nodes[parent.get(idx('head'))!].name).toBe('torso');
+      expect(g.nodes[parent.get(idx('jaw'))!].name).toBe('head');
+      expect(g.nodes[parent.get(idx('armL'))!].name).toBe('torso');
+      // the skull rides the translation chain onto the class window
+      let y = 0;
+      let i: number | undefined = idx('skull');
+      while (i !== undefined) {
+        y += g.nodes[i].translation?.[1] ?? 0;
+        i = parent.get(i);
+      }
+      expect(Math.abs(y - row.skullY)).toBeLessThan(0.03);
+      // pivots where the kit puts them (hip line, bi-acetabular width)
+      const torsoT = g.nodes[idx('torso')].translation!;
+      expect(Math.abs(torsoT[1] - row.hipY)).toBeLessThan(0.01);
+      for (const leg of ['legL', 'legR']) {
+        const t = g.nodes[idx(leg)].translation!;
+        expect(Math.abs(Math.abs(t[0]) - row.legX)).toBeLessThan(0.006);
+        expect(Math.abs(t[1] - row.hipY)).toBeLessThan(0.01);
+      }
+      // eyes load as MeshBasicMaterial (unlit); the torso stays lit
+      const matOf = (name: string) => g.materials[g.meshes[g.nodes[idx(name)].mesh!].primitives[0].material!];
+      expect(matOf('eyes').extensions?.KHR_materials_unlit).toBeDefined();
+      expect(matOf('torsoMesh').extensions?.KHR_materials_unlit).toBeUndefined();
+      // grime vertex colors ride the visible shells
+      for (const name of ['skull', 'torsoMesh', 'torsoSkin']) {
+        expect(g.meshes[g.nodes[idx(name)].mesh!].primitives[0].attributes.COLOR_0, name).toBeDefined();
+      }
+    });
+  }
+
+  it('crawler swap applies the quadruped re-pose the kit builder applies', () => {
+    const cr = new Husk('auth2_cr', 'crawler', 0, 0, 'test', groundY);
+    expect(cr.useAuthoredFigure(syntheticAuthoredTemplate())).toBe(true);
+    expect(cr.useAuthoredFigure(syntheticAuthoredTemplate())).toBe(false); // one swap only
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rig = (cr as any).rig as FigureRig;
+    expect(rig.torso.position.y).toBe(0.4);
+    expect(rig.torso.rotation.x).toBe(1.35);
+    expect(rig.pose.torsoX).toBe(1.35);
+    expect(rig.head.rotation.x).toBe(-1.1);
+    expect(rig.armL.rotation.x).toBe(-1.85);
+    expect(rig.legL.rotation.x).toBe(0.95);
+    expect(rig.legR.position.z).toBe(-0.2);
+    expect(rig.group.scale.y).toBe(0.96);
+  });
+});
