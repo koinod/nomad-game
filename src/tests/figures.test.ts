@@ -9,10 +9,13 @@
 //     counter, spitter telegraph, bloater burst, raycast hit windows.
 
 import * as THREE from 'three';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   buildHumanFigure, buildHuskFigure, bindFigureGLB,
-  type HuskFigureKind,
+  type FigureRig, type HuskFigureKind,
 } from '../game/figureKit';
 import { Husk, HuskManager, type HuskCtx, type HuskKind, type SpawnZone } from '../game/Husks';
 import { SHRIEK_WINDUP_SEC } from '../game/huskMath';
@@ -267,5 +270,125 @@ describe('husk behavior parity after the figure swap', () => {
     const head = shoot(base.y + h.profile.headY);
     expect(head?.husk).toBe(h);
     expect(head?.head).toBe(true);
+  });
+});
+
+// ------------------------------------------------ authored figures, wave 1 ---
+
+/** Extract a GLB's JSON chunk read as utf8: the chunk is plain JSON and
+ *  a string-aware brace scan finds its exact end before the binary chunk. */
+function gltfJson(path: string): {
+  nodes: { name?: string; children?: number[]; translation?: number[]; mesh?: number }[];
+  meshes: { primitives: { attributes: Record<string, number>; material?: number }[] }[];
+  materials: { name?: string; extensions?: Record<string, unknown> }[];
+} {
+  const text = readFileSync(path, 'utf8');
+  const start = text.indexOf('{"asset"');
+  expect(start, 'GLB JSON chunk').toBeGreaterThanOrEqual(0);
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  let end = -1;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === '\\') esc = true;
+      else if (ch === '"') inStr = false;
+    } else if (ch === '"') inStr = true;
+    else if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) { end = i + 1; break; }
+    }
+  }
+  expect(end, 'GLB JSON chunk end').toBeGreaterThan(start);
+  return JSON.parse(text.slice(start, end));
+}
+
+const AUTHORED_GLB = join(
+  dirname(fileURLToPath(import.meta.url)), '..', '..',
+  'public', 'figures', 'husk_shambler_authored.glb',
+);
+
+describe('authored shambler GLB (wave 1)', () => {
+  it('the shipped artifact honors the bindFigureGLB node contract', () => {
+    const g = gltfJson(AUTHORED_GLB);
+    const names = g.nodes.map((n) => n.name);
+    for (const req of ['torso', 'head', 'jaw', 'armL', 'armR', 'legL', 'legR', 'torsoMesh', 'eyes', 'skull']) {
+      expect(names, req).toContain(req);
+    }
+    const parent = new Map<number, number>();
+    g.nodes.forEach((n, i) => (n.children ?? []).forEach((c) => parent.set(c, i)));
+    const idx = (name: string) => names.indexOf(name);
+    expect(g.nodes[parent.get(idx('head'))!].name).toBe('torso');
+    expect(g.nodes[parent.get(idx('jaw'))!].name).toBe('head');
+    expect(g.nodes[parent.get(idx('armL'))!].name).toBe('torso');
+    // the skull rides the translation chain onto the HitProfile window
+    let y = 0;
+    let i: number | undefined = idx('skull');
+    while (i !== undefined) {
+      y += g.nodes[i].translation?.[1] ?? 0;
+      i = parent.get(i);
+    }
+    expect(Math.abs(y - 1.71)).toBeLessThan(0.03);
+    // eyes load as MeshBasicMaterial (unlit); the torso stays lit (flash seam)
+    const matOf = (name: string) => g.materials[g.meshes[g.nodes[idx(name)].mesh!].primitives[0].material!];
+    expect(matOf('eyes').extensions?.KHR_materials_unlit).toBeDefined();
+    expect(matOf('torsoMesh').extensions?.KHR_materials_unlit).toBeUndefined();
+    // grime vertex colors ride the visible shells
+    for (const name of ['skull', 'torsoMesh', 'torsoSkin']) {
+      expect(g.meshes[g.nodes[idx(name)].mesh!].primitives[0].attributes.COLOR_0, name).toBeDefined();
+    }
+  });
+
+  it('useAuthoredShambler swaps ONLY shamblers, onto the slump, with per-husk materials', () => {
+    // a synthetic template in the authored GLB's shape (the bind contract)
+    const tmpl = new THREE.Group();
+    const mk = (name: string, parent: THREE.Object3D) => {
+      const o = new THREE.Group();
+      o.name = name;
+      parent.add(o);
+      return o;
+    };
+    const torso = mk('torso', tmpl);
+    const head = mk('head', torso);
+    mk('jaw', head);
+    mk('armL', torso);
+    mk('armR', torso);
+    mk('legL', tmpl);
+    mk('legR', tmpl);
+    const tm = new THREE.Mesh(
+      new THREE.BoxGeometry(0.3, 0.6, 0.2),
+      new THREE.MeshStandardMaterial({ color: 0x776655 }),
+    );
+    tm.name = 'torsoMesh';
+    torso.add(tm);
+    const em = new THREE.Mesh(
+      new THREE.SphereGeometry(0.02, 6, 6),
+      new THREE.MeshBasicMaterial({ color: 0xffd76a }),
+    );
+    em.name = 'eyes';
+    head.add(em);
+
+    const sh = new Husk('auth_sh', 'shambler', 0, 0, 'test', groundY);
+    const childrenBefore = sh.group.children.length;
+    expect(sh.useAuthoredShambler(tmpl)).toBe(true);
+    expect(sh.useAuthoredShambler(tmpl)).toBe(false); // one swap only
+    expect(sh.group.children.length).toBe(childrenBefore); // old rig out, authored in
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rig = (sh as any).rig as FigureRig;
+    expect(rig.pose.torsoX).toBe(0.14); // the poseSlump base, same as the kit build
+    expect(rig.torso.rotation.x).toBe(0.14);
+    // per-husk material clones: flashing this husk never touches the template
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const bodyMat = (sh as any).bodyMat as THREE.MeshStandardMaterial;
+    expect(bodyMat).not.toBe(tm.material);
+    sh.damage(5, DIR, 0, false);
+    expect(bodyMat.emissive.getHex()).toBe(0xff2222);
+    expect((tm.material as THREE.MeshStandardMaterial).emissive.getHex()).toBe(0x000000);
+    // other kinds refuse — their interim meshes stand
+    const st = new Husk('auth_st', 'stalker', 0, 0, 'test', groundY);
+    expect(st.useAuthoredShambler(tmpl)).toBe(false);
   });
 });
