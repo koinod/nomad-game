@@ -9,6 +9,7 @@ import { MODS } from '../data/mods';
 import { carryLimitKg, encumbranceTier, totalWeightKg } from '../store/inventoryUtils';
 import { packGridDims, canPlace, layoutItems } from '../store/gridUtils';
 import GridInventory from './GridInventory';
+import InventoryOverlay from './InventoryOverlay';
 import { sfx } from '../systems/audio';
 
 function Act({
@@ -55,6 +56,9 @@ const CATEGORY_LABEL: Record<string, string> = {
 
 export default function Backpack() {
   const open = useGameStore((s) => s.backpackOpen);
+  // the full inventory deck (KeyB) supersedes the field pack while open;
+  // this component hosts it so GameView mounts it with no changes there
+  const inventoryOpen = useGameStore((s) => s.inventoryOpen);
   const closeBackpack = useGameStore((s) => s.closeBackpack);
   const inventory = useGameStore((s) => s.inventory);
   const equipped = useGameStore((s) => s.equipped);
@@ -88,8 +92,9 @@ export default function Backpack() {
   const [query, setQuery] = useState('');
   const [chip, setChip] = useState<string>('all');
 
-  if (!open) return null;
-
+  // no early return: the fragment below always renders so the hosted
+  // InventoryOverlay (and its KeyB listener) stays mounted while the
+  // field pack itself is closed.
   const sel = selected ? inventory.find((i) => i.uid === selected) : undefined;
   const selDef = sel ? ITEMS[sel.itemId] : undefined;
   const equippedUids = [equipped.melee, equipped.ranged, equipped.pack];
@@ -129,6 +134,8 @@ export default function Backpack() {
   };
 
   return (
+    <>
+      {open && !inventoryOpen && (
     <div
       className={`absolute inset-0 z-30 flex items-center justify-center p-4 ${
         limited ? 'bg-black/35' : 'bg-black/60'
@@ -497,5 +504,8 @@ export default function Backpack() {
         </div>
       </div>
     </div>
+      )}
+      <InventoryOverlay />
+    </>
   );
 }

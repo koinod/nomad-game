@@ -76,6 +76,13 @@ interface GameState {
 
   // backpack overlay (works with a dead phone — it's your bag, not an app)
   backpackOpen: boolean;
+  // full inventory deck (InventoryOverlay, KeyB): the phone-free
+  // management surface. Opening it also sets backpackOpen — the flag
+  // Game.ts's worldPaused already honors — so the world pauses with
+  // no Game.ts change; closing either surface clears both.
+  inventoryOpen: boolean;
+  openInventory: () => void;
+  closeInventory: () => void;
   // sleep dialog (Skyrim-style rest at campfires)
   sleepOpen: boolean;
   restedMinutesLeft: number; // well-rested buff countdown (game minutes)
@@ -566,6 +573,7 @@ export const useGameStore = create<GameState>()((set, get) => {
     battery: 100,
 
     backpackOpen: false,
+    inventoryOpen: false,
     sleepOpen: false,
     restedMinutesLeft: 0,
     lootOpenId: null,
@@ -594,7 +602,7 @@ export const useGameStore = create<GameState>()((set, get) => {
     pendingSnapshot: null,
     saveSlots: [],
 
-    setScreen: (s) => set({ screen: s, paused: false, dialogue: null, phoneOpen: false, backpackOpen: false, sleepOpen: false, lootOpenId: null, lootStash: {} }),
+    setScreen: (s) => set({ screen: s, paused: false, dialogue: null, phoneOpen: false, backpackOpen: false, inventoryOpen: false, sleepOpen: false, lootOpenId: null, lootStash: {} }),
     setPaused: (p) => set({ paused: p }),
 
     startNewGame: (d) => {
@@ -614,7 +622,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         flags: {},
         rep: { ...STARTING_REP },
         phoneOpen: false, phoneTab: 'home', phoneUnlocked: false, battery: 100,
-        backpackOpen: false, sleepOpen: false, restedMinutesLeft: 0, lootOpenId: null, lootStash: {},
+        backpackOpen: false, inventoryOpen: false, sleepOpen: false, restedMinutesLeft: 0, lootOpenId: null, lootStash: {},
         storageOpen: null, storageItems: [], vehicle: null, fleet: [], trailerFleet: [],
         dialogue: { source: 'prologue', nodeId: 'start' },
         interactPrompt: null,
@@ -1676,7 +1684,9 @@ export const useGameStore = create<GameState>()((set, get) => {
     },
 
     openBackpack: () => set({ backpackOpen: true }),
-    closeBackpack: () => set({ backpackOpen: false }),
+    closeBackpack: () => set({ backpackOpen: false, inventoryOpen: false }),
+    openInventory: () => set({ inventoryOpen: true, backpackOpen: true }),
+    closeInventory: () => set({ inventoryOpen: false, backpackOpen: false }),
 
     sortInventory: () => {
       const s = get();

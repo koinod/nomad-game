@@ -213,3 +213,34 @@ describe('second-batch field requests (Lanes 9 + 10 + 8)', () => {
     expect(st.rep).toEqual(STARTING_REP);
   });
 });
+
+describe('inventory deck flags (Lane 5 step 2)', () => {
+  beforeEach(() => {
+    useGameStore.setState({ backpackOpen: false, inventoryOpen: false });
+  });
+
+  it('openInventory sets both flags (backpackOpen is the world-pause gate)', () => {
+    useGameStore.getState().openInventory();
+    const st = useGameStore.getState();
+    expect(st.inventoryOpen).toBe(true);
+    expect(st.backpackOpen).toBe(true);
+  });
+
+  it('closeInventory and closeBackpack both clear the deck', () => {
+    const s = useGameStore.getState();
+    s.openInventory();
+    s.closeInventory();
+    expect(useGameStore.getState().inventoryOpen).toBe(false);
+    expect(useGameStore.getState().backpackOpen).toBe(false);
+    s.openInventory();
+    s.closeBackpack(); // the G-key path must not strand the deck open
+    expect(useGameStore.getState().inventoryOpen).toBe(false);
+    expect(useGameStore.getState().backpackOpen).toBe(false);
+  });
+
+  it('startNewGame closes the deck', () => {
+    useGameStore.getState().openInventory();
+    useGameStore.getState().startNewGame('survivor');
+    expect(useGameStore.getState().inventoryOpen).toBe(false);
+  });
+});
