@@ -14,6 +14,8 @@ import { sfx } from '../systems/audio';
 
 export default function StoragePanel() {
   const storageOpen = useGameStore((s) => s.storageOpen);
+  // the inventory deck's storage mode supersedes this panel while open
+  const inventoryOpen = useGameStore((s) => s.inventoryOpen);
   const items = useGameStore((s) => s.storageItems);
   const inventory = useGameStore((s) => s.inventory);
   const equipped = useGameStore((s) => s.equipped);
@@ -27,7 +29,7 @@ export default function StoragePanel() {
   const [selStored, setSelStored] = useState<string | null>(null);
   const [selPack, setSelPack] = useState<string | null>(null);
 
-  if (!storageOpen) return null;
+  if (!storageOpen || inventoryOpen) return null;
 
   const usedKg = items.reduce((w, it) => w + (ITEMS[it.itemId]?.weight ?? 0) * it.qty, 0);
   let capKg: number | null = null;

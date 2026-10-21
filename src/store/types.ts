@@ -1,4 +1,5 @@
 import type { SurvivorDef } from '../data/survivors';
+import type { SkillId } from '../data/skills';
 // Shared types for the zustand store, game data modules, and save system.
 // Data modules (src/data/*) implement the *Def interfaces declared here.
 
@@ -21,6 +22,15 @@ export interface FleetEntry {
   tiresFlat: number;
   hitchedTrailer: string | null; // trailer defId being towed
   loc: string; // wave 3: human location label ("At the depot", "Carrier deck", coords)
+  // parallel cycle (Lane 13 field request): instance + fuel accounting.
+  // OPTIONAL because the engine stamps them when it publishes the fleet;
+  // until a publisher stamps them, readers default: instanceId ?? defId
+  // (one instance per def in the current fleet), fuelLiters ?? fuelPct
+  // of tankLiters. Lane 13's DispatchPanel reads them defensively.
+  instanceId?: string;
+  fuelLiters?: number; // absolute fuel aboard, liters
+  tankLiters?: number; // tank capacity, liters
+  burnClass?: number; // fuel burn class (Lane 13's consumption model)
 }
 
 /** One trailer row for the phone's Vehicles app. */
@@ -35,6 +45,9 @@ export interface TrailerFleetEntry {
   fuelLiters: number; // tanker only, else 0
   beaconMode: 'off' | 'sat' | 'horde';
   loadedVehicle: string | null; // vehicle name riding the deck
+  // parallel cycle (Lane 13 field request): instance identity, same
+  // defaulting rule as FleetEntry (instanceId ?? defId until stamped).
+  instanceId?: string;
 }
 
 export interface DifficultyDef {
@@ -90,7 +103,11 @@ export const DEFAULT_APPEARANCE: Appearance = {
 // ---------- inventory ----------
 export type ItemCategory =
   | 'weapon-melee' | 'weapon-ranged' | 'ammo' | 'food' | 'medical'
-  | 'material' | 'tool' | 'key' | 'pack' | 'mod';
+  | 'material' | 'tool' | 'key' | 'pack' | 'mod'
+  // parallel cycle (Lane 5 field contract, SYSTEMS_SPEC §1.1): worn
+  // mitigation gets its own category, and blueprint unlock items theirs.
+  // Lane 6 codes its catalog re-categorization against these.
+  | 'armor' | 'blueprint';
 
 export interface ItemDef {
   id: string;
@@ -128,6 +145,17 @@ export interface ItemDef {
   projectileSpeed?: number; // ranged: m/s — set = true projectile with drop, unset = hitscan
   pen?: number; // ammo: armor penetration class 0..2 (vs armored husks)
   disassembly?: { itemId: string; qty: number }[]; // bench yield when stripped for parts
+  // ---- parallel cycle field contract (SYSTEMS_SPEC §1.2) — all optional,
+  // authored by Lane 6 (items) / gated by Lane 7 (crafting) + Lane 8
+  // (skills). Declared here so every lane compiles against one shape. ----
+  tier?: 1 | 2 | 3; // weapons + mods: loot/power tier
+  swingSec?: number; // melee: full swing duration
+  staminaCost?: number; // melee: stamina per swing
+  blockPct?: number; // melee: damage blocked while blocking (0..1)
+  reach?: number; // melee: reach in meters
+  armorSlot?: 'head' | 'torso' | 'legs'; // armor: body slot it protects
+  barterValue?: number; // trader price in "value" units (Lane 6 §3.5 anchors)
+  skillReq?: { skill: SkillId; level: number }; // crafting gate (§4.2/§6.1)
 }
 
 export interface InvItem {
@@ -150,6 +178,12 @@ export interface Equipped {
   melee: string | null; // uid
   ranged: string | null; // uid
   pack: string | null; // uid
+  // parallel cycle field contract (SYSTEMS_SPEC §1.3): worn-armor slots.
+  // OPTIONAL so every pre-cycle save and literal stays valid untouched;
+  // undefined and null both mean "nothing worn there".
+  armorHead?: string | null; // uid
+  armorTorso?: string | null; // uid
+  armorLegs?: string | null; // uid
 }
 
 // ---------- quests ----------
@@ -274,6 +308,15 @@ export interface Dispatch {
   etaMin: number;
   distM: number;
   status: 'out';
+  // parallel cycle (Lane 13 field request): instance addressing + fuel.
+  // Optional on the type because legacy saves carry dispatches without
+  // them; loadFromSlot defaults them (instance ids := the def ids, fuel
+  // := 0 = not yet accounted) and startDispatch stamps them at creation,
+  // so live state always carries them. Lane 13's instance-id
+  // startDispatch signature lands at integration (main agent).
+  vehicleInstanceId?: string;
+  trailerInstanceId?: string | null;
+  fuelLiters?: number;
 }
 
 export interface JournalEntry {
@@ -295,6 +338,105 @@ export interface BaseBuildOrder {
   facilityId: string;
   /** Absolute game minutes when construction completes. */
   readyMin: number;
+}
+
+// ---- parallel cycle: Lane 5 field contract ----
+// These shapes are the published schema sibling lanes code against.
+// All are OPTIONAL on the v3 snapshot (passthrough-safe, see save.ts):
+// older saves lack them, the store defaults them on load, no version bump.
+
+/** One timed craft job — Lane 7's engine shape, declared here so the
+ *  save contract and src/systems/crafting.ts (which exports the identical
+ *  interface) stay structurally interchangeable. Segment-based on
+ *  purpose: an interrupted job banks its progress and freezes, which a
+ *  single deadline timestamp cannot express. Lane 7 owns the engine and
+ *  its useCraftQueue store; Lane 5 owns persisting this array. */
+export interface CraftJob {
+  uid: string;
+  recipeId: string; // FIELD_RECIPES / STATION_RECIPES id (data/items)
+  /** Absolute game minute the current run segment started. */
+  startedAtMin: number;
+  /** Progress banked before this segment (interrupt/resume), in minutes. */
+  bankedMin: number;
+  durationMin: number;
+  status: 'running' | 'interrupted';
+}
+
+/** Base-state extensions (Lane 10 owns the logic: claims, heat, siege,
+ *  stockpile; Lane 5 owns persistence). Every field optional — a run
+ *  with no base extensions saves and loads exactly as before. The home
+ *  base itself stays `SaveSnapshot.base`; this is everything around it. */
+export interface BaseExt {
+  /** Last computed base heat (Lane 10's heat math owns the value). */
+  heat?: number;
+  /** Siege-loop state (Lane 10): absent = the loop has never stirred. */
+  siegeState?: 'calm' | 'scouted' | 'warning' | 'siege';
+  /** Absolute game minutes of the next scheduled siege beat, if any. */
+  siegeNextMin?: number;
+  /** Husk kills near the base — a heat input (Lane 10's computeHeat
+   *  takes it as a parameter; the store persists the running count). */
+  localKillsNearBase?: number;
+  // NOTE: outposts + stockpile lived here in the first contract draft;
+  // Lane 10's ClaimsState/BaseInstance (below) supersede them — outposts
+  // are ClaimsState.outposts and the stockpile is per-base
+  // (BaseInstance.stockpile, {itemId, qty} stacks, no uids).
+}
+
+/** A plain item stack — Lane 10's StockItem (src/systems/morale.ts).
+ *  Mirrored here so the save contract is self-contained; structurally
+ *  identical, re-export Lane 10's at merge if preferred. */
+export interface StockItem {
+  itemId: string;
+  qty: number;
+}
+
+/** Lane 10's FacilityInstance (src/systems/baseClaims.ts) — mirror. */
+export interface FacilityInstance {
+  defId: string;
+  tier: number;
+  /** Survivor id staffing this facility, or null. */
+  staffId: string | null;
+  /** Production paused (injured staff, siege prep). */
+  paused: boolean;
+}
+
+/** Lane 10's PrefabInstance (src/systems/baseClaims.ts) — mirror. */
+export interface PrefabInstance {
+  defId: string;
+  /** Palisade scrap-plating (upgrade-in-place). */
+  upgraded?: boolean;
+  /** Survivor id posted here (watchtower guard posts). */
+  staffId?: string | null;
+}
+
+/** Lane 10's BaseInstance (src/systems/baseClaims.ts) — mirror. One
+ *  claimed site: tiered facility instances, placed prefabs, and the
+ *  per-base stockpile Lane 10 asked to persist ({itemId, qty} stacks). */
+export interface BaseInstance {
+  siteId: string;
+  role: 'home' | 'outpost' | 'field';
+  facilities: FacilityInstance[];
+  prefabs: PrefabInstance[];
+  stockpile: StockItem[];
+}
+
+/** Lane 10's ClaimsState (src/systems/baseClaims.ts) — mirror. The
+ *  canonical base model going forward; it SUPERSEDES the single legacy
+ *  `base: { poiId, facilities }` snapshot field, which stays readable
+ *  forever: on load, a save with `base` but no `claims` is migrated
+ *  (see claimsFromLegacyBase in gameStore.ts). */
+export interface ClaimsState {
+  home: BaseInstance | null;
+  outposts: BaseInstance[];
+}
+
+/** Lane 10's MoraleRuntime (src/systems/morale.ts) — mirror. Persisted
+ *  alongside `survivors`; SurvivorDef itself carries no counters. */
+export interface MoraleRuntime {
+  /** Consecutive days with no job (idle −1/day starts at 3+). */
+  idleDays: Record<string, number>;
+  /** Consecutive days spent Breaking (<20). 3 → the survivor leaves. */
+  breakingDays: Record<string, number>;
 }
 
 export interface SaveSnapshot {
@@ -334,6 +476,24 @@ export interface SaveSnapshot {
   baseQueue?: BaseBuildOrder[];
   // wave 4: character appearance — optional on v3, store defaults on load
   appearance?: Appearance;
+  // parallel cycle (Lane 5 field contract) — optional on v3, same rule:
+  // absent on older saves, store defaults them on load. Lane 7's timed
+  // craft jobs persist here (harvested/rehydrated through the bridge in
+  // gameStore.ts); Lane 9 records string-valued story choices the
+  // boolean `flags` map cannot hold (e.g. beacon: 'lit'); Lane 10
+  // persists base extensions here.
+  craftQueue?: CraftJob[];
+  storyChoices?: Record<string, string>;
+  baseExt?: BaseExt;
+  // field requests, second batch — optional on v3, same rule. Lane 10:
+  // the claims model (supersedes `base`; legacy saves migrate on load)
+  // and the morale counters that ride alongside `survivors`. Lane 9:
+  // the explicit beacon ending state, derived from the beacon_lit /
+  // beacon_dark flags when absent — hardmode's seed reads this field,
+  // never the flags.
+  claims?: ClaimsState;
+  moraleRuntime?: MoraleRuntime;
+  beaconChoice?: 'light' | 'dark' | null;
 }
 
 export interface SaveMeta {
