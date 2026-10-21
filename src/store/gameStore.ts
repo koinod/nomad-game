@@ -7,7 +7,7 @@ import { FACILITIES as FACILITY_DEFS, baseHeat, buildMinutes } from '../data/bas
 import { dispatchDurationMin, poiName, resolveDispatch } from '../data/dispatch';
 import { TRAITS as TRAIT_DEFS } from '../data/survivors';
 import { QUESTS } from '../data/quests';
-import { FACTIONS } from '../data/factions';
+import { FACTIONS, STARTING_REP, LEGACY_REP_ALIAS } from '../data/factions';
 import { DEFAULT_APPEARANCE, DIFFICULTIES } from './types';
 import type {
   Appearance, DifficultyId, Equipped, FleetEntry, InvItem, PhoneTab, QuestProgress, QuestStepType,
@@ -320,20 +320,15 @@ export const craftQueueBridge: {
 } = { read: null, write: null };
 
 /**
- * Faction canon mirrors (Lane 9 field requests F1/F2). The canonical
- * STARTING_REP / LEGACY_REP_ALIAS live in Lane 9's src/data/factions.ts
- * (easymode-era startRep values; folds from FACTION_FOLDS) — that file
- * only lands at merge, so the values are mirrored here verbatim:
+ * Faction canon (Lane 9 field requests F1/F2) — SINGLE SOURCE since the
+ * Stage 4 merge: STARTING_REP / LEGACY_REP_ALIAS are imported from
+ * src/data/factions.ts (easymode-era startRep values; folds from
+ * FACTION_FOLDS) and re-exported here so existing store consumers and
+ * tests keep their import path. Values are unchanged by the swap:
  * remnants −50, union +25, skulls −30, tollkeepers/drowned/lighthouse 0;
- * pier→union, refuge→union, hollow→skulls. At merge, swap these consts
- * for imports from '../data/factions' (same names there).
+ * pier→union, refuge→union, hollow→skulls.
  */
-export const STARTING_REP: Record<string, number> = {
-  remnants: -50, union: 25, skulls: -30, tollkeepers: 0, drowned: 0, lighthouse: 0,
-};
-export const LEGACY_REP_ALIAS: Record<string, string> = {
-  pier: 'union', refuge: 'union', hollow: 'skulls',
-};
+export { STARTING_REP, LEGACY_REP_ALIAS };
 
 /** Fold a loaded save's rep onto the canon roster (Lane 9, F2): start
  *  from STARTING_REP, let saved standings override, then add any legacy
