@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { input, consumeLook } from './input';
 import { tryMelee, tryRanged, meleeStatsFor, equippedMeleeId, equippedRangedDef } from './Combat';
 import { buildHandMesh, activeHandItemId } from './weaponMeshes';
+import { noiseClassRadius } from './noise';
 import { getGame } from './instance';
 import type { AnimalManager, AnimalKill } from './Animals';
 import { resolveCollisions, type Collider } from './Colliders';
@@ -335,7 +336,9 @@ export class Player {
       ? (s.equipped.melee ? s.inventory.find((i) => i.uid === s.equipped.melee) : undefined)
         ?? (s.equipped.ranged ? s.inventory.find((i) => i.uid === s.equipped.ranged) : undefined)
       : undefined;
-    const key = `${want ?? ''}|${activeInst?.finish ?? ''}`;
+    // Lane 11: attached mods are part of the mesh too — a mod swap must
+    // rebuild the hand mesh or the new part never renders in hand
+    const key = `${want ?? ''}|${activeInst?.finish ?? ''}|${(activeInst?.mods ?? []).join(',')}`;
     if (key === this.handKey) return;
     this.handKey = key;
     this.handItemId = want;
@@ -348,12 +351,12 @@ export class Player {
       while (anchor.children.length > 0) anchor.remove(anchor.children[0]);
     }
     if (want) {
-      const mesh = buildHandMesh(want, activeInst?.finish);
+      const mesh = buildHandMesh(want, activeInst?.finish, activeInst?.mods);
       // slight grip tilt so weapons read naturally in hand
       mesh.rotation.x = 0.15;
       this.handAnchor.add(mesh);
       // view-model variant points down the lens
-      const vm = buildHandMesh(want, activeInst?.finish);
+      const vm = buildHandMesh(want, activeInst?.finish, activeInst?.mods);
       vm.rotation.y = Math.PI; // hand meshes point +Z; the lens looks -Z
       this.vmAnchor.add(vm);
     }
@@ -537,10 +540,14 @@ export class Player {
       this.sprintNoiseT -= dt;
       if (sprinting && this.sprintNoiseT <= 0) {
         this.sprintNoiseT = 1.2;
-        ctx.emitNoise(this.pos.x, this.pos.z, 14);
+        ctx.emitNoise(this.pos.x, this.pos.z, noiseClassRadius('sprint_step'));
       } else if (!sprinting && this.walkNoiseT <= 0) {
         this.walkNoiseT = 2.5;
-        ctx.emitNoise(this.pos.x, this.pos.z, this.crouching ? 3 : 6);
+        ctx.emitNoise(
+          this.pos.x,
+          this.pos.z,
+          this.crouching ? noiseClassRadius('crouch_step') : noiseClassRadius('walk_step'),
+        );
       }
     } else {
       // idle: settle the limbs, breathe (stay low if crouching)

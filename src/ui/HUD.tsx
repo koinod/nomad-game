@@ -3,6 +3,7 @@ import { useGameStore } from '../store/gameStore';
 import { input } from '../game/input';
 import { ITEMS } from '../data/items';
 import { magSizeOf } from '../data/mods';
+import { LightIndicator } from './SkillsPanel';
 import { QUESTS } from '../data/quests';
 import { sfx } from '../systems/audio';
 
@@ -297,6 +298,9 @@ function BatteryIcon() {
 
 export default function HUD() {
   const hp = useGameStore((s) => s.hp);
+  // §6.3 light indicator: the store's per-frame exposure (Lane 5's
+  // visibility flag, written by Game's visibility pass every frame)
+  const visibility = useGameStore((s) => s.visibility);
   const maxHp = useGameStore((s) => s.maxHp);
   const stamina = useGameStore((s) => s.stamina);
   const maxStamina = useGameStore((s) => s.maxStamina);
@@ -378,17 +382,23 @@ export default function HUD() {
         </div>
         <Bar value={stamina} max={maxStamina} fill="bg-[#e8b34b]" bg="bg-[#232b36]" />
         {!isTouch && <NoiseMeter />}
-        {/* INTEGRATION (Lane 8): mount <LightIndicator /> here — the
-            component is Lane 8's (exported from ui/SkillsPanel.tsx),
-            fed by game/visibility's lightIndicator(exposure) over the
-            visibility value Lane 5 exposes. See Lane 11's report. */}
+        {/* §6.3 light indicator (Lane 8's component, Lane 11's mount
+            point): the eye fills with the player's current exposure */}
+        {!isTouch && (
+          <div className="mt-1.5">
+            <LightIndicator exposure={visibility} />
+          </div>
+        )}
       </div>
 
-      {/* noise pill, touch only — top-center, clear of the combat cluster.
-          Lane 8's LightIndicator pill joins this row at integration. */}
+      {/* noise pill, touch only — top-center, clear of the combat cluster;
+          the light indicator rides the same pill row */}
       {isTouch && (
-        <div className="absolute left-1/2 top-4 flex -translate-x-1/2 gap-2">
+        <div className="absolute left-1/2 top-4 flex -translate-x-1/2 items-center gap-2">
           <NoiseMeter pill />
+          <div className="rounded border border-[#232b36] bg-[#0b0e12]/80 px-2 py-1">
+            <LightIndicator exposure={visibility} />
+          </div>
         </div>
       )}
 

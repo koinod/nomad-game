@@ -29,6 +29,7 @@ import { useCraftQueue } from '../systems/crafting';
 import { XP_EVENTS } from '../systems/skills';
 import { isSpecialKind } from './Combat';
 import { computeVisibility } from './visibility';
+import { meterLevel, noiseClassRadius } from './noise';
 import { ENDING_LINES } from '../narrative/dialogue';
 import {
   totalWeightKg, carryLimitKg, encumbranceTier,
@@ -768,8 +769,9 @@ export class Game {
         const eff = useGameStore.getState().perks.includes('gh_soft') ? r * 0.75 : r;
         husks.emitNoise(x, z, eff);
         this.animals?.emitNoise(x, z, eff);
-        // the HUD noise meter tracks the loudest sound at the player
-        useGameStore.getState().setNoiseLevel(Math.min(100, (eff / 80) * 100));
+        // the HUD noise meter tracks the loudest sound at the player,
+        // on Lane 11's canonical meter curve (gunshot class = full scale)
+        useGameStore.getState().setNoiseLevel(meterLevel(eff));
       },
       onThrow: (itemId: string) => this.throwGrenade(itemId),
       onProjectile: (
@@ -1297,6 +1299,9 @@ export class Game {
     // parked) — impact damage lands on the car that actually hit
     const v = this.driving ?? this.vehicles?.vehicles[0];
     if (!v || dv < 3.2) return;
+    // Lane 11 wiring: a real impact is LOUD — the crash class (150m)
+    // carries to every husk in earshot, not just the ones watching
+    this.noiseAt(v.group.position.x, v.group.position.z, noiseClassRadius('vehicle_crash'));
     const loss = Math.min(0.3, (dv - 2.5) * 0.02) * collisionLossFactor(v.upgrades);
     if (loss > 0.004) {
       v.condition = Math.max(0.03, v.condition - loss);
@@ -1346,10 +1351,21 @@ export class Game {
     // body handles buildings; husks are not physics bodies)
     const spd = Math.abs(v.speed);
     if (spd > 1.5) {
+      // at speed: the def's drive radius (the class table's 55m for the
+      // Stallion; the Shelby's pipe reads 58) scaled by how fast it's
+      // actually moving
       const r = v.def.noiseDrive * Math.min(1, spd / 25);
       husks.emitNoise(v.group.position.x, v.group.position.z, r);
       this.animals?.emitNoise(v.group.position.x, v.group.position.z, r);
-      s.setNoiseLevel(Math.min(100, (r / 80) * 100));
+      s.setNoiseLevel(meterLevel(r));
+    } else if (v.fuel > 0.05) {
+      // Lane 11 wiring: a running engine at a standstill is still heard —
+      // the idle class (30m). The 0.05 threshold matches the physics
+      // hasFuel gate in the step call above.
+      const r = noiseClassRadius('vehicle_idle');
+      husks.emitNoise(v.group.position.x, v.group.position.z, r);
+      this.animals?.emitNoise(v.group.position.x, v.group.position.z, r);
+      s.setNoiseLevel(meterLevel(r));
     }
     this.ramT -= dt;
     if (spd > 4 && this.ramT <= 0) {
@@ -1794,7 +1810,9 @@ export class Game {
     setTimeout(() => this.scene!.remove(flash), 250);
     husks.damageInRadius(p.x, p.z, th.aoe, th.dmg);
     this.animals?.damageInRadius(p.x, p.z, th.aoe, th.dmg);
-    this.noiseAt(p.x, p.z, 40);
+    // Lane 11 wiring: a detonation is the explosion class (200m) — the
+    // old 40m meant a grenade barely carried past the next street
+    this.noiseAt(p.x, p.z, noiseClassRadius('explosion'));
     this.requestHitstop(0.08);
     sfx.play('hit', { volume: 1 });
   }
@@ -1803,7 +1821,7 @@ export class Game {
   private noiseAt(x: number, z: number, r: number): void {
     this.husks?.emitNoise(x, z, r);
     this.animals?.emitNoise(x, z, r);
-    useGameStore.getState().setNoiseLevel(Math.min(100, (r / 80) * 100));
+    useGameStore.getState().setNoiseLevel(meterLevel(r));
   }
 
   private handleMouseDown(e: MouseEvent): void {

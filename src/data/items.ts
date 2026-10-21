@@ -220,7 +220,7 @@ export const ITEMS: Record<string, ItemDef> = {
   flare_gun: {
     id: 'flare_gun', name: 'Flare gun', category: 'weapon-ranged', weight: 0.7, slots: 2, stack: 1,
     desc: 'Burns bright. So does everything it hits.', damage: 30, range: 35, ammoId: 'flare',
-    spread: 0.03, cooldown: 1.2, noiseRadius: 45,
+    spread: 0.03, cooldown: 1.2, noiseRadius: 15,
     magSize: 1, reloadSec: 1.0, modSlots: [],
     fireMode: 'single', recoil: 0.012, recoilDrift: 0.004, bloomPerShot: 0.2, bloomMax: 0.03, adsTime: 0.22, sway: 0.5,
   },
@@ -234,7 +234,7 @@ export const ITEMS: Record<string, ItemDef> = {
   crossbow: {
     id: 'crossbow', name: 'Crossbow', category: 'weapon-ranged', weight: 2.4, slots: 3, stack: 1,
     desc: 'Whispers. Reloads like it means it.', damage: 60, range: 55, ammoId: 'bolts',
-    spread: 0.015, cooldown: 1.6, noiseRadius: 12,
+    spread: 0.015, cooldown: 1.6, noiseRadius: 8,
     magSize: 1, reloadSec: 1.6, modSlots: ['optic'],
     fireMode: 'single', projectileSpeed: 55, recoil: 0.008, recoilDrift: 0.002, bloomPerShot: 0.3, bloomMax: 0.015, adsTime: 0.3, sway: 0.8,
   },

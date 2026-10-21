@@ -56,7 +56,7 @@ export function noiseClassRadius(id: NoiseClassId): number {
 
 /**
  * The radius a shot actually emits. Per-weapon `noiseRadius` on the item
- * def overrides the class default (crossbow 12m, flare gun 45m); the
+ * def overrides the class default (crossbow 8m, flare gun 15m); the
  * suppressor's noiseMult then scales whatever the weapon starts from —
  * the class case is the spec's worked example: 80m × 0.31 ≈ 25m.
  */
