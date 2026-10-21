@@ -64,6 +64,47 @@ export function consumeLook(): [number, number] {
   return [dx, dy];
 }
 
+// ------------------------------------------------------------- driving ---
+// Driving reads the same axes as walking: moveY is throttle (forward +,
+// reverse −), moveX is steering. One write path for every producer
+// (keyboard, touch, tests) so the layouts can never drift apart.
+//
+// The handbrake shares the `ascend` field with the helicopter collective:
+// the two meanings never apply at once (you are seated at a wheel or in a
+// rotor seat, never both) and the vehicle controller picks the meaning
+// from the vehicle kind. setHandbrake is the drive-side name for it.
+
+export interface DriveInput {
+  throttle: number; // -1..1 (reverse..forward)
+  steer: number; // -1..1 (left..right)
+  handbrake: boolean;
+}
+
+function clampAxis(v: number): number {
+  return Math.min(1, Math.max(-1, v));
+}
+
+export function getDriveInput(): DriveInput {
+  return { throttle: input.moveY, steer: input.moveX, handbrake: input.ascend };
+}
+
+export function setDriveAxes(throttle: number, steer: number): void {
+  input.moveY = clampAxis(throttle);
+  input.moveX = clampAxis(steer);
+}
+
+export function setHandbrake(held: boolean): void {
+  input.ascend = held;
+}
+
+/** Zero every drive-owned field — called when the player leaves the seat
+ *  so a held brake or a rolled-on throttle can never stick. */
+export function resetDriveInputs(): void {
+  input.moveX = 0;
+  input.moveY = 0;
+  input.ascend = false;
+}
+
 export function resetEdgeTriggers(): void {
   input.jump = false;
   input.attackMelee = false;

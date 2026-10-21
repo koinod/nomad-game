@@ -5,8 +5,9 @@ import { ITEMS } from '../data/items';
 import { useGameStore } from '../store/gameStore';
 import { sfx } from '../systems/audio';
 import type { HuskManager } from './Husks';
-import { modNoiseMult, modSpreadMult } from '../data/mods';
+import { modSpreadMult } from '../data/mods';
 import { bloomSpread, moveSpread, rangeFalloff } from './gunMath';
+import { gunshotRadius, noiseClassRadius } from './noise';
 import {
   applyWear, armorMult, conditionDamageMult, rollJam, WEAR_PER_SHOT, WEAR_PER_SWING,
 } from './gunMath';
@@ -139,7 +140,7 @@ export function tryMelee(h: CombatHooks): MeleeResult {
     return empty;
   }
   sfx.play('swing', { volume: 0.8 });
-  h.emitNoise(h.playerPos.x, h.playerPos.z, 8);
+  h.emitNoise(h.playerPos.x, h.playerPos.z, noiseClassRadius('melee_swing'));
 
   const targets = h.husks.meleeSweep(
     h.playerPos,
@@ -257,7 +258,7 @@ export function tryRanged(h: CombatHooks): RangedResult {
 
   sfx.play('shot', { volume: 1 });
   h.flashMuzzle();
-  h.emitNoise(h.playerPos.x, h.playerPos.z, (def.noiseRadius ?? 80) * modNoiseMult(mods)); // suppressor: the loud problem, solved
+  h.emitNoise(h.playerPos.x, h.playerPos.z, gunshotRadius(def.noiseRadius, mods)); // suppressor: the loud problem, solved
 
   const range = def.range ?? 45;
   const pellets = def.pellets ?? 1;

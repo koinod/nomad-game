@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useGameStore } from '../store/gameStore';
 import { input } from '../game/input';
 import { ITEMS } from '../data/items';
+import { magSizeOf } from '../data/mods';
 import { QUESTS } from '../data/quests';
 import { sfx } from '../systems/audio';
 
@@ -79,7 +80,7 @@ function VehiclePanel() {
       </div>
       <Bar value={vehicle.condPct} max={1} fill={vehicle.condPct < 0.3 ? 'bg-[#d9534f]' : 'bg-[#5aa469]'} bg="bg-[#232b36]" />
       <div className="mt-2 text-[11px] text-[#8a94a3]">
-        {'W/S drive · A/D steer · F exit'}
+        {isTouch ? 'Stick drive · BRK handbrake · USE exit' : 'W/S drive · A/D steer · F exit'}
       </div>
     </div>
   );
@@ -118,14 +119,18 @@ function AmmoCounter() {
   const inst = rangedUid ? inventory.find((i) => i.uid === rangedUid) : undefined;
   const def = inst ? ITEMS[inst.itemId] : undefined;
   if (!inst || !def || def.magSize == null || !def.ammoId) return null;
-  const cap = Math.round(def.magSize * (inst.mods?.includes('extended_mag') ? 1.5 : 1));
+  // capacity comes from the same helper Player/store reload by — the
+  // counter can never disagree with the gun about what "full" means
+  const cap = magSizeOf(def.magSize, inst.mods ?? []);
   const loaded = inst.loaded ?? cap;
   const reserve = inventory
     .filter((i) => i.itemId === def.ammoId)
     .reduce((a, i) => a + i.qty, 0);
   const cond = Math.round(inst.condition ?? 100);
   return (
-    <div className="absolute bottom-24 right-4 rounded border border-[#232b36] bg-[#0b0e12]/80 px-3 py-1.5 text-right">
+    // touch: the bottom-right is the combat cluster's ground — the counter
+    // rides under the quest tracker instead of behind the FIRE buttons
+    <div className={`absolute right-4 rounded border border-[#232b36] bg-[#0b0e12]/80 px-3 py-1.5 text-right ${isTouch ? 'top-44' : 'bottom-24'}`}>
       <div className={`font-mono text-lg leading-none ${loaded === 0 ? 'text-[#d9534f]' : 'text-[#d7dde5]'}`}>
         {loaded}<span className="text-xs text-[#8a94a3]"> / {cap}</span>
       </div>
@@ -373,11 +378,16 @@ export default function HUD() {
         </div>
         <Bar value={stamina} max={maxStamina} fill="bg-[#e8b34b]" bg="bg-[#232b36]" />
         {!isTouch && <NoiseMeter />}
+        {/* INTEGRATION (Lane 8): mount <LightIndicator /> here — the
+            component is Lane 8's (exported from ui/SkillsPanel.tsx),
+            fed by game/visibility's lightIndicator(exposure) over the
+            visibility value Lane 5 exposes. See Lane 11's report. */}
       </div>
 
-      {/* noise pill, touch only — top-center, clear of the combat cluster */}
+      {/* noise pill, touch only — top-center, clear of the combat cluster.
+          Lane 8's LightIndicator pill joins this row at integration. */}
       {isTouch && (
-        <div className="absolute left-1/2 top-4 -translate-x-1/2">
+        <div className="absolute left-1/2 top-4 flex -translate-x-1/2 gap-2">
           <NoiseMeter pill />
         </div>
       )}

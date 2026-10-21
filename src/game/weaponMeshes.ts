@@ -159,28 +159,21 @@ export function buildGroundMesh(itemId: string, qty = 1): THREE.Group {
       spout.position.set(0.06, 0.19, 0);
       break;
     }
-    // new weapons lying flat: hand-space +Z is already horizontal — drop it in
+    // new weapons lying flat: hand-space +Z is already horizontal — drop it in.
+    // NOTE: throwables (frag/molotov/flashbang/smoke/rock/boombox) are NOT in
+    // this list on purpose — they carry dedicated ground art below, and
+    // listing them here shadowed those cases into dead code.
     case 'baseball_bat':
     case 'combat_knife':
     case 'sledgehammer':
     case 'shotgun':
     case 'hunting_rifle':
-    case 'frag':
-    case 'molotov':
-    case 'flashbang':
-    case 'crowbar':
-    case 'fire_axe':
-    case 'spear':
-    case 'riot_baton':
     case 'flare_gun':
     case 'revolver':
     case 'crossbow':
     case 'smg':
     case 'carbine':
-    case 'dmr':
-    case 'smoke':
-    case 'rock':
-    case 'boombox': {
+    case 'dmr': {
       const m = buildHandMesh(itemId);
       m.position.y = 0.06;
       g.add(m);
@@ -253,6 +246,8 @@ export function buildGroundMesh(itemId: string, qty = 1): THREE.Group {
     case 'flashbang': {
       const body = add(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.18, 10), MAT.steel()));
       body.rotation.x = Math.PI / 2; body.position.z = 0.12;
+      const cap = add(new THREE.Mesh(new THREE.CylinderGeometry(0.053, 0.053, 0.03, 10), MAT.darkSteel()));
+      cap.rotation.x = Math.PI / 2; cap.position.z = 0.03;
       break;
     }
     case 'crowbar': {
@@ -366,8 +361,125 @@ export function buildGroundMesh(itemId: string, qty = 1): THREE.Group {
   return g;
 }
 
-/** Hand-held mesh — origin at the grip, points forward (+Z in hand space). */
-export function buildHandMesh(itemId: string, finish?: string): THREE.Group {
+// ------------------------------------------------------------ mod deltas ---
+// SYSTEMS_SPEC §3.2: attached mods must READ on the hand mesh — a
+// suppressor adds a tube, a reflex sight adds a hump, an extended mag
+// lengthens the mag. Anchors are per weapon, in hand space (+Z forward),
+// and exist only where the weapon's modSlots offer the slot — a mesh can
+// never grow a part its data says it cannot mount. Foregrip and laser
+// (the underbarrel pair) get the same treatment: a wedge / a lamp box
+// under the barrel.
+
+interface ModAnchors {
+  muzzle?: { y: number; z: number; r: number; len: number }; // suppressor tube
+  optic?: { y: number; z: number }; // reflex hump base (top of receiver)
+  magExt?: { x: number; y: number; z: number; w: number; h: number; d: number; tilt: number; tube?: boolean };
+  under?: { y: number; z: number }; // foregrip wedge / laser box
+}
+
+const MOD_ANCHORS: Record<string, ModAnchors> = {
+  pistol: {
+    muzzle: { y: 0.06, z: 0.33, r: 0.027, len: 0.15 },
+    optic: { y: 0.095, z: 0.1 },
+    // the base pistol models no mag — the extension IS the visible mag
+    magExt: { x: 0, y: -0.17, z: -0.005, w: 0.045, h: 0.15, d: 0.07, tilt: 0.25 },
+    under: { y: 0.0, z: 0.18 },
+  },
+  shotgun: {
+    // tube magazine: the extension stretches the tube, not a box
+    magExt: { x: 0, y: 0.0, z: 0.58, w: 0.04, h: 0.16, d: 0.04, tilt: 0, tube: true },
+    under: { y: -0.05, z: 0.18 },
+  },
+  hunting_rifle: {
+    muzzle: { y: 0.06, z: 0.79, r: 0.028, len: 0.17 },
+    // optic slot exists but the base mesh already models a scope — the
+    // scope IS the optic read; no second hump stacked on top of it
+    magExt: { x: 0, y: -0.075, z: 0.02, w: 0.04, h: 0.11, d: 0.08, tilt: 0 },
+    under: { y: -0.005, z: 0.4 },
+  },
+  revolver: {
+    under: { y: -0.005, z: 0.16 },
+  },
+  crossbow: {
+    optic: { y: 0.078, z: 0.14 },
+  },
+  smg: {
+    muzzle: { y: 0.05, z: 0.4, r: 0.026, len: 0.14 },
+    optic: { y: 0.078, z: 0.06 },
+    magExt: { x: 0, y: -0.235, z: 0.09, w: 0.04, h: 0.09, d: 0.06, tilt: 0.12 },
+    under: { y: -0.005, z: 0.24 },
+  },
+  carbine: {
+    muzzle: { y: 0.05, z: 0.6, r: 0.026, len: 0.16 },
+    optic: { y: 0.078, z: 0.12 },
+    magExt: { x: 0, y: -0.225, z: 0.115, w: 0.04, h: 0.09, d: 0.07, tilt: 0.18 },
+    under: { y: -0.02, z: 0.3 },
+  },
+  dmr: {
+    // the can sleeves over the muzzle brake zone
+    muzzle: { y: 0.06, z: 0.84, r: 0.03, len: 0.18 },
+    // optic: modeled scope, same call as the hunting rifle
+    magExt: { x: 0, y: -0.21, z: 0.125, w: 0.042, h: 0.08, d: 0.08, tilt: 0.1 },
+    under: { y: -0.005, z: 0.42 },
+  },
+};
+
+function applyModMeshes(
+  add: (m: THREE.Mesh) => THREE.Mesh,
+  itemId: string,
+  mods: readonly string[],
+): void {
+  const a = MOD_ANCHORS[itemId];
+  if (!a || mods.length === 0) return;
+  for (const modId of mods) {
+    if (modId === 'suppressor' && a.muzzle) {
+      const tube = add(new THREE.Mesh(
+        new THREE.CylinderGeometry(a.muzzle.r, a.muzzle.r, a.muzzle.len, 12), MAT.darkSteel()));
+      tube.rotation.x = Math.PI / 2;
+      tube.position.set(0, a.muzzle.y, a.muzzle.z + a.muzzle.len / 2 - 0.02);
+      const collar = add(new THREE.Mesh(
+        new THREE.CylinderGeometry(a.muzzle.r * 1.18, a.muzzle.r * 1.18, 0.035, 12), MAT.black()));
+      collar.rotation.x = Math.PI / 2;
+      collar.position.set(0, a.muzzle.y, a.muzzle.z + 0.005);
+    } else if (modId === 'reflex_sight' && a.optic) {
+      const base = add(new THREE.Mesh(new THREE.BoxGeometry(0.034, 0.016, 0.046), MAT.black()));
+      base.position.set(0, a.optic.y + 0.008, a.optic.z);
+      const hood = add(new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.034, 0.03), MAT.black()));
+      hood.position.set(0, a.optic.y + 0.032, a.optic.z);
+      const lens = add(new THREE.Mesh(
+        new THREE.CylinderGeometry(0.01, 0.01, 0.004, 10),
+        new THREE.MeshStandardMaterial({ color: 0x1a0505, emissive: 0xff2a1a, emissiveIntensity: 0.9, roughness: 0.3 }),
+      ));
+      lens.rotation.x = Math.PI / 2;
+      lens.position.set(0, a.optic.y + 0.034, a.optic.z + 0.016);
+    } else if (modId === 'extended_mag' && a.magExt) {
+      const m = a.magExt;
+      const ext = m.tube
+        ? add(new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, m.h, 8), MAT.steel()))
+        : add(new THREE.Mesh(new THREE.BoxGeometry(m.w, m.h, m.d), MAT.black()));
+      if (m.tube) ext.rotation.x = Math.PI / 2;
+      else ext.rotation.x = m.tilt;
+      ext.position.set(m.x, m.y, m.z);
+    } else if (modId === 'foregrip' && a.under) {
+      const wedge = add(new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.095, 0.045), MAT.black()));
+      wedge.position.set(0, a.under.y - 0.045, a.under.z);
+      wedge.rotation.x = -0.35;
+    } else if (modId === 'laser_sight' && a.under) {
+      const lamp = add(new THREE.Mesh(new THREE.BoxGeometry(0.026, 0.032, 0.075), MAT.black()));
+      lamp.position.set(0, a.under.y - 0.012, a.under.z + 0.02);
+      const tip = add(new THREE.Mesh(
+        new THREE.BoxGeometry(0.012, 0.012, 0.006),
+        new THREE.MeshStandardMaterial({ color: 0x1a0505, emissive: 0xff2015, emissiveIntensity: 1.2, roughness: 0.3 }),
+      ));
+      tip.position.set(0, a.under.y - 0.012, a.under.z + 0.06);
+    }
+  }
+}
+
+/** Hand-held mesh — origin at the grip, points forward (+Z in hand space).
+ *  `mods` (the instance's attached mod ids) grow their physical parts;
+ *  `finish` refinishes the whole build, attachments included. */
+export function buildHandMesh(itemId: string, finish?: string, mods: readonly string[] = []): THREE.Group {
   const g = new THREE.Group();
   const add = (m: THREE.Mesh) => { m.castShadow = true; g.add(m); return m; };
 
@@ -555,6 +667,82 @@ export function buildHandMesh(itemId: string, finish?: string): THREE.Group {
       stirrup.position.set(0, 0.0, 0.5); stirrup.rotation.x = Math.PI / 2;
       break;
     }
+    // ---- wave-4 melee the hand switch never got (their ground art was
+    // shadowed by the reuse list too — both paths showed the generic box)
+    case 'crowbar': {
+      const bar = add(new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.045, 0.55), MAT.steel()));
+      bar.position.z = 0.22;
+      const claw = add(new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.13, 0.055), MAT.steel()));
+      claw.position.set(0, 0.045, 0.5);
+      break;
+    }
+    case 'fire_axe': {
+      const handle = add(new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.032, 0.78, 8), MAT.wood()));
+      handle.rotation.x = Math.PI / 2; handle.position.z = 0.3;
+      const head = add(new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.15, 0.28), new THREE.MeshStandardMaterial({ color: 0xb03a2e, roughness: 0.6, metalness: 0.3 })));
+      head.position.set(0, 0.01, 0.62);
+      break;
+    }
+    case 'spear': {
+      const shaft = add(new THREE.Mesh(new THREE.CylinderGeometry(0.023, 0.023, 1.5, 8), MAT.wood()));
+      shaft.rotation.x = Math.PI / 2; shaft.position.z = 0.55;
+      const tip = add(new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.26, 8), MAT.steel()));
+      tip.rotation.x = Math.PI / 2; tip.position.z = 1.42;
+      break;
+    }
+    case 'riot_baton': {
+      const body = add(new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.52, 10), MAT.black()));
+      body.rotation.x = Math.PI / 2; body.position.z = 0.2;
+      const grip = add(new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.15, 8), MAT.black()));
+      grip.rotation.z = Math.PI / 2; grip.position.set(0.09, -0.02, 0.0);
+      break;
+    }
+    // ---- throwables in hand: what the throw arc starts from ----
+    case 'frag': {
+      const body = add(new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 10), new THREE.MeshStandardMaterial({ color: 0x3a5230, roughness: 0.7 })));
+      body.position.z = 0.1;
+      const neck = add(new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.024, 0.04, 8), MAT.darkSteel()));
+      neck.position.set(0, 0.055, 0.1);
+      const lever = add(new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.07, 0.02), MAT.steel()));
+      lever.position.set(0.028, 0.03, 0.1); lever.rotation.z = 0.25;
+      break;
+    }
+    case 'molotov': {
+      const bottle = add(new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.045, 0.24, 10), new THREE.MeshStandardMaterial({ color: 0x8a5a22, roughness: 0.3 })));
+      bottle.rotation.x = Math.PI / 2; bottle.position.z = 0.1;
+      const rag = add(new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.05, 0.09), MAT.tan()));
+      rag.position.set(0, 0.03, 0.24); rag.rotation.x = 0.4;
+      break;
+    }
+    case 'flashbang': {
+      const body = add(new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.15, 10), MAT.steel()));
+      body.rotation.x = Math.PI / 2; body.position.z = 0.08;
+      const cap = add(new THREE.Mesh(new THREE.CylinderGeometry(0.043, 0.043, 0.03, 10), MAT.darkSteel()));
+      cap.rotation.x = Math.PI / 2; cap.position.z = 0.0;
+      break;
+    }
+    case 'smoke': {
+      const body = add(new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.042, 0.14, 10), new THREE.MeshStandardMaterial({ color: 0x6a7078, roughness: 0.6 })));
+      body.rotation.x = Math.PI / 2; body.position.z = 0.08;
+      const band = add(new THREE.Mesh(new THREE.CylinderGeometry(0.044, 0.044, 0.04, 10), new THREE.MeshStandardMaterial({ color: 0xd8d8d0, roughness: 0.5 })));
+      band.rotation.x = Math.PI / 2; band.position.z = 0.08;
+      break;
+    }
+    case 'rock': {
+      const r = add(new THREE.Mesh(new THREE.DodecahedronGeometry(0.065), new THREE.MeshStandardMaterial({ color: 0x7a7a72, roughness: 1 })));
+      r.position.z = 0.07;
+      break;
+    }
+    case 'boombox': {
+      const bodyM = add(new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.24, 0.16), MAT.black()));
+      bodyM.position.z = 0.12;
+      const spk = add(new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.025, 12), MAT.steel()));
+      spk.rotation.x = Math.PI / 2; spk.position.set(-0.1, -0.02, 0.21);
+      const spk2 = spk.clone();
+      spk2.position.x = 0.1;
+      g.add(spk2);
+      break;
+    }
     default: {
       // generic held item: small box at the fist
       const box = add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.18), MAT.tan()));
@@ -562,6 +750,9 @@ export function buildHandMesh(itemId: string, finish?: string): THREE.Group {
       break;
     }
   }
+  // attached mods grow their parts BEFORE the finish pass, so a refinished
+  // gun refinishes its can, sight and mag along with the receiver
+  applyModMeshes(add, itemId, mods);
   if (finish) applyFinish(g, finish);
   return g;
 }
