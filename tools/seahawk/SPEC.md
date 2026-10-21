@@ -75,4 +75,4 @@ boom sides, **US NAVY** on both doghouse sides, **NAVY** on fin · emissive posi
 - Cabin side windows aft are surface panes (not cut through) — cabin interior is a tub with its
   own walls, so cut-through windows there would show the tub wall; panes read correctly dark.
 - No LODs, no collision meshes, no flight model — flight integration is a later serialized step
-  (heliMath was purged). Poly count ≈ 12.6k faces / 157 mesh objects — plenty of headroom.
+  (heliMath was purged). Poly count ≈ 12.9k faces / 154 mesh objects — plenty of headroom.

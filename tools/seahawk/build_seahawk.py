@@ -54,7 +54,7 @@ EXH   = mat("exhaust",         (0.13, 0.11, 0.10), 0.55, 0.6)
 TIRE  = mat("tire",            (0.03, 0.03, 0.032), 0.95, 0.0)
 HUBM  = mat("hub_gray",        (0.22, 0.23, 0.24), 0.5, 0.4)
 BLADE = mat("rotor_charcoal",  (0.075, 0.078, 0.082), 0.55, 0.25)
-TIPM  = mat("blade_tip",       (0.55, 0.56, 0.55), 0.5, 0.2)
+TIPM  = mat("blade_tip",       (0.40, 0.41, 0.40), 0.5, 0.2)
 MARK  = mat("marking",         (0.16, 0.175, 0.185), 0.55, 0.1)    # low-viz darker gray
 ORNG  = mat("placard_orange",  (0.65, 0.22, 0.03), 0.6, 0.0)
 REDL  = mat("light_red",       (0.3, 0.02, 0.02), 0.4, 0.0, emissive=(1.0, 0.05, 0.05), ei=2.0)
@@ -105,7 +105,7 @@ def sphere(name, loc, scale, material=None, parent=None):
     if parent: ob.parent = parent
     return ob
 
-def loft(name, stations, material=None, n=24, exp=3.4, cap=True, parent=None):
+def loft(name, stations, material=None, n=32, exp=3.4, cap=True, parent=None):
     """stations: list of (x, halfW, halfH, zCenter). Superellipse rings bridged."""
     rings = []
     for (x, hw, hh, zc) in stations:
@@ -145,23 +145,23 @@ ROOTOB = empty("Seahawk", (0, 0, 0))
 # ================================================================ FUSELAGE LOFT
 # (x, halfW, halfH, zCenter) nose -> tail
 FUSE_STATIONS = [
-    ( 7.64, 0.06, 0.10, 1.80),
-    ( 7.35, 0.52, 0.72, 1.82),
-    ( 6.70, 0.92, 1.02, 1.92),
-    ( 5.50, 1.17, 1.22, 1.98),
-    ( 3.60, 1.18, 1.27, 2.00),
-    ( 1.60, 1.17, 1.27, 2.01),
-    (-0.20, 1.10, 1.22, 2.05),
-    (-1.80, 0.86, 0.92, 2.18),
-    (-4.20, 0.58, 0.66, 2.36),
-    (-6.20, 0.44, 0.54, 2.56),
-    (-7.30, 0.32, 0.48, 2.78),
-    (-7.63, 0.05, 0.08, 2.86),
+    ( 7.64, 0.06, 0.09, 1.80),
+    ( 7.35, 0.50, 0.62, 1.84),
+    ( 6.70, 0.90, 0.90, 1.94),
+    ( 5.50, 1.15, 1.06, 2.00),
+    ( 3.60, 1.17, 1.10, 2.01),
+    ( 1.60, 1.16, 1.10, 2.02),
+    (-0.20, 1.08, 1.05, 2.07),
+    (-1.80, 0.84, 0.80, 2.20),
+    (-4.20, 0.56, 0.58, 2.38),
+    (-6.20, 0.43, 0.47, 2.58),
+    (-7.30, 0.31, 0.42, 2.80),
+    (-7.63, 0.05, 0.07, 2.87),
 ]
 fuse = loft("SH_Fuselage", FUSE_STATIONS, AIR, parent=ROOTOB)
 
 # Anti-glare panel ahead of windshield (dark deck strip)
-box("SH_AntiGlare", (6.28, 0, 2.94), (0.95, 1.05, 0.05), AIRD, bevel=0.02,
+box("SH_AntiGlare", (6.28, 0, 2.86), (0.95, 1.05, 0.05), AIRD, bevel=0.02,
     rot=(0, math.radians(-14), 0), parent=ROOTOB)
 
 # ---- door aperture cutouts (boolean, exact solver) -------------------------
@@ -258,14 +258,16 @@ def rotor_blade(name, r0=0.30, r1=8.18, chord=0.81, parent=None):
     faces.append((b, b + 1, b + 2, b + 3))
     me = bpy.data.meshes.new(name); me.from_pydata(verts, [], faces); me.update()
     ob = bpy.data.objects.new(name, me); link(ob, parent)
-    return finish(ob, BLADE, smooth=False)
+    finish(ob, BLADE, smooth=False)
+    ob.data.materials.append(TIPM)  # index 1: tip band on last segment + cap
+    for idx, p in enumerate(ob.data.polygons):
+        if idx >= (len(profs) - 2) * 4:
+            p.material_index = 1
+    return ob
 
 for i in range(4):
     bl = rotor_blade("SH_Blade%d" % i, parent=mast_pivot)
     bl.rotation_euler = (0, 0, math.radians(45 + i * 90))
-    # light-gray tip band
-    tip = box("SH_BladeTip%d" % i, (7.55, 0, -0.20), (0.85, 0.62, 0.055), TIPM, parent=bl)
-    tip.rotation_euler = (0, math.radians(1.5), math.radians(-8))
 
 # ================================================================ TAIL
 # vertical fin: extruded profile (side view shape) at boom aft
@@ -328,8 +330,9 @@ for sgn, nm in ((1, "Port"), (-1, "Stbd")):
              rot=(math.radians(90), 0, 0), verts=28, parent=ROOTOB)
     cyl("SH_WheelHub" + nm, (2.42, sgn * 1.43, 0.345), 0.17, 0.25, HUBM,
         rot=(math.radians(90), 0, 0), parent=ROOTOB)
-# tail wheel + strut
-cyl("SH_TailStrut", (-6.35, 0, 0.48), 0.05, 0.75, METAL, rot=(0, math.radians(18), 0), parent=ROOTOB)
+# tail wheel + strut (boom belly is ~2.1 high back here: the strut is LONG)
+cyl("SH_TailStrut", (-6.32, 0, 1.13), 0.055, 1.95, METAL, rot=(0, math.radians(10), 0), parent=ROOTOB)
+cyl("SH_TailBrace", (-6.61, 0, 1.30), 0.03, 1.16, METAL, rot=(0, math.radians(-19), 0), parent=ROOTOB)
 cyl("SH_WheelTail", (-6.48, 0, 0.205), 0.205, 0.13, TIRE, rot=(math.radians(90), 0, 0), verts=24, parent=ROOTOB)
 cyl("SH_WheelTailHub", (-6.48, 0, 0.205), 0.09, 0.14, HUBM, rot=(math.radians(90), 0, 0), parent=ROOTOB)
 
@@ -337,10 +340,10 @@ cyl("SH_WheelTailHub", (-6.48, 0, 0.205), 0.09, 0.14, HUBM, rot=(math.radians(90
 def pane(name, center, size, rot, parent=ROOTOB):
     return box(name, center, size, GLASS, bevel=0.03, rot=rot, parent=parent)
 
-# windshield pair (raked) + center pillar
+# windshield pair (raked, ON the sloped nose face) + center pillar
 for sgn, nm in ((1, "Port"), (-1, "Stbd")):
-    pane("SH_Windshield" + nm, (6.62, sgn * 0.47, 2.52), (0.07, 0.82, 0.86),
-         (0, math.radians(-17), math.radians(sgn * -6)))
+    pane("SH_Windshield" + nm, (6.95, sgn * 0.44, 2.40), (0.06, 0.78, 0.82),
+         (0, math.radians(-26), math.radians(sgn * -5)))
     # cockpit side window (big door window)
     pane("SH_CockpitWindow" + nm, (5.55, sgn * 1.175, 2.42), (1.15, 0.05, 0.78),
          (math.radians(sgn * 2), math.radians(-4), 0))
@@ -350,12 +353,12 @@ for sgn, nm in ((1, "Port"), (-1, "Stbd")):
     # aft cabin window (surface quad, dark)
     pane("SH_CabinWindowAft" + nm, (0.55, sgn * 1.155, 2.28), (0.62, 0.04, 0.52), (0, 0, 0))
     pane("SH_CabinWindowMid" + nm, (1.55, sgn * 1.165, 2.30), (0.55, 0.04, 0.48), (0, 0, 0))
-box("SH_WindshieldPillar", (6.60, 0, 2.52), (0.09, 0.10, 0.88), AIRD,
-    rot=(0, math.radians(-17), 0), parent=ROOTOB)
+box("SH_WindshieldPillar", (6.93, 0, 2.40), (0.08, 0.09, 0.84), AIRD,
+    rot=(0, math.radians(-26), 0), parent=ROOTOB)
 # windshield wipers
 for sgn in (1, -1):
-    box("SH_Wiper%d" % sgn, (6.70, sgn * 0.47, 2.30), (0.03, 0.05, 0.55), DARK,
-        rot=(0, math.radians(-17), 0), parent=ROOTOB)
+    box("SH_Wiper%d" % sgn, (7.02, sgn * 0.44, 2.20), (0.03, 0.05, 0.52), DARK,
+        rot=(0, math.radians(-26), 0), parent=ROOTOB)
 
 # ================================================================ SLIDING DOORS
 def build_door(sgn, nm):
@@ -466,32 +469,37 @@ for sgn, nm in ((1, "Port"), (-1, "Stbd")):
     # orange rescue placards by doors (per ref accents)
     box("SH_Placard" + nm, (4.15, sgn * 1.175, 1.55), (0.20, 0.02, 0.10), ORNG, parent=ROOTOB)
 # position lights: port red / stbd green on sponson tips, white tail
-sphere("SH_PosLightPort", (3.45, 1.52, 1.0), (0.05, 0.05, 0.05), REDL, parent=ROOTOB)
-sphere("SH_PosLightStbd", (3.45, -1.52, 1.0), (0.05, 0.05, 0.05), GRNL, parent=ROOTOB)
+sphere("SH_PosLightPort", (3.32, 1.47, 1.0), (0.05, 0.05, 0.05), REDL, parent=ROOTOB)
+sphere("SH_PosLightStbd", (3.32, -1.47, 1.0), (0.05, 0.05, 0.05), GRNL, parent=ROOTOB)
 sphere("SH_PosLightTail", (-7.72, 0, 2.86), (0.045, 0.045, 0.045), WHITEL, parent=ROOTOB)
 # tail bumper / skid under aft boom
 box("SH_TailSkid", (-6.9, 0, 1.95), (0.5, 0.08, 0.22), AIRD, rot=(0, math.radians(20), 0), parent=ROOTOB)
 
 # ================================================================ MARKINGS
-def marking(text, loc, size, rot, nm):
-    bpy.ops.object.text_add(location=loc, rotation=rot)
+def marking(text, loc, size, sgn, nm):
+    """Decal text on a fuselage side. Basis built explicitly (right/up/normal)
+    so the lettering reads correctly on BOTH sides — euler combos mirrored it."""
+    from mathutils import Matrix, Vector as MV
+    bpy.ops.object.text_add(location=(0, 0, 0))
     t = bpy.context.object; t.name = nm; t.data.body = text
     t.data.size = size; t.data.extrude = 0.006; t.data.align_x = 'CENTER'; t.data.align_y = 'CENTER'
     bpy.ops.object.convert(target='MESH')
-    t = bpy.context.object; t.data.materials.append(MARK); t.parent = ROOTOB
+    t = bpy.context.object
+    n = MV((0, sgn, 0)); u = MV((0, 0, 1)); r = u.cross(n)
+    m = Matrix.Identity(4)
+    m.col[0][:3] = r; m.col[1][:3] = u; m.col[2][:3] = n
+    m.translation = loc
+    t.matrix_world = m
+    t.data.materials.append(MARK); t.parent = ROOTOB
     return t
 # "615" both sides of tail boom + "HSC-5" beneath (per Ian's image)
 for sgn in (1, -1):
-    marking("615", (-4.55, sgn * 0.575, 2.52), 0.78,
-            (math.radians(90), 0, math.radians(0 if sgn > 0 else 180)), "SH_Mark615_%d" % sgn)
-    marking("HSC-5", (-4.55, sgn * 0.565, 2.06), 0.30,
-            (math.radians(90), 0, math.radians(0 if sgn > 0 else 180)), "SH_MarkHSC_%d" % sgn)
+    marking("615", (-4.55, sgn * 0.545, 2.52), 0.78, sgn, "SH_Mark615_%d" % sgn)
+    marking("HSC-5", (-4.55, sgn * 0.51, 2.06), 0.30, sgn, "SH_MarkHSC_%d" % sgn)
     # "US NAVY" on doghouse sides
-    marking("US NAVY", (1.15, sgn * 0.815, 3.14), 0.30,
-            (math.radians(90), 0, math.radians(0 if sgn > 0 else 180)), "SH_MarkUSN_%d" % sgn)
+    marking("US NAVY", (1.15, sgn * 0.80, 3.14), 0.30, sgn, "SH_MarkUSN_%d" % sgn)
     # "NAVY" small on fin
-    marking("NAVY", (-7.05, sgn * 0.115, 3.85), 0.24,
-            (math.radians(90), 0, math.radians(0 if sgn > 0 else 180)), "SH_MarkFin_%d" % sgn)
+    marking("NAVY", (-7.05, sgn * 0.108, 3.85), 0.24, sgn, "SH_MarkFin_%d" % sgn)
 
 # ================================================================ EXPORT
 os.makedirs(os.path.dirname(GLB_OUT), exist_ok=True)

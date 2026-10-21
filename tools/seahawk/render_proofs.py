@@ -18,14 +18,16 @@ bpy.ops.wm.open_mainfile(filepath=os.path.join(ROOT, "seahawk.blend"))
 
 scene = bpy.context.scene
 scene.render.engine = 'CYCLES'
-scene.cycles.samples = 36
+scene.cycles.samples = 20
 scene.cycles.use_denoising = True
+scene.cycles.use_adaptive_sampling = True
+scene.cycles.adaptive_threshold = 0.03
 scene.cycles.threads = 6
 scene.render.resolution_x = 1152
 scene.render.resolution_y = 720
 scene.view_settings.view_transform = 'AgX'
 scene.view_settings.look = 'AgX - Medium High Contrast'
-scene.view_settings.exposure = 0.15
+scene.view_settings.exposure = -0.3
 
 # world: slate studio backdrop like the reference sheet
 w = bpy.data.worlds.get('World') or bpy.data.worlds.new('World')
