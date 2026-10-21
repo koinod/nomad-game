@@ -245,33 +245,59 @@ const BETA_PADS: PadSpec[] = [
   ...BETA_EXTRA_PADS.map((p) => ({ cx: p.x, cz: p.z, hw: p.half[0], hd: p.half[1], y: p.y })),
 ];
 
+/** Quintic smootherstep — zero slope at both ends, the eased profile
+ *  the pad feather follows (Phase 1.5 shape pass). */
+function smootherstep(a: number, b: number, v: number): number {
+  const t = clamp((v - a) / (b - a), 0, 1);
+  return t * t * t * (t * (t * 6 - 15) + 10);
+}
+
+/** The pad apron's width (m) outside the surveyed rect. Phase 1's
+ *  24 m feather dropped a surveyed flat to the rolling landform fast
+ *  enough to read from the air as a rectangular platform — a terrace
+ *  with a rectilinear crest line (Ty's shape gate, 2026-10-21). 72 m
+ *  under a smootherstep profile spreads the same drop to ~2.4×
+ *  gentler: the pad reads as a graded rise in the landform, not a
+ *  stamped plate. Interiors are untouched by the change (weight 1). */
+const BETA_PAD_FEATHER_M = 72;
+
 /** Stamp the surveyed pads into a grid array by COMPOSITION: each node
  *  takes the strongest pad influence acting on it (weight 1 inside a
- *  rect, feathering to 0 over the 24 m ring outside it; ties go to the
- *  smaller, more specific pad). A node's own pad interior therefore
- *  reads exactly its surveyed height no matter whose feather ring
- *  reaches it — sequential stamping cannot promise that.
+ *  rect, easing to 0 over the BETA_PAD_FEATHER_M apron outside it;
+ *  ties go to the smaller, more specific pad). A node's own pad
+ *  interior therefore reads exactly its surveyed height no matter
+ *  whose feather ring reaches it — sequential stamping cannot
+ *  promise that.
  *  With `roadAwareRing`, ring nodes (weight < 1) inside a road corridor
  *  are left to the road stamp: a road descending from a pad keeps its
  *  own graded surface through the pad's feather instead of being
- *  dragged sideways toward the pad height. Interiors always stamp. */
+ *  dragged sideways toward the pad height. Interiors always stamp.
+ *  RING nodes are also WATER-GUARDED: the apron's pull fades out over
+ *  open water (field below ≈ −0.3 m) and is zero over deep water
+ *  (≈ −1.5 m and below), so a coastal pad's apron can neither shelf
+ *  the sea into a rectangular underwater echo nor fill the dredged
+ *  channel where the cut passes a pad (the Pier HQ apron reaches
+ *  across the harbor mouth — unguarded, it lifted the channel edge
+ *  by metres in Phase 1 probing). Interiors stamp regardless: a
+ *  surveyed rect claims its ground. */
 function stampBetaPads(g: Float32Array, roadAwareRing = false): void {
   const wBest = new Float32Array(g.length);
   const yBest = new Float32Array(g.length);
   const aBest = new Float32Array(g.length).fill(Infinity);
+  const reach = BETA_PAD_FEATHER_M + 4;
   for (const p of BETA_PADS) {
     const area = p.hw * p.hd;
-    const i0 = Math.max(0, Math.floor(((p.cx - p.hw - 30 - BETA_WORLD.xMin) / BETA_CELL_M)));
-    const i1 = Math.min(BETA_COLS, Math.ceil(((p.cx + p.hw + 30 - BETA_WORLD.xMin) / BETA_CELL_M)));
-    const j0 = Math.max(0, Math.floor(((p.cz - p.hd - 30 - BETA_WORLD.zMin) / BETA_CELL_M)));
-    const j1 = Math.min(BETA_ROWS, Math.ceil(((p.cz + p.hd + 30 - BETA_WORLD.zMin) / BETA_CELL_M)));
+    const i0 = Math.max(0, Math.floor(((p.cx - p.hw - reach - BETA_WORLD.xMin) / BETA_CELL_M)));
+    const i1 = Math.min(BETA_COLS, Math.ceil(((p.cx + p.hw + reach - BETA_WORLD.xMin) / BETA_CELL_M)));
+    const j0 = Math.max(0, Math.floor(((p.cz - p.hd - reach - BETA_WORLD.zMin) / BETA_CELL_M)));
+    const j1 = Math.min(BETA_ROWS, Math.ceil(((p.cz + p.hd + reach - BETA_WORLD.zMin) / BETA_CELL_M)));
     for (let j = j0; j <= j1; j++) {
       for (let i = i0; i <= i1; i++) {
         const x = betaNodeX(i);
         const z = betaNodeZ(j);
         const m = Math.max(Math.abs(x - p.cx) - p.hw, Math.abs(z - p.cz) - p.hd);
-        if (m >= 25.5) continue;
-        const w = 1 - smoothstep(1.5, 25.5, m);
+        if (m >= BETA_PAD_FEATHER_M) continue;
+        const w = 1 - smootherstep(0, BETA_PAD_FEATHER_M, m);
         const idx = j * STRIDE + i;
         if (w > wBest[idx] || (w === wBest[idx] && area < aBest[idx])) {
           wBest[idx] = w;
@@ -283,12 +309,17 @@ function stampBetaPads(g: Float32Array, roadAwareRing = false): void {
   }
   for (let idx = 0; idx < g.length; idx++) {
     if (wBest[idx] <= 0) continue;
-    if (roadAwareRing && wBest[idx] < 1) {
-      const i = idx % STRIDE;
-      const j = Math.floor(idx / STRIDE);
-      if (betaRoadDistance(betaNodeX(i), betaNodeZ(j)) < 8) continue;
+    let w = wBest[idx];
+    if (w < 1) {
+      if (roadAwareRing) {
+        const i = idx % STRIDE;
+        const j = Math.floor(idx / STRIDE);
+        if (betaRoadDistance(betaNodeX(i), betaNodeZ(j)) < 8) continue;
+      }
+      w *= smoothstep(-1.5, -0.3, g[idx]); // water guard (ring only)
+      if (w <= 0) continue;
     }
-    g[idx] = lerp(g[idx], yBest[idx], wBest[idx]);
+    g[idx] = lerp(g[idx], yBest[idx], w);
   }
 }
 
