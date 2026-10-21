@@ -1,5 +1,16 @@
 # NOMAD — Roadmap (2026-10-19, Ian's direction; story canon updated 2026-10-20)
 
+## ORDER OF OPERATIONS (2026-10-21, Ian — the standing build sequence; saved on his order)
+
+1. **The Stallion + the new map.** The Dark Horse built under the vehicle protocol; Beta Island built from the master spec + aerial — **high-poly design throughout: no more squares-and-rectangles primitive construction, anywhere in the world.**
+2. **Vehicle physics + interaction with the world.** The current collision logic is DELETED completely (Ian: it's not working properly) — no collision response, no tire/condition consequences to worry about in this pass. Then vehicles, physics, upgrades, in that lane.
+3. **Sat phone + inventory + the rest of UI management.**
+4. **Complete item build-out + rendering, and crafting tables.**
+5. **Skills** — finishing and building out all features, in the sat phone.
+6. **The rest of UI + rendering afterwards:** survivors, then survivor AI exhaustively (teaming up, survival behavior), zombie sprites, movement animations.
+
+Phases already in flight out of order (inventory v2, figures) finish their current scope; nothing new starts out of sequence.
+
 ## CANON: the journey (2026-10-20, Ian)
 
 **Easy mode = the road out:** Island (current) → Outer Banks → Norfolk / Virginia
