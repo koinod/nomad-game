@@ -173,6 +173,7 @@ export class Game {
       ...this.world.poiBuildings.colliders,
       ...this.world.lighthouseKit.colliders,
       ...this.world.stationColliders,
+      ...this.world.dressingColliders,
     ];
     this.houseFloors = [
       ...this.world.houses.floors,

@@ -7,7 +7,7 @@ import { makeFbm, makeNoise2D, mulberry32, clamp, lerp, smoothstep } from './rng
 import { buildHouses, houseFootprints, type HouseResult } from './HousesV4';
 import { buildPoiBuildings, poiFootprints, type PoiBuildResult } from './PoiBuildingsV4';
 import { buildLighthouse } from './Lighthouse';
-import { decalPlane } from './modelKit';
+import { box as kitBox, decalPlane, hullLoft, mat as kitMat, tubMat } from './modelKit';
 import type { KitBuilding, KitResult } from './kit';
 import { airbaseFootprints, buildAirbase, buildCarrier, CARRIER_DECK_Y } from './Airbase';
 import type { BiomeId } from './Game';
@@ -213,6 +213,9 @@ export class World {
   // physical crafting stations: { station, x, z } + their colliders
   stations: { station: StationId; x: number; z: number }[] = [];
   stationColliders: Collider[] = [];
+  /** Footprint colliders for dressing props that occupy real space
+   *  (the spine-road wrecks) — merged by Game like the station set. */
+  dressingColliders: Collider[] = [];
 
   private sun!: THREE.DirectionalLight;
   private hemi!: THREE.HemisphereLight;
@@ -810,8 +813,9 @@ export class World {
 
   /**
    * Map-phase dressing: region signage at the POI approaches (the island
-   * should tell you where you are) and burnt-out wreck shells along the
-   * spine road. Pure scenery — no colliders, no loot.
+   * should tell you where you are) and burnt wrecks along the spine road.
+   * Signs are pure scenery; the wrecks are lofted modern statics with
+   * honest footprint colliders (dressingColliders) and no loot.
    */
   private buildDressing(): void {
     const postMat = new THREE.MeshStandardMaterial({ color: 0x4a3826, roughness: 1 });
@@ -846,27 +850,116 @@ export class World {
     sign('lighthouse_base', -16, 9, 'LIGHTHOUSE POINT', 0.55);
     sign('airbase', -42, 58, 'AIRBASE — RESTRICTED', 0.9);
 
-    // wreck shells: burnt hull + cab + wheels, one tipped on its side
-    const shellMat = new THREE.MeshStandardMaterial({ color: 0x35322e, roughness: 1 });
-    const rustMat = new THREE.MeshStandardMaterial({ color: 0x5a3a28, roughness: 1 });
-    const tireMat = new THREE.MeshStandardMaterial({ color: 0x1c1c1e, roughness: 1 });
-    const wreck = (x: number, z: number, ry: number, tipped: boolean): void => {
+    // Burnt wrecks (realism pass): static hulks built from the fleet's
+    // own lofting language — hullLoft shells at true car/pickup
+    // proportions, so they read as burnt 2016–2026 vehicles, not boxes.
+    // Charred paint ghosts, burnt-out glasshouses (dark cavities, no
+    // intact glass), hoods up, a door swung open, wheels sagging /
+    // deflated / missing. Same three spots as the old shells.
+    const tireMat = kitMat(0x17171a, 1, 0);
+    const wreck = (
+      x: number, z: number, ry: number, tipped: boolean,
+      kind: 'sedan' | 'hatch' | 'pickup', tone: number, burn: number,
+    ): void => {
       const y = this.groundY(x, z);
       const g = new THREE.Group();
-      const hull = new THREE.Mesh(new THREE.BoxGeometry(4.3, 0.62, 1.78), shellMat);
-      hull.position.y = 0.55;
-      hull.castShadow = true;
-      g.add(hull);
-      const cab = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.58, 1.62), rustMat);
-      cab.position.set(-0.2, 1.12, 0);
-      cab.castShadow = true;
-      g.add(cab);
-      for (const [wx, wz] of [[-1.45, 0.92], [1.45, 0.92], [-1.45, -0.92], [1.45, -0.92]] as [number, number][]) {
-        const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.22, 10), tireMat);
-        wheel.rotation.x = Math.PI / 2;
-        wheel.position.set(wx, 0.34, wz);
-        g.add(wheel);
+      const paint = kitMat(tone, 0.95, 0.05); // factory color, soot-dulled
+      const soot = kitMat(0x201d1b, 1, 0);
+      const rust = kitMat(0x5a3a28, 1, 0);
+      const cavity = tubMat(); // burnt-out interior / glasshouse void
+      const L = kind === 'pickup' ? 5.3 : 4.7;
+      const W = 1.85;
+      const body = (sections: { z: number; halfW: number; yTop: number; yBot: number }[], m: THREE.Material) =>
+        g.add(hullLoft(sections, m, { capStart: true, capEnd: true }));
+      if (kind === 'pickup') {
+        // hood + cab clip, then an open bed (floor + side walls + gate)
+        body([
+          { z: 2.65, halfW: 0.74, yTop: 0.72, yBot: 0.32 },
+          { z: 2.4, halfW: 0.88, yTop: 0.86, yBot: 0.2 },
+          { z: 1.7, halfW: 0.93, yTop: 0.95, yBot: 0.16 },
+          { z: 0.6, halfW: 0.93, yTop: 0.98, yBot: 0.15 },
+        ], paint);
+        kitBox(g, W - 0.1, 0.1, 2.6, soot, 0, 0.52, -1.35); // bed floor, ash-covered
+        for (const sgn of [1, -1]) kitBox(g, 0.08, 0.55, 2.6, paint, sgn * (W / 2 - 0.04), 0.82, -1.35);
+        kitBox(g, W - 0.1, 0.55, 0.08, rust, 0, 0.82, -2.62); // tailgate, rusted shut
+        // cab glasshouse: burnt-out cavity + caved roof skin
+        body([
+          { z: 0.55, halfW: 0.8, yTop: 1.3, yBot: 0.85 },
+          { z: 0.0, halfW: 0.84, yTop: 1.62, yBot: 0.85 },
+          { z: -0.55, halfW: 0.8, yTop: 1.58, yBot: 0.85 },
+        ], cavity);
+        const roofSkin = kitBox(g, 1.5, 0.05, 1.15, soot, 0, 1.64, -0.05);
+        roofSkin.rotation.z = 0.05;
+      } else {
+        // sedan / hatchback shell: one lofted body, glasshouse cavity
+        const rearZ = kind === 'hatch' ? -1.7 : -1.15;
+        body([
+          { z: 2.35, halfW: 0.72, yTop: 0.68, yBot: 0.3 },
+          { z: 2.05, halfW: 0.86, yTop: 0.79, yBot: 0.2 },
+          { z: 1.45, halfW: 0.92, yTop: 0.88, yBot: 0.16 },
+          { z: 0.9, halfW: 0.93, yTop: 0.93, yBot: 0.15 },
+          { z: -0.9, halfW: 0.93, yTop: 0.94, yBot: 0.15 },
+          { z: -1.9, halfW: 0.9, yTop: 0.89, yBot: 0.2 },
+          { z: -2.35, halfW: 0.8, yTop: 0.8, yBot: 0.3 },
+        ], paint);
+        body([
+          { z: 0.95, halfW: 0.62, yTop: 1.18, yBot: 0.82 },
+          { z: 0.45, halfW: 0.76, yTop: 1.5, yBot: 0.8 },
+          { z: -0.2, halfW: 0.79, yTop: 1.58, yBot: 0.8 },
+          { z: rearZ, halfW: 0.72, yTop: 1.34, yBot: 0.82 },
+        ], cavity);
+        const roofSkin = kitBox(g, 1.45, 0.05, 1.5, soot, 0, 1.6, 0.1);
+        roofSkin.rotation.x = -0.03;
+        roofSkin.rotation.z = 0.04;
       }
+      // hood up on its stay, engine bay a blackened cavity with a block
+      const hood = kitBox(g, 1.45, 0.05, 1.05, paint, 0, 1.12, 1.95);
+      hood.rotation.x = -0.85;
+      kitBox(g, 1.5, 0.3, 1.0, cavity, 0, 0.62, 1.75);
+      kitBox(g, 0.8, 0.28, 0.6, soot, 0, 0.82, 1.7);
+      // one door swung open (paint ghost, charred edge), hinges forward
+      if (!tipped) {
+        const door = kitBox(g, 0.05, 0.66, 1.05, paint, W / 2 + 0.38, 0.62, 0.62);
+        door.rotation.y = -0.85;
+        kitBox(g, 0.03, 0.3, 0.9, cavity, W / 2 + 0.4, 0.78, 0.62).rotation.y = -0.85;
+      }
+      // scorch + rust patches down the flanks (burn severity varies)
+      for (const sgn of [1, -1]) {
+        kitBox(g, 0.03, 0.5, 1.6 * burn, soot, sgn * (W / 2 + 0.01), 0.55, 0.9);
+        kitBox(g, 0.03, 0.34, 0.9, rust, sgn * (W / 2 + 0.01), 0.42, -1.2);
+      }
+      // wheels at the true wheelbase: one deflated, one missing entirely
+      const wz = L * 0.32;
+      const wheelAt = (sx: number, sz: number, deflated: boolean): void => {
+        const wgeo = new THREE.CylinderGeometry(0.34, 0.34, 0.24, 14);
+        const wheel = new THREE.Mesh(wgeo, tireMat);
+        wheel.rotation.z = Math.PI / 2;
+        if (deflated) { wheel.scale.y = 1; wheel.scale.x = 0.7; wheel.position.set(sx * 0.88, 0.24, sz); }
+        else wheel.position.set(sx * 0.88, 0.34, sz);
+        wheel.castShadow = true;
+        g.add(wheel);
+        const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.26, 10), soot);
+        hub.rotation.z = Math.PI / 2;
+        hub.position.copy(wheel.position);
+        g.add(hub);
+      };
+      wheelAt(1, wz, false);
+      wheelAt(1, -wz, true); // rear-right flat, rim on the ground
+      wheelAt(-1, -wz, false);
+      // front-left is GONE: bare hub on the car, the tire lies beside it
+      const bareHub = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.12, 10), rust);
+      bareHub.rotation.z = Math.PI / 2;
+      bareHub.position.set(-0.86, 0.3, wz);
+      g.add(bareHub);
+      const loose = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.24, 14), tireMat);
+      loose.position.set(-W / 2 - 0.75, 0.12, wz + 0.4); // lying flat on its sidewall
+      loose.castShadow = true;
+      g.add(loose);
+      // ash drift under the engine bay
+      const ash = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.25, 0.1, 12), kitMat(0x3a3835, 1, 0));
+      ash.position.set(0, 0.05, 1.5);
+      ash.scale.z = 1.5;
+      g.add(ash);
       if (tipped) {
         g.rotation.z = Math.PI / 2.15;
         g.position.set(x, y + 0.85, z);
@@ -874,15 +967,18 @@ export class World {
         g.position.set(x, y, z);
       }
       g.rotation.y = ry;
-      g.name = 'wreck-shell';
+      g.name = `wreck-modern:${kind}`;
       this.scene.add(g);
+      // honest footprint collider (rotated-rect AABB; footprint only)
+      const c = Math.abs(Math.cos(ry));
+      const s = Math.abs(Math.sin(ry));
+      const hx = (L / 2) * c + (W / 2) * s;
+      const hz = (L / 2) * s + (W / 2) * c;
+      this.dressingColliders.push({ x0: x - hx, z0: z - hz, x1: x + hx, z1: z + hz });
     };
-    const wreckSpots: [number, number, number, boolean][] = [
-      [-300, 96, 0.4, false], // west of the wreck POI, on the shore road
-      [120, 62, -0.3, true], // tipped, east of town
-      [415, 120, 0.9, false], // the dunes approach
-    ];
-    for (const [x, z, ry, tipped] of wreckSpots) wreck(x, z, ry, tipped);
+    wreck(-300, 96, 0.4, false, 'sedan', 0x6e2a24, 1.0); // shore road, burnt red sedan
+    wreck(120, 62, -0.3, true, 'hatch', 0x4a4d4f, 0.75); // tipped hatchback, east of town
+    wreck(415, 120, 0.9, false, 'pickup', 0x2e4a4a, 0.9); // dunes approach, burnt teal pickup
   }
 
   private buildRelayRuin(): void {
