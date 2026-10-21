@@ -15,10 +15,10 @@ import {
 import { FURNITURE_LOOT, HUSK_LOOT, ITEMS, STATION_RECIPES } from '../data/items';
 
 describe('UPGRADES data', () => {
-  it('has 6 unique ids (VEHICLE RESET: mounts, tank tiers, heli line deleted)', () => {
-    expect(UPGRADES).toHaveLength(6);
+  it('has 10 unique ids (VEHICLE RESET + physics-native engine tree)', () => {
+    expect(UPGRADES).toHaveLength(10);
     const ids = UPGRADES.map((u) => u.id);
-    expect(new Set(ids).size).toBe(6);
+    expect(new Set(ids).size).toBe(10);
   });
 
   it('every cost itemId exists as a key in ITEMS', () => {

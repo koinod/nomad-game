@@ -9,6 +9,7 @@ import { traitName, moraleBand, type SurvivorJob } from '../data/survivors';
 import { FACILITIES, baseHeat, heatBand, buildMinutes } from '../data/base';
 import { poiName } from '../data/dispatch';
 import { UPGRADES, canInstallUpgrade } from '../data/upgrades';
+import { carParams, estimatePerformance, UPGRADE_MASS_KG } from '../game/carSpec';
 import { VEHICLE_DEFS } from '../game/Vehicles';
 import { carryLimitKg, encumbranceTier, totalWeightKg } from '../store/inventoryUtils';
 import { packGridDims, canPlace, layoutItems } from '../store/gridUtils';
@@ -1378,6 +1379,28 @@ function VehiclesTab() {
               Scrap patch (Scrap)
             </button>
           </div>
+          {(() => {
+            // BUILD SHEET: the sim's own math, shown. Same parameters the
+            // rigid body runs (game/carSpec) — weight, power-to-weight,
+            // and the estimated figures for THIS build state.
+            const est = estimatePerformance(carParams(sel.upgrades, sel.storageUsedKg));
+            return (
+              <div className="mb-2 rounded border border-[#232b36] bg-[#12161c] px-2.5 py-2">
+                <div className="mb-1 text-[11px] font-semibold text-[#8a94a3]">BUILD SHEET — as she sits</div>
+                <div className="flex flex-wrap gap-x-4 gap-y-0.5 font-mono text-[11px] text-[#d7dde5]">
+                  <span>{est.massKg.toFixed(0)} kg</span>
+                  <span>{Math.round(est.powerKw * 1.341)} hp</span>
+                  <span>{est.powerToWeightKwPerTonne.toFixed(0)} kW/t</span>
+                  <span>0–100 ≈ {est.zeroToHundredSec.toFixed(1)}s</span>
+                  <span>top ≈ {Math.round(est.topSpeedKmh)} km/h</span>
+                </div>
+                <div className="mt-0.5 text-[10px] text-[#5a6472]">
+                  Computed from the same torque curve, gearing, grip and mass the car actually
+                  runs on. Kilograms are the tradeoff: everything you bolt on shows up here.
+                </div>
+              </div>
+            );
+          })()}
           <h4 className="mb-1 text-[11px] font-semibold text-[#8a94a3]">
             UPGRADES {atShop ? '— workshop in reach' : '— need the marina Machine Shop or a base Garage Bay'}
           </h4>
@@ -1391,6 +1414,15 @@ function VehiclesTab() {
                   <div className="min-w-0">
                     <div className="text-xs text-[#d7dde5]">{u.name}{owned && <span className="ml-2 text-[#5aa469]">FITTED</span>}</div>
                     <div className="truncate text-[11px] text-[#8a94a3]">{u.desc}</div>
+                    {!owned && (() => {
+                      const withU = estimatePerformance(carParams([...sel.upgrades, u.id], sel.storageUsedKg));
+                      const dKg = UPGRADE_MASS_KG[u.id] ?? 0;
+                      return (
+                        <div className="font-mono text-[10px] text-[#57c7d4]">
+                          fitted: 0–100 ≈ {withU.zeroToHundredSec.toFixed(1)}s · top ≈ {Math.round(withU.topSpeedKmh)} km/h · {dKg > 0 ? `+${dKg}` : dKg} kg
+                        </div>
+                      );
+                    })()}
                     {!owned && costLine(u.cost)}
                   </div>
                   {!owned && (

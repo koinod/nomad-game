@@ -19,6 +19,14 @@ export const UPGRADES: UpgradeDef[] = [
   { id: 'cargo_racks', name: 'Cargo Racks', desc: 'Roof rack, bed rails, tie-downs. Storage capacity +60%.', cost: [{ itemId: 'scrap', qty: 4 }, { itemId: 'wood', qty: 2 }], kinds: ['car'] },
   { id: 'bullbar', name: 'Bullbar', desc: 'A welded push bar. Ramming hurts them a lot more than it hurts you.', cost: [{ itemId: 'scrap', qty: 5 }], kinds: ['car'], excludeIds: ['tank'] },
   { id: 'lift_kit', name: 'Lift Kit', desc: 'Raised suspension and clearance. Sand barely slows you; body sits higher.', cost: [{ itemId: 'scrap', qty: 4 }, { itemId: 'engine_part', qty: 1 }], kinds: ['car'], excludeIds: ['mustang', 'tank'] },
+  // Physics-native line (Piece 3): every one of these changes a real
+  // simulation parameter in game/carSpec.ts — torque curve, gearing,
+  // tire grip, or kilograms on the rigid body. The phone's build sheet
+  // shows the computed effect before you buy.
+  { id: 'supercharger', name: 'Supercharger', desc: 'A blower on the V8: +38% torque across the curve, +55 kg of iron up front. The Dark Horse ceiling build starts here.', cost: [{ itemId: 'engine_part', qty: 2 }, { itemId: 'gun_parts', qty: 6 }, { itemId: 'scrap', qty: 4 }], kinds: ['car'] },
+  { id: 'grip_tires', name: 'Track Compound Tires', desc: 'Soft-compound rubber: longitudinal grip 1.02 -> 1.18. Launches bite instead of spinning.', cost: [{ itemId: 'tire', qty: 4 }], kinds: ['car'] },
+  { id: 'weight_reduction', name: 'Weight Reduction', desc: 'Rear seat, sound deadening and trim out; carbon panels on. -95 kg on the body — the cheapest speed there is.', cost: [{ itemId: 'scrap', qty: 3 }, { itemId: 'cloth', qty: 2 }], kinds: ['car'] },
+  { id: 'final_drive', name: 'Shorter Final Drive', desc: '3.55 -> 3.85 final drive: every gear pulls harder. Acceleration is bought with revs, not magic.', cost: [{ itemId: 'engine_part', qty: 1 }, { itemId: 'scrap', qty: 3 }], kinds: ['car'] },
   { id: 'run_flats', name: 'Run-Flat Tires', desc: 'Reinforced sidewalls. A blown tire stops being a thing that happens to you.', cost: [{ itemId: 'tire', qty: 2 }], kinds: ['car'], excludeIds: ['tank'] },
   // Goliath 6x6 weapon mounts (mutually exclusive — one ring, one weapon)
   // VEHICLE RESET: the weapon mounts, tank tiers and helicopter line are

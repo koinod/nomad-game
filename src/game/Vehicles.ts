@@ -1,20 +1,13 @@
-// Vehicles.ts — the 13-vehicle roster, procedural meshes, arcade driving
-// physics (arcade, honest fuel + wear from the spec), enter/exit, ramming.
-// VEHICLE RESET (Ian, 2026-10-20): fleet deleted, one Stallion FX remains.
+// Vehicles.ts — VEHICLE RESET (Ian, 2026-10-20): the 13-vehicle roster
+// is deleted; one Stallion FX remains. This module owns the vehicle's
+// state (fuel, condition, storage, upgrades), its spawn, and its models:
+// the Blender GLB (Piece 2) with the procedural Stallion as stand-in.
+// Driving physics lives in CarPhysics.ts (Rapier rigid body, Piece 3).
 
 import * as THREE from 'three';
-import { clamp } from './rng';
-import { resolveCollisions, type Collider } from './Colliders';
 import { ITEMS } from '../data/items';
 import type { InvItem } from '../store/types';
-import {
-  accelFactor, collisionLossFactor, ramDamageFactor, sandFactor, topSpeedFactor, wearFactor,
-} from '../data/upgrades';
 import { buildStallion, applyStallionUpgrades } from './carModels';
-import {
-  cgHeightM, cornerRoll, effectiveSteerAngle, impactBounce, impactDamage,
-  understeerK, vehicleMassKg, weightTransferPitch,
-} from './drivePhysics';
 
 export { glassTint } from './modelKit';
 
@@ -82,6 +75,19 @@ export interface Vehicle {
   wheelSpin: THREE.Object3D[];
   wheelPivots: THREE.Object3D[];
   steerVis: number;
+  /** Piece 3: accumulated wheel spin (rad) + per-wheel suspension length,
+   *  written by CarPhysics, consumed by the GLB visual rig. */
+  wheelSpinAngle: number;
+  suspension: number[];
+  /** Piece 2: the Blender GLB rig (wrapper + wheel pivots), when loaded.
+   *  Until it lands (or if it fails), the procedural body stands in. */
+  glb?: {
+    wrapper: THREE.Group;
+    steerPivots: THREE.Object3D[];
+    spinPivots: THREE.Object3D[];
+    suspPivots: { obj: THREE.Object3D; baseY: number; wheelIdx: number }[];
+    headLights: THREE.SpotLight[];
+  };
   bobT: number;
   steerAngle: number; // current front-wheel angle (rad), the bicycle model's input
   wheelR: number; // rolling radius for wheel spin
@@ -104,13 +110,6 @@ export interface Vehicle {
   variant?: string;
 }
 
-export interface DriveEnv {
-  groundY: (x: number, z: number) => number;
-  colliders: Collider[];
-  ram: (x: number, z: number, radius: number, dmg: number) => void;
-  noise: (x: number, z: number, r: number) => void;
-  time: number;
-}
 
 function buildCarBody(g: THREE.Group, def: VehicleDef, v: Vehicle): void {
   buildStallion(g, def, v); // the one car — procedural stand-in until the GLB lands
@@ -122,7 +121,7 @@ function makeVehicle(def: VehicleDef, x: number, z: number, heading: number, gro
     uid: def.id, def, group: g, heading, speed: 0,
     fuel: def.fuelMax * (0.2 + Math.random() * 0.4),
     condition: 0.2 + Math.random() * 0.4,
-    wheelSpin: [], wheelPivots: [], steerVis: 0, bobT: Math.random() * 10,
+    wheelSpin: [], wheelPivots: [], steerVis: 0, wheelSpinAngle: 0, suspension: [0.32, 0.32, 0.32, 0.32], bobT: Math.random() * 10,
     steerAngle: 0, wheelR: 0.35, bodyPitch: 0, bodyRoll: 0, suspV: 0,
     storage: [], upgrades: [], tiresFlat: 0, flatSide: 1, blewTire: false,
     wasClipped: false, doors: [], variant,
@@ -186,198 +185,6 @@ export class VehicleManager {
   byId(uid: string): Vehicle | null {
     return this.vehicles.find((v) => v.uid === uid) ?? null;
   }
-
-  /** Arcade drive step for one vehicle. Returns the driven vehicle. */
-  /**
-   * Bicycle-model drive: the front wheels carry a real steer angle, the car
-   * rotates about its REAR AXLE (the true pivot), and speed comes from a
-   * power curve + drag instead of a lerp to target. Steering direction:
-   * heading θ maps +Z→(sinθ, cosθ), so increasing θ turns LEFT — a right
-   * steer (input +1) must decrease θ.
-   */
-  drive(dt: number, v: Vehicle, throttle: number, steer: number, env: DriveEnv): void {
-    const def = v.def;
-    const pos = v.group.position;
-    const groundHere = env.groundY(pos.x, pos.z);
-    const speedRatio = clamp(Math.abs(v.speed) / Math.max(def.topSpeed, 1), 0, 1);
-    const hasFuel = v.fuel > 0.05;
-    const condF = 0.6 + 0.4 * v.condition;
-
-    // ---------- land: bicycle model ----------
-    const inWater = groundHere < -0.4;
-    const onSand = groundHere < 0.9; // beach band — soft surface, real drag
-    const wb = def.length * 0.567; // S650 wheelbase 2.718 m on a 4.79 m car
-    // steer angle: ramps toward the input, max angle shrinks with speed
-    const maxSteerBase = 0.58; // ~33°
-    const maxSteer = maxSteerBase / (1 + speedRatio * 2.4);
-    const steerTarget = clamp(steer, -1, 1) * maxSteer;
-    const steerRate = steerTarget === 0 || Math.sign(steerTarget) !== Math.sign(v.steerAngle) ? 3.4 : 2.6;
-    v.steerAngle += clamp(steerTarget - v.steerAngle, -steerRate * dt, steerRate * dt);
-    v.steerVis = v.steerAngle;
-    // grip saturation: the tires can't deliver full lock at speed
-    // (the wheel + steering wheel still show the commanded angle)
-    const effSteer = effectiveSteerAngle(v.steerAngle, speedRatio, understeerK(def));
-    const massKg = vehicleMassKg(def) + itemsWeightKg(v.storage);
-
-    // longitudinal: power curve launch, real brakes, aero + rolling drag.
-    // Load matters: a hitched trailer's mass (towedMassKg, set by the
-    // trailer manager) and blown tires cut the top end and the pull;
-    // an engine tune buys some of it back (data/upgrades math).
-    const surfaceTop = onSand ? sandFactor(v.upgrades) : 1;
-    const topF = def.topSpeed * condF * surfaceTop * (inWater ? 0.3 : 1)
-      * topSpeedFactor(v.upgrades, 0, v.tiresFlat);
-    const accelF = accelFactor(v.upgrades, 0);
-    const topR = def.topSpeed * 0.32 * condF;
-    const th = hasFuel ? clamp(throttle, -1, 1) : 0;
-    const accelBefore = v.speed;
-    if (th > 0.02) {
-      const power = clamp(1 - v.speed / Math.max(topF, 1), 0.22, 1); // strong launch, tapering top end
-      v.speed += th * (topF / 2.9) * power * (onSand ? 0.8 : 1) * accelF * dt;
-    } else if (th < -0.02) {
-      if (v.speed > 0.4) {
-        v.speed -= (topF / 1.05) * dt; // brakes
-      } else {
-        const power = clamp(1 + v.speed / Math.max(topR, 1), 0.3, 1);
-        v.speed += th * (topR / 1.6) * power * dt; // reverse
-      }
-    }
-    if (v.speed > topF) v.speed = Math.max(topF, v.speed - topF * 0.8 * dt);
-    if (v.speed < -topR) v.speed = -topR;
-    // drag: aero (proportional) + rolling resistance (constant pull to 0)
-    v.speed -= v.speed * (inWater ? 1.4 : 0.32) * dt;
-    if (Math.abs(th) < 0.02) {
-      const roll = (onSand ? 1.1 : 0.55) * dt;
-      v.speed = Math.abs(v.speed) <= roll ? 0 : v.speed - Math.sign(v.speed) * roll;
-      v.speed -= v.speed * 0.25 * dt; // engine braking
-    }
-    const accel = dt > 0 ? (v.speed - accelBefore) / dt : 0;
-
-    // yaw from the bicycle model; position integrates from the REAR AXLE,
-    // so the nose swings wide and the tail stays planted — the real pivot.
-    const yawRate = wb > 0 ? (v.speed / wb) * Math.tan(effSteer) : 0;
-    const fx0 = Math.sin(v.heading);
-    const fz0 = Math.cos(v.heading);
-    const rearX = pos.x - fx0 * (wb / 2);
-    const rearZ = pos.z - fz0 * (wb / 2);
-    v.heading -= yawRate * dt; // minus: right steer decreases θ (see header)
-    const fx = Math.sin(v.heading);
-    const fz = Math.cos(v.heading);
-    const newRearX = rearX + fx * v.speed * dt;
-    const newRearZ = rearZ + fz * v.speed * dt;
-    pos.x = newRearX + fx * (wb / 2);
-    pos.z = newRearZ + fz * (wb / 2);
-    // a flat tire drags the nose toward its side, worse with speed
-    if (v.tiresFlat > 0) {
-      v.heading += v.flatSide * 0.05 * v.tiresFlat * (v.speed / Math.max(def.topSpeed, 1)) * dt;
-    }
-
-    // body vs. buildings (center-circle, as before)
-    const radius = Math.max(def.length, def.width) / 2 * 0.75;
-    const p3 = { x: pos.x, z: pos.z };
-    const before = { x: pos.x, z: pos.z };
-    resolveCollisions(p3, radius, env.colliders, pos.y);
-    const clipped = Math.hypot(p3.x - before.x, p3.z - before.z) > 0.001;
-    // IMPACT physics: damage lands once, on the impact edge, scaled by
-    // kinetic energy (speed², mass class) — scraping a wall bleeds
-    // speed but doesn't keep re-charging the repair bill. A hard hit
-    // bounces: light hulls ricochet, heavy hulls just stop.
-    const impactSpeed = Math.abs(v.speed);
-    let bounced = false;
-    if (false) {
-      env.noise(pos.x, pos.z, 26); // the building loses; the tank doesn't notice
-    }
-    if (clipped && !v.wasClipped && impactSpeed > 5) {
-      const dmg = impactDamage(impactSpeed, massKg, def.armorMul ?? 1, collisionLossFactor(v.upgrades));
-      v.condition = Math.max(0, v.condition - dmg);
-      env.noise(pos.x, pos.z, 18);
-      // a hard hit on a worn vehicle can blow a tire (run-flats prevent it)
-      if (dmg > 0.07 && v.condition < 0.45 && v.tiresFlat < 2 && !v.upgrades.includes('run_flats')
-        && Math.random() < Math.min(0.7, dmg * 1.8)) {
-        v.tiresFlat += 1;
-        v.flatSide = Math.random() < 0.5 ? 1 : -1;
-        v.blewTire = true;
-        env.noise(pos.x, pos.z, 30);
-      }
-      if (impactSpeed >= 7) {
-        v.speed = -v.speed * impactBounce(massKg);
-        bounced = true;
-      }
-    }
-    v.wasClipped = clipped;
-    pos.x = p3.x;
-    pos.z = p3.z;
-    if (clipped && !bounced) v.speed *= 0.35;
-
-    // SUSPENSION: sample the ground at all four wheel contact patches.
-    // Body height, pitch, AND roll all come from the four corners — a
-    // vehicle straddling a slope now leans sideways into it (the old
-    // 3-sample follow only really solved front-to-back), and the height
-    // rides on an underdamped spring so the body travels and settles
-    // instead of being glued to the terrain.
-    const track = def.width * 0.82;
-    const rx = fz; // right vector (world) for heading (fx, fz)
-    const rz = -fx;
-    const hAt = (ox: number, oz: number) => Math.max(env.groundY(pos.x + ox, pos.z + oz), -0.6);
-    const hFL = hAt(fx * (wb / 2) - rx * (track / 2), fz * (wb / 2) - rz * (track / 2));
-    const hFR = hAt(fx * (wb / 2) + rx * (track / 2), fz * (wb / 2) + rz * (track / 2));
-    const hRL = hAt(-fx * (wb / 2) - rx * (track / 2), -fz * (wb / 2) - rz * (track / 2));
-    const hRR = hAt(-fx * (wb / 2) + rx * (track / 2), -fz * (wb / 2) + rz * (track / 2));
-    const avgH = (hFL + hFR + hRL + hRR) / 4;
-    const rideH = 0.02 + (v.upgrades.includes('lift_kit') ? 0.1 : 0);
-    // spring: stiffness 90, damping 12 (underdamped — visible travel)
-    v.suspV += ((avgH + rideH - pos.y) * 90 - v.suspV * 12) * dt;
-    pos.y += v.suspV * dt;
-    if (pos.y < avgH + rideH - 0.35) { pos.y = avgH + rideH - 0.35; v.suspV = 0; }
-    const frontAvg = (hFL + hFR) / 2;
-    const rearAvg = (hRL + hRR) / 2;
-    const leftAvg = (hFL + hRL) / 2;
-    const rightAvg = (hFR + hRR) / 2;
-    const terrainPitch = clamp(Math.atan2(rearAvg - frontAvg, wb) * 0.9, -0.38, 0.38);
-    const terrainRoll = clamp(Math.atan2(leftAvg - rightAvg, track) * 0.9, -0.38, 0.38);
-    const cgH = cgHeightM(def);
-    const pitchTarget = terrainPitch + weightTransferPitch(accel, cgH, wb); // weight transfer: dive on brake, squat on launch
-    const rollTarget = terrainRoll + cornerRoll(yawRate, v.speed, cgH, track); // roll OUT with lateral load
-    const smooth = Math.min(1, dt * 7);
-    v.bodyPitch += (pitchTarget - v.bodyPitch) * smooth;
-    v.bodyRoll += (rollTarget - v.bodyRoll) * smooth;
-    v.group.rotation.x = v.bodyPitch;
-    v.group.rotation.z = v.bodyRoll;
-    v.group.rotation.y = v.heading;
-
-    // wheels: spin by true rolling radius; front pivots show the real angle
-    for (const w of v.wheelSpin) w.rotation.x += (v.speed / v.wheelR) * dt;
-    for (const p of v.wheelPivots) p.rotation.y = -v.steerAngle;
-    if (v.steerWheel) v.steerWheel.rotation.z = -v.steerAngle * 2.3;
-
-    this.finishDriveStep(dt, v, env, th, speedRatio);
-  }
-
-  /** Shared tail of a drive step: fuel, wear, ramming, engine noise. */
-  private finishDriveStep(dt: number, v: Vehicle, env: DriveEnv, engine: number, speedRatio: number): void {
-    const def = v.def;
-    const pos = v.group.position;
-    if (Math.abs(engine) > 0.05 && v.fuel > 0) {
-      v.fuel = Math.max(0, v.fuel - 0.18 * def.burnClass * Math.max(speedRatio, 0.15) * dt);
-    }
-    {
-      v.condition = Math.max(0, v.condition - (0.02 / 60) * (0.3 + speedRatio) * dt * wearFactor(v.upgrades));
-    }
-    if (Math.abs(v.speed) > 4) {
-      const fx = Math.sin(v.heading);
-      const fz = Math.cos(v.heading);
-      const crush = false;
-      env.ram(
-        pos.x + fx * (def.length / 2), pos.z + fz * (def.length / 2),
-        crush ? 3.0 : 1.2 + def.width / 2,
-        Math.abs(v.speed) * (crush ? 5 : 2.2) * ramDamageFactor(v.upgrades),
-      );
-    }
-    (v as { noiseT?: number }).noiseT = ((v as { noiseT?: number }).noiseT ?? 0) + dt;
-    if ((v as { noiseT?: number }).noiseT! > 0.3) {
-      (v as { noiseT?: number }).noiseT = 0;
-      env.noise(pos.x, pos.z, Math.abs(v.speed) > 0.5 ? def.noiseDrive : def.noiseDrive * 0.55);
-    }
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -397,4 +204,86 @@ export function applyUpgradeVisuals(v: Vehicle): void {
   applyStallionUpgrades(v, g);
   v.group.add(g);
   v.upgradeGroup = g;
+}
+
+/**
+ * Piece 2 — the Blender-built Stallion FX (public/mustang.glb, authored
+ * by tools/build_mustang.py at real S650 dimensions). Loads async; the
+ * procedural body stands in until it arrives, and stays if it fails.
+ * Orientation: the GLB's nose is +X, up +Y — a -90° wrapper yaw puts
+ * the nose on the game's +Z forward. Wheel empties (WheelFL/FR/RL/RR)
+ * get steering/suspension pivots in wrapper space.
+ */
+export function attachMustangGlb(v: Vehicle): void {
+  import('three/addons/loaders/GLTFLoader.js')
+    .then(({ GLTFLoader }) => new GLTFLoader().loadAsync('/mustang.glb'))
+    .then((gltf) => {
+      const model = gltf.scene;
+      const wrapper = new THREE.Group();
+      wrapper.rotation.y = -Math.PI / 2;
+      wrapper.add(model);
+      // clear the procedural stand-in
+      while (v.group.children.length) v.group.remove(v.group.children[0]);
+      v.wheelSpin = [];
+      v.wheelPivots = [];
+      v.group.add(wrapper);
+      model.traverse((o) => {
+        if ((o as THREE.Mesh).isMesh) {
+          o.castShadow = true;
+          o.receiveShadow = true;
+        }
+      });
+      // wheel rig: suspension index order matches CarPhysics [FR, FL, RR, RL]
+      const order: [string, number][] = [
+        ['WheelFR', 0], ['WheelFL', 1], ['WheelRR', 2], ['WheelRL', 3],
+      ];
+      const steerPivots: THREE.Object3D[] = [];
+      const spinPivots: THREE.Object3D[] = [];
+      const suspPivots: { obj: THREE.Object3D; baseY: number; wheelIdx: number }[] = [];
+      for (const [name, wheelIdx] of order) {
+        const wheel = model.getObjectByName(name);
+        if (!wheel || !wheel.parent) continue;
+        const susp = new THREE.Group();
+        susp.position.copy(wheel.position);
+        wheel.parent.add(susp);
+        susp.add(wheel);
+        wheel.position.set(0, 0, 0);
+        const spin = new THREE.Group();
+        spin.position.copy(wheel.position);
+        susp.add(spin);
+        spin.add(wheel);
+        wheel.position.set(0, 0, 0);
+        suspPivots.push({ obj: susp, baseY: susp.position.y, wheelIdx });
+        spinPivots.push(spin);
+        if (wheelIdx <= 1) steerPivots.push(susp);
+      }
+      // headlights: real spotlights seated at the lenses (glTF space:
+      // nose +X, up +Y, width on Z) — light only, no fake glow geometry
+      const headLights: THREE.SpotLight[] = [];
+      for (const sz of [-0.6, 0.6]) {
+        const spot = new THREE.SpotLight(0xffeec4, 0, 60, 0.46, 0.55, 1.2);
+        spot.position.set(2.42, 0.62, sz);
+        spot.target.position.set(14, 0, sz * 1.25);
+        wrapper.add(spot);
+        wrapper.add(spot.target);
+        headLights.push(spot);
+      }
+      v.glb = { wrapper, steerPivots, spinPivots, suspPivots, headLights };
+      if (v.upgrades.length) applyUpgradeVisuals(v);
+    })
+    .catch((err) => {
+      console.warn('[Vehicles] mustang.glb failed to load; procedural body stands:', err);
+    });
+}
+
+/** Per-frame GLB rig update: steering, spin, suspension travel. */
+export function applyGlbVisuals(v: Vehicle): void {
+  const g = v.glb;
+  if (!g) return;
+  for (const p of g.steerPivots) p.rotation.y = v.steerVis;
+  for (const p of g.spinPivots) p.rotation.z = -v.wheelSpinAngle;
+  for (const s of g.suspPivots) {
+    const len = v.suspension[s.wheelIdx] ?? 0.32;
+    s.obj.position.y = s.baseY + (len - 0.32);
+  }
 }

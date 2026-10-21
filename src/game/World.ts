@@ -194,6 +194,36 @@ const NIGHT_SKY = new THREE.Color(0x05080f);
 const DAY_FOG = new THREE.Color(0x9db8c8);
 const NIGHT_FOG = new THREE.Color(0x070b12);
 
+/** Lighting baseline (2026-10-20, Ian's order — "a real sun"): the sky
+ *  is not just a background color. A PMREM environment is generated from
+ *  a procedural sky dome (zenith/horizon/ground + sun glow) per phase of
+ *  day, giving every PBR surface image-based light; a hemisphere light
+ *  guarantees bounce fill so enclosed interiors at midday are SHADED,
+ *  never pitch black (honest fake GI: hemisphere + env, no real GI).
+ *  The directional sun + ACES tone mapping complete the baseline. */
+export type SkyPhase = 'day' | 'golden' | 'night';
+
+export function skyPhase(sunElevation: number): SkyPhase {
+  if (sunElevation > 0.25) return 'day';
+  if (sunElevation > -0.06) return 'golden';
+  return 'night';
+}
+
+export interface SkyPalette {
+  zenith: number;
+  horizon: number;
+  ground: number;
+  sun: number;
+  envIntensity: number;
+  hemiIntensity: number;
+}
+
+export const SKY_PALETTES: Record<SkyPhase, SkyPalette> = {
+  day: { zenith: 0x2f62a8, horizon: 0xc3d7e8, ground: 0x54503f, sun: 0xfff2dd, envIntensity: 0.5, hemiIntensity: 0.55 },
+  golden: { zenith: 0x39598c, horizon: 0xe9b47c, ground: 0x4c463a, sun: 0xffb36b, envIntensity: 0.42, hemiIntensity: 0.45 },
+  night: { zenith: 0x05070f, horizon: 0x111a29, ground: 0x0a0c10, sun: 0x8fa8d8, envIntensity: 0.1, hemiIntensity: 0.2 },
+};
+
 export class World {
   readonly scene: THREE.Scene;
   readonly seed: number;
@@ -217,6 +247,11 @@ export class World {
   private beam!: THREE.Mesh;
   private beamPivot!: THREE.Group;
   private lampLight!: THREE.PointLight;
+  private pmrem: THREE.PMREMGenerator | null = null;
+  private envScene: THREE.Scene | null = null;
+  private envMat: THREE.ShaderMaterial | null = null;
+  private envTex: THREE.Texture | null = null;
+  private envPhase: SkyPhase | null = null;
   private water!: THREE.Mesh;
   private waterMat!: THREE.MeshStandardMaterial;
   private terrainMat!: THREE.MeshStandardMaterial;
@@ -226,6 +261,65 @@ export class World {
     this.seed = seed;
     this.rng = mulberry32(seed ^ 0x12345678);
     initTerrainField(seed);
+  }
+
+  /** One-time IBL setup (Game calls this once the renderer exists): a
+   *  PMREM environment baked from the procedural sky dome. Regenerated
+   *  only when the phase of day changes (see updateSky). */
+  setupEnvironment(renderer: THREE.WebGLRenderer): void {
+    this.pmrem = new THREE.PMREMGenerator(renderer);
+    this.envScene = new THREE.Scene();
+    this.envMat = new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      depthWrite: false,
+      uniforms: {
+        zenith: { value: new THREE.Color(0x2f62a8) },
+        horizon: { value: new THREE.Color(0xc3d7e8) },
+        ground: { value: new THREE.Color(0x54503f) },
+        sunColor: { value: new THREE.Color(0xfff2dd) },
+        sunDir: { value: new THREE.Vector3(0, 1, 0) },
+      },
+      vertexShader: `
+        varying vec3 vDir;
+        void main() {
+          vDir = position;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }`,
+      fragmentShader: `
+        varying vec3 vDir;
+        uniform vec3 zenith; uniform vec3 horizon; uniform vec3 ground;
+        uniform vec3 sunColor; uniform vec3 sunDir;
+        void main() {
+          vec3 d = normalize(vDir);
+          float h = d.y;
+          vec3 col = mix(horizon, zenith, pow(max(h, 0.0), 0.55));
+          col = mix(col, ground, smoothstep(0.02, -0.3, h));
+          float s = max(dot(d, normalize(sunDir)), 0.0);
+          col += sunColor * (pow(s, 240.0) * 3.0 + pow(s, 8.0) * 0.20);
+          gl_FragColor = vec4(col, 1.0);
+        }`,
+    });
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(50, 32, 16), this.envMat);
+    this.envScene.add(dome);
+    this.envPhase = null;
+    this.applyEnvironment(skyPhase(1), new THREE.Vector3(0.3, 1, 0.2));
+  }
+
+  private applyEnvironment(phase: SkyPhase, sunDir: THREE.Vector3): void {
+    if (!this.pmrem || !this.envScene || !this.envMat) return;
+    const pal = SKY_PALETTES[phase];
+    const u = this.envMat.uniforms;
+    (u.zenith.value as THREE.Color).setHex(pal.zenith);
+    (u.horizon.value as THREE.Color).setHex(pal.horizon);
+    (u.ground.value as THREE.Color).setHex(pal.ground);
+    (u.sunColor.value as THREE.Color).setHex(pal.sun);
+    (u.sunDir.value as THREE.Vector3).copy(sunDir);
+    const tex = this.pmrem.fromScene(this.envScene, 0.04).texture;
+    if (this.envTex) this.envTex.dispose();
+    this.envTex = tex;
+    this.scene.environment = tex;
+    this.scene.environmentIntensity = pal.envIntensity;
+    this.envPhase = phase;
   }
 
   build(): void {
@@ -856,7 +950,6 @@ export class World {
         .lerp(DAY_SKY, dayness);
       (this.scene.background as THREE.Color).copy(sky);
       (this.scene.fog as THREE.Fog).color.copy(DAY_FOG).lerp(NIGHT_FOG, 1 - dayness);
-      this.hemi.intensity = 0.25 + dayness * 0.65;
       this.starMat.opacity = 0;
     } else {
       // night: moonlight fill
@@ -864,9 +957,15 @@ export class World {
       this.moonFill.intensity = 0.35;
       (this.scene.background as THREE.Color).copy(NIGHT_SKY);
       (this.scene.fog as THREE.Fog).color.copy(NIGHT_FOG);
-      this.hemi.intensity = 0.22;
       this.starMat.opacity = clamp(-elev * 3, 0, 0.9);
     }
+    // lighting baseline: the environment follows the phase of day; the
+    // hemisphere is the interior guarantee (shaded, never black)
+    const phase = skyPhase(elev);
+    if (phase !== this.envPhase) {
+      this.applyEnvironment(phase, this.sun.position.clone().normalize());
+    }
+    this.hemi.intensity = SKY_PALETTES[phase].hemiIntensity;
     // lighthouse lamp burns at night
     const lampOn = isNight;
     this.lampLight.intensity = lampOn ? 60 : 0;
@@ -907,6 +1006,8 @@ export class World {
   }
 
   dispose(): void {
+    if (this.envTex) this.envTex.dispose();
+    if (this.pmrem) this.pmrem.dispose();
     this.scene.traverse((o) => {
       const mesh = o as THREE.Mesh;
       if (mesh.isMesh || (o as THREE.Points).isPoints) {

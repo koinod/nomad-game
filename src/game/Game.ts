@@ -17,8 +17,9 @@ import { HuskManager } from './Husks';
 import type { Husk, SpawnZone } from './Husks';
 import { InteractSystem, buildContainerDefs } from './Interact';
 import { AnimalManager } from './Animals';
-import { VehicleManager, applyUpgradeVisuals, itemsWeightKg, type Vehicle } from './Vehicles';
-import { canInstallUpgrade, storageCapKg } from '../data/upgrades';
+import { VehicleManager, applyUpgradeVisuals, attachMustangGlb, applyGlbVisuals, itemsWeightKg, type Vehicle } from './Vehicles';
+import { CarPhysics } from './CarPhysics';
+import { canInstallUpgrade, storageCapKg, collisionLossFactor, ramDamageFactor } from '../data/upgrades';
 import type { InvItem, TrailerSave } from '../store/types'; // TrailerSave: legacy snapshot field, always [] now
 import { floorYAt, floorYAtRef, resolveCollisions, type Collider, type FloorRect } from './Colliders';
 import { survivingVehicleSave } from './saveMigration';
@@ -64,6 +65,9 @@ export class Game {
   // hold-to-search state (container / corpse / safe)
   private searching: { id: string; label: string; t: number; dur: number; x: number; z: number; hp: number } | null = null;
   vehicles!: VehicleManager;
+  private carPhysics: CarPhysics | null = null;
+  private ramT = 0;
+  private buildKey = '';
   driving: Vehicle | null = null;
   private wasFirstPerson = false;
   private cleanMeters = 0;
@@ -142,6 +146,7 @@ export class Game {
 
     this.world = new World(this.scene, opts.seed);
     this.world.build();
+    this.world.setupEnvironment(this.renderer);
     this.fx = new Fx(this.scene);
     this.projectiles = new ProjectileManager(this.scene);
 
@@ -207,6 +212,23 @@ export class Game {
       this.player.setPosition(spawnX, heightAt(spawnX, spawnZ) + 0.5, spawnZ);
       // face the tower and the car
       this.player.camYaw = Math.PI * 0.75;
+    }
+
+    // Piece 2/3: the Blender GLB replaces the procedural stand-in when
+    // it loads; the Rapier rigid body is built at the car's final
+    // (possibly save-restored) position.
+    const mustang = this.vehicles.vehicles[0];
+    if (mustang) attachMustangGlb(mustang);
+    this.carPhysics = await CarPhysics.create(
+      { onImpact: (dv) => this.onCarImpact(dv) },
+      (x, z) => heightAt(x, z),
+      [...this.world.lighthouseKit.colliders, ...this.world.stationColliders],
+    );
+    if (mustang) {
+      this.carPhysics.spawnCar(mustang, mustang.upgrades, itemsWeightKg(mustang.storage));
+      // settle the suspension before anyone sees it
+      for (let i = 0; i < 30; i++) this.carPhysics.parkBrake();
+      applyGlbVisuals(mustang);
     }
 
     // husks
@@ -655,6 +677,16 @@ export class Game {
         }
         return `${Math.round(x)}, ${Math.round(z)}`;
       };
+      {
+        const mv = this.vehicles.vehicles[0];
+        if (mv && this.carPhysics) {
+          const key = `${mv.upgrades.join(',')}:${itemsWeightKg(mv.storage)}:${mv.tiresFlat}`;
+          if (key !== this.buildKey) {
+            this.buildKey = key;
+            this.carPhysics.setBuild(mv.upgrades, itemsWeightKg(mv.storage));
+          }
+        }
+      }
       s.setFleet(
         this.vehicles.vehicles.map((v) => ({
           defId: v.def.id,
@@ -727,6 +759,12 @@ export class Game {
     this.world?.updateShadowTarget(player.pos.x, player.pos.z);
 
     this.vehicles.updateDoors(dt);
+    if (!this.driving && this.carPhysics) {
+      // parked: the handbrake holds the body; visuals follow the settle
+      this.carPhysics.parkBrake();
+      const mv = this.vehicles.vehicles[0];
+      if (mv) applyGlbVisuals(mv);
+    }
 
     // ROOFS NEVER DISAPPEAR (Ian's law, 2026-10-20): the old roof-lift
     // rule that hid a building's roof while the player was inside is
@@ -1145,6 +1183,29 @@ export class Game {
   // vehicles
   // ------------------------------------------------------------------
 
+  /** Rigid-body impacts cost condition (the existing damage economy),
+   *  scaled by fitted armor; a hard enough hit can blow a tire. */
+  private onCarImpact(dv: number): void {
+    const v = this.vehicles?.vehicles[0];
+    if (!v || dv < 3.2) return;
+    const loss = Math.min(0.3, (dv - 2.5) * 0.02) * collisionLossFactor(v.upgrades);
+    if (loss > 0.004) {
+      v.condition = Math.max(0.03, v.condition - loss);
+      if (this.driving && dv > 5.2) {
+        useGameStore.getState().addToast(
+          dv > 8 ? 'Hard hit — the car took real damage.' : 'Impact — the bodywork felt that.',
+        );
+        this.requestHitstop(0.05);
+      }
+      sfx.play('hit', { volume: 0.55 });
+    }
+    if (dv > 7.5 && v.tiresFlat < 2 && !v.upgrades.includes('run_flats')) {
+      v.tiresFlat += 1;
+      v.blewTire = true;
+    }
+    this.cleanMeters = 0;
+  }
+
   private updateDriving(dt: number, s: ReturnType<typeof useGameStore.getState>, playerCtx: import('./Player').PlayerCtx): void {
     const v = this.driving;
     if (!v) return;
@@ -1152,24 +1213,46 @@ export class Game {
     const husks = this.husks!;
     const condBefore = v.condition;
     const posBefore = v.group.position.clone();
-    this.vehicles.drive(dt, v, input.moveY, input.moveX, {
-      groundY: (x, z) => this.driveGroundY(x, z),
-      colliders: this.houseColliders,
-      ram: (x, z, r, dmg) => {
-        const killed = husks.damageInRadius(x, z, r, dmg);
-        if (killed > 0) {
-          sfx.play('hit', { volume: 0.6 });
-          this.requestHitstop(0.06);
-        }
-        husks.emitNoise(x, z, 20);
-      },
-      noise: (x, z, r) => {
-        husks.emitNoise(x, z, r);
-        this.animals?.emitNoise(x, z, r);
-        s.setNoiseLevel(Math.min(100, (r / 80) * 100));
-      },
-      time: this.elapsed,
-    });
+    // Piece 3: rigid-body step (Rapier raycast vehicle; kinematic
+    // carSpec fallback inside CarPhysics if the WASM ever fails)
+    this.carPhysics?.step(dt, {
+      throttle: input.moveY,
+      steer: input.moveX,
+      handbrake: !!input.ascend,
+      hasFuel: v.fuel > 0.05,
+    }, v, (x, z) => this.driveGroundY(x, z));
+    applyGlbVisuals(v);
+    if (v.glb) {
+      const lamp = this.isNight() ? 55 : 0;
+      for (const l of v.glb.headLights) l.intensity = lamp;
+    }
+    // fuel burn follows engine load — a working engine drinks, an
+    // idling one sips
+    const load = Math.abs(input.moveY);
+    if (load > 0.02 && v.fuel > 0) {
+      const speedF = 0.35 + 0.65 * Math.min(1, Math.abs(v.speed) / 28);
+      v.fuel = Math.max(0, v.fuel - dt * v.def.burnClass * (0.006 + 0.03 * load * speedF));
+    }
+    // driving noise + husk rams, from speed and proximity (the physics
+    // body handles buildings; husks are not physics bodies)
+    const spd = Math.abs(v.speed);
+    if (spd > 1.5) {
+      const r = v.def.noiseDrive * Math.min(1, spd / 25);
+      husks.emitNoise(v.group.position.x, v.group.position.z, r);
+      this.animals?.emitNoise(v.group.position.x, v.group.position.z, r);
+      s.setNoiseLevel(Math.min(100, (r / 80) * 100));
+    }
+    this.ramT -= dt;
+    if (spd > 4 && this.ramT <= 0) {
+      this.ramT = 0.18;
+      const fx = v.group.position.x + Math.sin(v.heading) * v.def.length * 0.55;
+      const fz = v.group.position.z + Math.cos(v.heading) * v.def.length * 0.55;
+      const killed = husks.damageInRadius(fx, fz, 1.9, 30 * ramDamageFactor(v.upgrades) * Math.min(1, spd / 12));
+      if (killed > 0) {
+        sfx.play('hit', { volume: 0.6 });
+        this.requestHitstop(0.06);
+      }
+    }
     const pos = v.group.position;
     player.driveUpdate(dt, playerCtx, pos.x, pos.y, pos.z, v.def.length * 0.9 + 4, {
       kind: v.def.kind,
@@ -1221,6 +1304,7 @@ export class Game {
       return;
     }
     this.driving = v;
+    this.carPhysics?.wake();
     this.wasFirstPerson = this.player!.firstPerson;
     // first person stays first person: driveUpdate renders the
     // driver's-eye view (V toggles back to chase in the seat)
