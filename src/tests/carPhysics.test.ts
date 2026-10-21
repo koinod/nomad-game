@@ -18,7 +18,7 @@ function fakeVehicle(x = 0, z = 0, heading = 0): Vehicle {
     uid: 'mustang', def, group, heading, speed: 0, fuel: 61, condition: 1,
     wheelSpin: [], wheelPivots: [], steerVis: 0, wheelSpinAngle: 0,
     suspension: [0.32, 0.32, 0.32, 0.32], suspRest: 0.32, bobT: 0, steerAngle: 0, wheelR: 0.345,
-    bodyPitch: 0, bodyRoll: 0, suspV: 0, storage: [], upgrades: [], tiresFlat: 0,
+    storage: [], upgrades: [], tiresFlat: 0,
     flatSide: 1, blewTire: false, wasClipped: false, doors: [],
   } as Vehicle;
 }
@@ -91,5 +91,33 @@ describe('Rapier rigid-body Mustang', () => {
     // (or the car has circled — either way it must not have gone LEFT)
     expect(v.heading).toBeLessThan(0.15);
     expect(cp.speed).toBeGreaterThan(5);
+  }, 60000);
+
+  // Item 4 (2026-10-21): lean is the BODY's, never scripted. The mesh
+  // group copies the rigid body's quaternion in syncVisual; the old
+  // smoothed bodyPitch/bodyRoll fields were dead and are deleted.
+  // Evidence: no lean without lateral load, real lean with it — read
+  // straight off the body-driven group quaternion.
+  it('gravity lean: upright in a straight line, rolled by the body in a corner', async () => {
+    const cp = await CarPhysics.create({ onImpact: () => undefined }, flat, []);
+    const v = fakeVehicle();
+    cp.spawnCar(v, [], 0);
+    const dt = 1 / 60;
+    const rollDeg = () => Math.abs(THREE.MathUtils.radToDeg(new THREE.Euler().setFromQuaternion(v.group.quaternion, 'YXZ').z));
+    // straight line at speed: nothing leans
+    for (let i = 0; i < 300; i++) {
+      cp.step(dt, { throttle: 0.8, steer: 0, handbrake: false, hasFuel: true }, v, flat);
+      if (v.group.position.z > 250) cp.repositionKeepVelocity(v, 0, -250);
+    }
+    expect(cp.speed).toBeGreaterThan(10);
+    expect(rollDeg()).toBeLessThan(0.4);
+    // sustained corner: the BODY rolls and the corners disagree
+    for (let i = 0; i < 200; i++) {
+      cp.step(dt, { throttle: 0.55, steer: 1, handbrake: false, hasFuel: true }, v, flat);
+      if (Math.abs(v.group.position.z) > 250 || Math.abs(v.group.position.x) > 250) cp.repositionKeepVelocity(v, 0, 0);
+    }
+    expect(rollDeg()).toBeGreaterThan(1.0);
+    const s = cp.rawSuspension;
+    expect(Math.max(...s) - Math.min(...s)).toBeGreaterThan(0.025);
   }, 60000);
 });

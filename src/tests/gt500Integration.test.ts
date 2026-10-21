@@ -100,7 +100,7 @@ function fakeVehicle(defId: string): Vehicle {
     uid: def.id, def, group, heading: 0, speed: 0, fuel: 61, condition: 1,
     wheelSpin: [], wheelPivots: [], steerVis: 0, wheelSpinAngle: 0,
     suspension: [0.32, 0.32, 0.32, 0.32], suspRest: 0.32, bobT: 0, steerAngle: 0, wheelR: 0.343,
-    bodyPitch: 0, bodyRoll: 0, suspV: 0, storage: [], upgrades: [], tiresFlat: 0,
+    storage: [], upgrades: [], tiresFlat: 0,
     flatSide: 1, blewTire: false, wasClipped: false, doors: [],
   } as Vehicle;
 }

@@ -97,9 +97,11 @@ export interface Vehicle {
   bobT: number;
   steerAngle: number; // current front-wheel angle (rad), the bicycle model's input
   wheelR: number; // rolling radius for wheel spin
-  bodyPitch: number; // smoothed weight-transfer pitch (accel/brake)
-  bodyRoll: number; // smoothed lateral lean (cornering)
-  suspV: number; // suspension spring velocity (4-corner terrain follow)
+  // NOTE (Item 4 audit, 2026-10-21): there are deliberately NO
+  // bodyPitch/bodyRoll scripted-lean fields — the old smoothed-lean
+  // fields were dead (declared, never driven) and are removed. Body
+  // roll/pitch comes only from the rigid body + suspension forces;
+  // the rendered group copies the body's quaternion in syncVisual.
   // --- vehicle & trailer wave state ---
   storage: InvItem[]; // what's riding in the trunk / bed / cargo bay
   upgrades: string[]; // installed upgrade ids (data/upgrades)
@@ -128,7 +130,7 @@ function makeVehicle(def: VehicleDef, x: number, z: number, heading: number, gro
     fuel: def.fuelMax * (0.2 + Math.random() * 0.4),
     condition: 0.2 + Math.random() * 0.4,
     wheelSpin: [], wheelPivots: [], steerVis: 0, wheelSpinAngle: 0, suspension: [0.32, 0.32, 0.32, 0.32], suspRest: 0.32, bobT: Math.random() * 10,
-    steerAngle: 0, wheelR: 0.35, bodyPitch: 0, bodyRoll: 0, suspV: 0,
+    steerAngle: 0, wheelR: 0.35,
     storage: [], upgrades: [], tiresFlat: 0, flatSide: 1, blewTire: false,
     wasClipped: false, doors: [], variant,
   };
