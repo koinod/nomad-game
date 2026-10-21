@@ -1,11 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { useGameStore } from '../store/gameStore';
+import { useGameStore, claimsFromLegacyBase } from '../store/gameStore';
 import { ITEMS, STATION_LABEL } from '../data/items';
 import { QUESTS } from '../data/quests';
 import { FACTIONS, repTier } from '../data/factions';
 import { SKILLS, TREES, PERKS, xpToNext } from '../data/skills';
 import { traitName, moraleBand, type SurvivorJob } from '../data/survivors';
-import { FACILITIES, baseHeat, heatBand, buildMinutes } from '../data/base';
+import { FACILITIES, baseHeat, heatBand, buildMinutes, tieredFacility } from '../data/base';
+import {
+  baseSummary, buildMenu, computeHeat, facilityStatus, jobBoard,
+  relocationQuote, stockpileView,
+} from '../systems/baseClaims';
+import BasePanel from './BasePanel';
 import { poiName } from '../data/dispatch';
 import { TRADERS } from '../data/traders';
 import TraderPanel from './TraderPanel';
@@ -455,17 +460,96 @@ function WorldMap() {
 /* ---------------- COMMAND tab ---------------- */
 
 /**
- * MERGE SLOT — Lane 10 BasePanel (src/ui/BasePanel.tsx on lane/base,
- * default export). At merge, mount it in place of this section:
- *   import BasePanel from './BasePanel';
- *   <BasePanel {...props} />
- * BasePanel is PROPS-DRIVEN (BasePanelProps in its header): summary /
- * facilities / buildMenu / stockpile / survivors / board / garage view
- * models come from Lane 10's systems/baseClaims.ts functions over the
- * store's `claims` + `moraleRuntime` state (Lane 5 contract) — the
- * wiring builds those props at this call site. The legacy section below
- * (single `base` + flat facilities) is the pre-merge fallback.
+ * MERGE SLOT — Lane 10 BasePanel: MOUNTED (Stage 4). BaseTab below feeds
+ * the props-driven panel from Lane 10's systems/baseClaims.ts view models
+ * over the store's `claims` state (falling back to the legacy base,
+ * migrated read-only with the loader's own claimsFromLegacyBase, so a
+ * base claimed this session shows before the next save/load). The legacy
+ * section (BaseSection) remains the no-base fallback.
+ * Deferred to the wiring train: the §7.2 claims prop (its 'area clear'
+ * check needs live husk counts only world claim posts know) and the
+ * §7.8 garage prop (needs Lane 13's stamped fleet fuel absolutes).
+ * onBuild routes shared facility ids through the shipped legacy build
+ * queue; tier-only facilities (workbench, machine shop…) have no phone
+ * order path yet — the claims build queue is a later step.
  */
+const TIERED_TO_FLAT_FACILITY: Record<string, string> = {
+  water: 'rain_collector',
+  garage: 'garage_bay',
+};
+
+function BaseTab() {
+  const claims = useGameStore((s) => s.claims);
+  const base = useGameStore((s) => s.base);
+  const survivors = useGameStore((s) => s.survivors);
+  const daysElapsed = useGameStore((s) => s.daysElapsed);
+  const baseExt = useGameStore((s) => s.baseExt);
+  const inventory = useGameStore((s) => s.inventory);
+  const baseQueue = useGameStore((s) => s.baseQueue);
+  const cancelBuild = useGameStore((s) => s.cancelBuild);
+  const buildFacility = useGameStore((s) => s.buildFacility);
+  const addToast = useGameStore((s) => s.addToast);
+
+  const home = claims.home ?? (base ? claimsFromLegacyBase(base).home : null);
+  if (!home) return <BaseSection />;
+  const effectiveClaims = claims.home ? claims : { home, outposts: claims.outposts };
+  const localKills = baseExt.localKillsNearBase ?? 0;
+  const heat = computeHeat(home, survivors, daysElapsed, localKills);
+  const crew = {
+    builders: survivors.filter((sv) => sv.job === 'Builder').length,
+    jobsPresent: [...new Set(survivors.map((sv) => sv.job ?? 'Idle'))],
+    blueprints: [...new Set(inventory.filter((i) => i.itemId.startsWith('bp_')).map((i) => i.itemId))],
+  };
+  const onBuild = (facilityId: string) => {
+    const flatId = TIERED_TO_FLAT_FACILITY[facilityId] ?? facilityId;
+    if (FACILITIES.some((f) => f.id === flatId)) {
+      sfx.play('ui');
+      buildFacility(flatId);
+    } else {
+      addToast('That facility is built on site, not from the phone — yet.');
+    }
+  };
+  return (
+    <div className="flex flex-col gap-3">
+      <BasePanel
+        summary={baseSummary(home, survivors, daysElapsed, localKills)}
+        facilities={home.facilities.map((f) => ({
+          defId: f.defId,
+          name: tieredFacility(f.defId)?.name ?? f.defId,
+          tier: f.tier,
+          staffId: f.staffId,
+          status: facilityStatus(home, f.defId, survivors),
+        }))}
+        buildMenu={buildMenu(home.siteId, home, crew)}
+        stockpile={stockpileView(home)}
+        survivors={survivors}
+        board={jobBoard(home, survivors, heat)}
+        relocation={relocationQuote(effectiveClaims)}
+        onBuild={onBuild}
+      />
+      {baseQueue.length > 0 && (
+        <section>
+          <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Build orders in progress</h3>
+          {baseQueue.map((q) => (
+            <div key={q.facilityId} className="mb-1.5 flex items-center justify-between rounded border border-[#e8b34b] bg-[#12161c] px-2.5 py-2 text-sm">
+              <span className="text-[#d7dde5]">
+                {FACILITIES.find((f) => f.id === q.facilityId)?.name ?? q.facilityId}
+                <span className="ml-2 font-mono text-[11px] text-[#8a94a3]">ready {fmtAbs(q.readyMin)}</span>
+              </span>
+              <button
+                onClick={() => { sfx.play('ui'); cancelBuild(q.facilityId); }}
+                className="rounded border border-[#232b36] bg-[#0b0e12] px-2 py-1 text-[12px] text-[#d7dde5] transition-colors hover:border-[#e5484d]"
+              >
+                Cancel
+              </button>
+            </div>
+          ))}
+        </section>
+      )}
+    </div>
+  );
+}
+
 function BaseSection() {
   const base = useGameStore((s) => s.base);
   const buildFacility = useGameStore((s) => s.buildFacility);
@@ -1505,7 +1589,7 @@ export default function Phone() {
             {phoneTab === 'world' && <WorldMap />}
             {phoneTab === 'base' && (
               <div className="nomad-scroll h-full overflow-y-auto">
-                <BaseSection />
+                <BaseTab />
               </div>
             )}
             {phoneTab === 'team' && <TeamTab />}
