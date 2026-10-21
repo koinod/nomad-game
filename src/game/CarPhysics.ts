@@ -133,6 +133,43 @@ export function geomFor(defId: string): ChassisGeom {
   return CHASSIS_GEOM[defId] ?? CHASSIS_GEOM.mustang;
 }
 
+/** Per-def suspension tune (Item 3, 2026-10-21). Until this wave
+ *  every car ran one hardcoded stiffness (32), NO damping was ever
+ *  set, and travel was a shared 0.28 — the GT500 (heavier, lower,
+ *  period geometry) bottomed out through its whole travel on a 3 m
+ *  drop and its wheels visually rose past the fender arches.
+ *
+ *  archTravelM is the body's own datum: how far a wheel may rise
+ *  (suspension length below rest) before its top passes the arch
+ *  lip; archTopM is the arch lip's height over the ground plane.
+ *  The visual clamp and the geometry test both read these numbers.
+ *  Mustang damping stays UNSET (Rapier defaults) — its measured
+ *  behavior was Ian-approved and does not move; the GT500 gets a
+ *  full explicit tune for its mass and geometry. */
+export interface SuspTune {
+  stiffness: number;
+  compression?: number;
+  relaxation?: number;
+  travel: number;
+  archTravelM: number;
+  archTopM: number;
+}
+export const SUSP_TUNES: Record<string, SuspTune> = {
+  mustang: { stiffness: 32, travel: 0.28, archTravelM: 0.18, archTopM: 0.87 },
+  gt500: { stiffness: 46, compression: 4.5, relaxation: 6.5, travel: 0.24, archTravelM: 0.17, archTopM: 0.86 },
+};
+export function suspTuneFor(defId: string): SuspTune {
+  return SUSP_TUNES[defId] ?? SUSP_TUNES.mustang;
+}
+
+/** The wheel-visual clamp (Item 3b): a wheel may tuck INTO its arch
+ *  at full compression but must never render above it. Suspension
+ *  length below rest by more than the arch allows is clamped for
+ *  the visual; droop is clamped at full travel. Pure — tests pin it. */
+export function clampSuspensionVisual(len: number, rest: number, tune: SuspTune): number {
+  return THREE.MathUtils.clamp(len, rest - tune.archTravelM, rest + tune.travel);
+}
+
 /** Physics parameters per def. The Stallion derives from its upgrade
  *  build state (carSpec). The GT500 runs its fixed period spec —
  *  cargo is real mass on top; the upgrade tree's carSpec deltas are
@@ -161,6 +198,10 @@ export class CarPhysics {
   /** Water interaction state, refreshed every step (Item 2). */
   submerged = 0;
   stalled = false;
+  /** Unclamped suspension lengths (m) from the controller — physics
+   *  truth for tests/diagnostics; Vehicle.suspension is the clamped
+   *  visual value. */
+  rawSuspension: [number, number, number, number] = [0.32, 0.32, 0.32, 0.32];
   private spin = 0;
   private prevVel = new THREE.Vector3();
   private impactCooldown = 0;
@@ -272,9 +313,12 @@ export class CarPhysics {
         this.params.wheelRadiusM,
       );
     }
+    const tune = suspTuneFor(this.defId);
     for (let i = 0; i < 4; i++) {
-      ctrl.setWheelSuspensionStiffness(i, 32);
-      ctrl.setWheelMaxSuspensionTravel(i, 0.28);
+      ctrl.setWheelSuspensionStiffness(i, tune.stiffness);
+      if (tune.compression !== undefined) ctrl.setWheelSuspensionCompression(i, tune.compression);
+      if (tune.relaxation !== undefined) ctrl.setWheelSuspensionRelaxation(i, tune.relaxation);
+      ctrl.setWheelMaxSuspensionTravel(i, tune.travel);
       ctrl.setWheelFrictionSlip(i, this.params.tireMu * this.gripScale * 4.0);
       ctrl.setWheelSideFrictionStiffness(i, 0.9);
     }
@@ -296,7 +340,7 @@ export class CarPhysics {
         // the lift kit is geometry, not a stat: longer rest length,
         // softer springs — clearance you can see, roll you can feel
         this.controller.setWheelSuspensionRestLength(i, this.restLen());
-        this.controller.setWheelSuspensionStiffness(i, this.params.lifted ? 26 : 32);
+        this.controller.setWheelSuspensionStiffness(i, this.params.lifted ? 26 : suspTuneFor(this.defId).stiffness);
       }
     }
   }
@@ -494,9 +538,14 @@ export class CarPhysics {
     this.spin += (this.speed / this.params.wheelRadiusM) * dt;
     v.steerVis = this.steerAngle;
     v.wheelSpinAngle = this.spin;
+    const tune = suspTuneFor(this.defId);
     for (let i = 0; i < 4; i++) {
-      const len = this.controller.wheelSuspensionLength(i);
-      v.suspension[i] = len ?? this.restLen();
+      const len = this.controller.wheelSuspensionLength(i) ?? this.restLen();
+      this.rawSuspension[i] = len;
+      // the VISUAL length is clamped to the arch (Item 3b): the body
+      // may bottom out in physics, but the rendered wheel tucks into
+      // the well and never pokes through the fender
+      v.suspension[i] = clampSuspensionVisual(len, this.restLen(), tune);
     }
     v.suspRest = this.restLen();
   }

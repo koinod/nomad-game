@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { CarPhysics, geomFor, paramsForDef } from '../game/CarPhysics';
+import { CarPhysics, geomFor, paramsForDef, suspTuneFor, clampSuspensionVisual } from '../game/CarPhysics';
 import { VEHICLE_DEFS, VEHICLE_SPAWNS, type Vehicle } from '../game/Vehicles';
 import { GT500_DEF, GT500_PARAMS, GT500_SPAWN, GT500_TORQUE } from '../game/gt500Def';
 import {
@@ -161,4 +161,125 @@ describe('rigid-body GT500', () => {
     expect(g.group.position.y).toBeGreaterThan(-0.25);
     expect(g.group.position.y).toBeLessThan(0.35);
   }, 30000);
+});
+
+// ------------------------------------------------------------ Item 3: suspension + arches
+
+describe('GT500 suspension tune (Item 3)', () => {
+  it('the tune is explicit: stiffness for its mass, real damping, its own travel', () => {
+    const t = suspTuneFor('gt500');
+    expect(t.stiffness).toBeGreaterThan(suspTuneFor('mustang').stiffness);
+    expect(t.compression).toBeGreaterThan(0);
+    expect(t.relaxation).toBeGreaterThan(0);
+    expect(t.travel).toBeLessThan(0.28);
+  });
+
+  it('the arch datum is consistent for both cars: full tuck still fits the well', () => {
+    for (const id of ['mustang', 'gt500']) {
+      const tune = suspTuneFor(id);
+      const r = paramsForDef(id, [], 0).wheelRadiusM;
+      // wheel top at maximum visual rise = diameter + allowed rise
+      expect(2 * r + tune.archTravelM).toBeLessThanOrEqual(tune.archTopM + 1e-9);
+    }
+  });
+
+  it('clampSuspensionVisual: tuck clamps at the arch, droop at full travel', () => {
+    const tune = suspTuneFor('gt500');
+    const rest = 0.32;
+    expect(clampSuspensionVisual(0.0, rest, tune)).toBeCloseTo(rest - tune.archTravelM, 6);
+    expect(clampSuspensionVisual(-1, rest, tune)).toBeCloseTo(rest - tune.archTravelM, 6);
+    expect(clampSuspensionVisual(0.9, rest, tune)).toBeCloseTo(rest + tune.travel, 6);
+    expect(clampSuspensionVisual(0.27, rest, tune)).toBeCloseTo(0.27, 6);
+  });
+
+  it('settles composed: near-equal corners, laden stance', async () => {
+    const cp = await CarPhysics.create({ onImpact: () => undefined }, flat, []);
+    const v = fakeVehicle('gt500');
+    cp.spawnCar(v, [], 0);
+    for (let i = 0; i < 240; i++) {
+      cp.step(1 / 60, { throttle: 0, steer: 0, handbrake: true, hasFuel: true }, v, flat);
+    }
+    for (const s of cp.rawSuspension) {
+      expect(s).toBeGreaterThan(0.24);
+      expect(s).toBeLessThan(0.30);
+    }
+    expect(Math.max(...cp.rawSuspension) - Math.min(...cp.rawSuspension)).toBeLessThan(0.01);
+  }, 30000);
+
+  it('a hard landing compresses deep, recovers clean, and never breaches the arch', async () => {
+    // Measured character of the controller (tune sweep + force trace,
+    // 2026-10-21): Rapier's raycast suspension applies a fraction of
+    // its computed force per substep, so free-fall drops past ~0.25 m
+    // use the whole travel and kiss the chassis — at EVERY stiffness
+    // from 40 to 130. That is the shipped model's character (the
+    // Mustang baseline shares it), not a tune defect; what the tune
+    // must guarantee is a deep, damped compression with a clean
+    // recovery and no oscillation — and the rendered wheel inside
+    // its arch at every instant (asserted separately at 3 m too).
+    const cp = await CarPhysics.create({ onImpact: () => undefined }, flat, []);
+    const v = fakeVehicle('gt500');
+    cp.spawnCar(v, [], 0);
+    for (let i = 0; i < 120; i++) cp.step(1 / 60, { throttle: 0, steer: 0, handbrake: true, hasFuel: true }, v, flat);
+    const settledY = v.group.position.y;
+    const settledLen = cp.rawSuspension[0];
+    v.group.position.y = 0.3;
+    cp.teleport(v);
+    const tune = suspTuneFor('gt500');
+    let minRaw = Infinity;
+    const late: number[] = [];
+    for (let i = 0; i < 360; i++) {
+      cp.step(1 / 60, { throttle: 0, steer: 0, handbrake: true, hasFuel: true }, v, flat);
+      minRaw = Math.min(minRaw, ...cp.rawSuspension);
+      for (let w = 0; w < 4; w++) {
+        expect(v.suspRest - v.suspension[w]).toBeLessThanOrEqual(tune.archTravelM + 1e-6);
+      }
+      if (i > 330) late.push(cp.rawSuspension[0]);
+    }
+    expect(minRaw).toBeLessThan(settledLen - 0.1); // the landing really loaded the springs
+    expect(Math.abs(v.group.position.y - settledY)).toBeLessThan(0.02); // recovered to ride height
+    expect(Math.max(...late) - Math.min(...late)).toBeLessThan(0.005); // no residual oscillation
+  }, 30000);
+
+  it('a 3 m drop bottoms the physics — but the RENDERED wheel never leaves the arch', async () => {
+    const cp = await CarPhysics.create({ onImpact: () => undefined }, flat, []);
+    const v = fakeVehicle('gt500');
+    cp.spawnCar(v, [], 0);
+    for (let i = 0; i < 120; i++) cp.step(1 / 60, { throttle: 0, steer: 0, handbrake: true, hasFuel: true }, v, flat);
+    v.group.position.y = 3;
+    cp.teleport(v);
+    const tune = suspTuneFor('gt500');
+    const r = paramsForDef('gt500', [], 0).wheelRadiusM;
+    let sawPhysicsBottom = false;
+    for (let i = 0; i < 300; i++) {
+      cp.step(1 / 60, { throttle: 0, steer: 0, handbrake: true, hasFuel: true }, v, flat);
+      if (Math.min(...cp.rawSuspension) <= 0.32 - tune.travel + 0.005) sawPhysicsBottom = true;
+      for (let w = 0; w < 4; w++) {
+        const rise = v.suspRest - v.suspension[w];
+        expect(rise).toBeLessThanOrEqual(tune.archTravelM + 1e-6);
+        // the Ian-facing invariant: wheel top at/below the arch lip
+        expect(2 * r + rise).toBeLessThanOrEqual(tune.archTopM + 1e-6);
+      }
+    }
+    expect(sawPhysicsBottom).toBe(true); // proves the clamp was exercised, not idle
+  }, 30000);
+
+  it('cornering squat: load transfers — outside compresses, body rolls with it (Item 4)', async () => {
+    const cp = await CarPhysics.create({ onImpact: () => undefined }, flat, []);
+    const v = fakeVehicle('gt500');
+    cp.spawnCar(v, [], 0);
+    const dt = 1 / 60;
+    for (let i = 0; i < 400 && cp.speed < 8.5; i++) {
+      cp.step(dt, { throttle: 1, steer: 0, handbrake: false, hasFuel: true }, v, flat);
+      if (v.group.position.z > 250) cp.repositionKeepVelocity(v, 0, -250);
+    }
+    for (let i = 0; i < 200; i++) {
+      cp.step(dt, { throttle: 0.55, steer: 1, handbrake: false, hasFuel: true }, v, flat);
+      if (v.group.position.z > 250 || v.group.position.z < -250) cp.repositionKeepVelocity(v, 0, 0);
+    }
+    const e = new THREE.Euler().setFromQuaternion(v.group.quaternion, 'YXZ');
+    const rollDeg = Math.abs(THREE.MathUtils.radToDeg(e.z));
+    expect(rollDeg).toBeGreaterThan(1.2);
+    const s = cp.rawSuspension;
+    expect(Math.max(...s) - Math.min(...s)).toBeGreaterThan(0.03);
+  }, 60000);
 });
