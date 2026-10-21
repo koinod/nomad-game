@@ -19,6 +19,7 @@ import {
   carryLimitKg, encumbranceTier, slotLimit, totalWeightKg, usedSlots,
 } from './inventoryUtils';
 import { arrangeItems as arrangeGridItems, packGridDims } from './gridUtils';
+import { applyXp, canBuyPerk } from '../systems/skills';
 import { deleteSaveSlot, listSaveSlots, loadGameFromSlot, saveGameToSlot } from '../systems/save';
 import { sfx } from '../systems/audio';
 import { getGame } from '../game/instance';
@@ -1309,48 +1310,33 @@ export const useGameStore = create<GameState>()((set, get) => {
     perkPoints: 0,
     perks: [],
     addSkillXp: (skill, amt) => {
+      // Lane 8 engine adoption: level math lives in systems/skills.applyXp
+      // (semantically identical to the old inline copy — cap 10, overflow
+      // carries, 1 perk point per level). Toast/sfx stay here in the store.
       const s = get();
       const cur = s.skills[skill];
-      if (!cur || cur.level >= 10) return;
-      let { level, xp } = cur;
-      xp += amt;
-      let gained = 0;
-      while (level < 10 && xp >= 80 + 40 * level) {
-        xp -= 80 + 40 * level;
-        level++;
-        gained++;
-      }
-      if (level >= 10) xp = 0;
+      if (!cur) return;
+      const r = applyXp(cur, amt);
+      if (r.state === cur) return;
       set({
-        skills: { ...s.skills, [skill]: { level, xp } },
-        perkPoints: s.perkPoints + gained,
+        skills: { ...s.skills, [skill]: r.state },
+        perkPoints: s.perkPoints + r.levelsGained,
       });
-      if (gained > 0) {
+      if (r.levelsGained > 0) {
         const label = skill[0].toUpperCase() + skill.slice(1);
-        get().addToast(`${label} level ${level} — +${gained} perk point${gained > 1 ? 's' : ''}.`);
+        get().addToast(`${label} level ${r.state.level} — +${r.levelsGained} perk point${r.levelsGained > 1 ? 's' : ''}.`);
         sfx.play('quest', { volume: 0.5 });
       }
     },
     buyPerk: (perkId) => {
+      // Gate delegated to Lane 8's canBuyPerk (tier chain + §6.2 requires
+      // chains + capstone rules); its reason is the player-facing denial.
       const s = get();
       const def = PERKS_ALL.find((p) => p.id === perkId);
-      if (!def || s.perks.includes(perkId)) return;
-      if (s.perkPoints < 1) {
-        s.addToast('No perk points — earn skill levels first.');
-        return;
-      }
-      const tree = PERKS_ALL.filter((p) => p.tree === def.tree && s.perks.includes(p.id));
-      if (def.tier === 4) {
-        if (tree.length < 4) {
-          s.addToast('A capstone needs 4 perks in its tree first.');
-          return;
-        }
-        if (PERKS_ALL.some((p) => p.tier === 4 && s.perks.includes(p.id))) {
-          s.addToast('One capstone per run — this is who you are now.');
-          return;
-        }
-      } else if (def.tier > 1 && !tree.some((p) => p.tier === def.tier - 1)) {
-        s.addToast(`Learn a tier ${def.tier - 1} perk in this tree first.`);
+      if (!def) return;
+      const check = canBuyPerk(s.perks, s.perkPoints, perkId);
+      if (!check.ok) {
+        s.addToast(check.reason);
         return;
       }
       set({ perks: [...s.perks, perkId], perkPoints: s.perkPoints - 1 });
