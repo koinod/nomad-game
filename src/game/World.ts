@@ -86,8 +86,12 @@ export function slopeAt(x: number, z: number): number {
   return Math.hypot(dx, dz) / (2 * e);
 }
 
-/** Deterministic island height. Requires initTerrainField(seed) first. */
-export function heightAt(x: number, z: number): number {
+/** Deterministic island height — the ANALYTIC generator. Requires
+ *  initTerrainField(seed) first. This function DEFINES the island, but
+ *  nothing at runtime samples it directly once the ground field is
+ *  baked (see below): it exists to generate the field and for tests
+ *  that pin the island's surveyed properties. */
+export function analyticHeightAt(x: number, z: number): number {
   const az = Math.abs(z);
   const ax = Math.abs(x);
   const shore = smoothstep(305, 205, az); // 1 inland, 0 at the waterline
@@ -126,6 +130,83 @@ export function heightAt(x: number, z: number): number {
     }
   }
   return h;
+}
+
+// ---- THE GROUND FIELD: one source of truth (Ian playtest, 2026-10-21) ---
+//
+// The playtest verdict was brutal and specific: the car fell through the
+// floor in places and floated on thin air in others; feet fell through
+// the topo on foot. Root cause, measured: THREE different surfaces.
+// The visual mesh tessellated the analytic heightAt at 4.4x4 m, the
+// Rapier heightfield at 5x5 m, and gameplay sampled the analytic curve
+// itself — on the dune-ridge cusps those surfaces disagree by up to
+// 1.17 m, several times the suspension's whole travel.
+//
+// The fix is architectural: the island's ground IS a discrete field,
+// sampled once from the analytic generator at 2 m. The terrain mesh's
+// vertices are exactly the field nodes; the Rapier heightfield is fed
+// exactly the field nodes; heightAt() — the function every gameplay
+// system samples — bilinearly interpolates the field. All three agree
+// by construction; the only residual is the sub-cell triangle-split
+// difference (centimeters, pinned by groundTruth.test.ts).
+
+export const GROUND_COLS = 700; // 2 m cells across the 1400 m island
+export const GROUND_ROWS = 320; // 2 m cells across the 640 m island
+
+let groundField: Float32Array | null = null;
+
+/** Sample the analytic generator into the ground field. Called by
+ *  World.build() after the terrain pads resolve (pads are part of the
+ *  analytic definition) and before the terrain mesh is built. */
+export function bakeGroundField(): void {
+  const heights = new Float32Array((GROUND_COLS + 1) * (GROUND_ROWS + 1));
+  for (let j = 0; j <= GROUND_ROWS; j++) {
+    for (let i = 0; i <= GROUND_COLS; i++) {
+      const x = WORLD.xMin + (i / GROUND_COLS) * (WORLD.xMax - WORLD.xMin);
+      const z = WORLD.zMin + (j / GROUND_ROWS) * (WORLD.zMax - WORLD.zMin);
+      heights[j * (GROUND_COLS + 1) + i] = analyticHeightAt(x, z);
+    }
+  }
+  groundField = heights;
+}
+
+/** The baked field's node heights (null before bake) — the mesh, the
+ *  physics heightfield, and the tests all read THIS array. */
+export function groundFieldHeights(): Float32Array | null {
+  return groundField;
+}
+
+/** Sample of the baked field; clamps to the island rect. NOT bilinear:
+ *  each cell is two triangles split along the h10–h01 diagonal —
+ *  probed 2026-10-21 to be the exact split BOTH Rapier's heightfield
+ *  and PlaneGeometry's index buffer use, so this interpolation is the
+ *  rendered surface and the physics surface, point for point. */
+export function sampleGroundField(x: number, z: number): number {
+  const f = groundField;
+  if (!f) return analyticHeightAt(x, z);
+  const fx = clamp(((x - WORLD.xMin) / (WORLD.xMax - WORLD.xMin)) * GROUND_COLS, 0, GROUND_COLS - 1e-4);
+  const fz = clamp(((z - WORLD.zMin) / (WORLD.zMax - WORLD.zMin)) * GROUND_ROWS, 0, GROUND_ROWS - 1e-4);
+  const i = Math.floor(fx);
+  const j = Math.floor(fz);
+  const tx = fx - i;
+  const tz = fz - j;
+  const w = GROUND_COLS + 1;
+  const h00 = f[j * w + i];
+  const h10 = f[j * w + i + 1];
+  const h01 = f[(j + 1) * w + i];
+  const h11 = f[(j + 1) * w + i + 1];
+  if (tx + tz <= 1) {
+    return h00 + (h10 - h00) * tx + (h01 - h00) * tz;
+  }
+  return (h10 + h01 - h11) + (h11 - h01) * tx + (h11 - h10) * tz;
+}
+
+/** THE ground truth every system samples. Before the field is baked
+ *  (tests, pre-build queries) it is the analytic generator; once
+ *  World.build() bakes the field, it is the field itself — the same
+ *  surface the mesh renders and the physics body rides on. */
+export function heightAt(x: number, z: number): number {
+  return groundField ? sampleGroundField(x, z) : analyticHeightAt(x, z);
 }
 
 export function biomeAt(x: number, z: number): BiomeId {
@@ -393,6 +474,11 @@ export class World {
   build(): void {
     this.resolvePois();
     this.setupHousePads();
+    // the ground field bakes AFTER the pads resolve (they are part of
+    // the analytic definition) and BEFORE anything samples heightAt
+    // for placement — from here on, heightAt IS the field the mesh
+    // renders and the physics rides on
+    bakeGroundField();
     this.buildTerrain();
     this.buildWater();
     this.buildLights();
@@ -481,8 +567,11 @@ export class World {
   private buildTerrain(): void {
     const w = WORLD.xMax - WORLD.xMin;
     const d = WORLD.zMax - WORLD.zMin;
-    const segX = 320;
-    const segZ = 160;
+    // the mesh tessellates EXACTLY the ground field's nodes — one
+    // vertex per node, so the rendered surface and the physics
+    // heightfield are the same surface by construction
+    const segX = GROUND_COLS;
+    const segZ = GROUND_ROWS;
     const geo = new THREE.PlaneGeometry(w, d, segX, segZ);
     geo.rotateX(-Math.PI / 2);
     const pos = geo.attributes.position as THREE.BufferAttribute;

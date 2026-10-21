@@ -2,8 +2,46 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { carParams, torqueAt, type CarParams } from './carSpec';
 import { GT500_PARAMS } from './gt500Def';
+import { GROUND_COLS, GROUND_ROWS } from './World';
 import type { Vehicle } from './Vehicles';
 import type { Collider } from './Colliders';
+
+/** The Rapier heightfield for the ground, built from the ground
+ *  field's own nodes sampled through the same groundY the game passes
+ *  in (post-bake, heightAt at a node IS the node). One source of
+ *  truth — the physics surface and the rendered terrain mesh are the
+ *  same field.
+ *
+ *  LAYOUT WARNING (probed twice, 2026-10-21): Rapier's heightfield
+ *  swaps its subdivision arguments relative to the world axes — the
+ *  node count along X is governed by the SECOND subdivision argument,
+ *  and node (ix, iz) lives at flat index ix*(rows+1)+iz. The pre-fix
+ *  construction silently gave the physics a transposed, wrong-density
+ *  projection of the island: every flat-ground test passed on it (a
+ *  constant field is transpose-invariant), and it is a root cause of
+ *  the playtest's falls-through-floor / floats-on-thin-air. The
+ *  groundTruth tests raycast-probe this layout so it cannot regress
+ *  silently again. */
+export function buildRapierHeightfield(
+  groundY: (x: number, z: number) => number,
+  cols: number = GROUND_COLS,
+  rows: number = GROUND_ROWS,
+  xMin = -700,
+  xMax = 700,
+  zMin = -320,
+  zMax = 320,
+): { heights: Float32Array; nsubdivx: number; nsubdivz: number } {
+  const heights = new Float32Array((cols + 1) * (rows + 1));
+  for (let ix = 0; ix <= cols; ix++) {
+    for (let iz = 0; iz <= rows; iz++) {
+      const x = xMin + (ix / cols) * (xMax - xMin);
+      const z = zMin + (iz / rows) * (zMax - zMin);
+      heights[ix * (rows + 1) + iz] = groundY(x, z);
+    }
+  }
+  // Rapier: nsubdivx counts the Z nodes, nsubdivz counts the X nodes
+  return { heights, nsubdivx: rows, nsubdivz: cols };
+}
 
 /**
  * CarPhysics — rigid-body driving (Piece 3). One live body, bound to
@@ -106,22 +144,23 @@ export class CarPhysics {
       world.timestep = 1 / 120;
       cp.world = world;
       cp.events = new RAPIER.EventQueue(true);
-      // terrain heightfield, sampled from the same heightAt the mesh uses
-      const NX = 280;
-      const NZ = 128;
-      const heights = new Float32Array((NX + 1) * (NZ + 1));
-      for (let i = 0; i <= NX; i++) {
-        for (let j = 0; j <= NZ; j++) {
-          const x = -700 + (i / NX) * 1400;
-          const z = -320 + (j / NZ) * 640;
-          heights[j * (NX + 1) + i] = groundY(x, z);
-        }
-      }
+      // terrain heightfield: the ground field's nodes, verbatim — the
+      // same surface the mesh renders (World.bakeGroundField)
+      const hf = buildRapierHeightfield(groundY);
       const ground = RAPIER.ColliderDesc.heightfield(
-        NX, NZ, heights, new RAPIER.Vector3(1400, 1, 640),
+        hf.nsubdivx, hf.nsubdivz, hf.heights, new RAPIER.Vector3(1400, 1, 640),
       );
       ground.setFriction(0.15);
       world.createCollider(ground);
+      // seabed safety slab: the heightfield ends at the island rect,
+      // but the sea (and a car in it) does not — a floor just under the
+      // field's minimum (-1.6) spans the whole water plane so nothing
+      // can fall out of the world past the map edge. It sits 0.18 below
+      // the deepest field node, so it never touches on-island physics.
+      const seabed = RAPIER.ColliderDesc.cuboid(2100, 0.1, 1200)
+        .setTranslation(0, -1.88, 0)
+        .setFriction(0.3);
+      world.createCollider(seabed);
       // buildings: fixed cuboids from the kit AABBs
       for (const c of buildingColliders) {
         const cx = (c.x0 + c.x1) / 2;
