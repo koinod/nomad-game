@@ -372,6 +372,9 @@ export interface HuskLootEntry {
   min: number;
   max: number;
   chance: number;
+  /** Loot class for biome weighting (§4.5). Absent = derived from the
+   *  item (LOOT_CLASS_BY_ITEM, then its category) — see lootClassFor(). */
+  lootClass?: LootClass;
 }
 
 // Wave 4: corpse loot keyed by KIND, rolled in addition to the zone table —
@@ -938,4 +941,69 @@ export const BARTER_VALUES: Record<string, number> = {
 /** Trader price for one unit; 0 = not tradable. */
 export function barterValueOf(itemId: string): number {
   return BARTER_VALUES[itemId] ?? 0;
+}
+
+// ---------- biome loot weighting (SYSTEMS_SPEC §4.5) ----------
+// Where you loot shapes what you find: the same crate is food-heavy in
+// the forest and med-heavy in town. Mirrors Game.ts's BiomeId member-
+// for-member (declared locally — data must not import the engine).
+export type LootBiome = 'beach' | 'dune' | 'forest' | 'town' | 'marsh' | 'water';
+export type LootClass = 'material' | 'food' | 'military' | 'medical';
+
+export const BIOME_LOOT_WEIGHT: Record<LootBiome, Record<LootClass, number>> = {
+  beach: { material: 1.2, food: 0.8, military: 0.3, medical: 0.5 },
+  dune: { material: 0.8, food: 0.6, military: 0.5, medical: 0.5 },
+  forest: { material: 1.0, food: 1.4, military: 0.2, medical: 0.8 },
+  town: { material: 1.1, food: 1.0, military: 0.6, medical: 1.2 },
+  marsh: { material: 0.7, food: 1.1, military: 0.3, medical: 0.7 },
+  water: { material: 0.5, food: 0.6, military: 0.2, medical: 0.3 },
+};
+
+/** Item-level class overrides where the category lies: gun_parts and
+ *  armor are 'material'-category data but military loot in the fiction. */
+const LOOT_CLASS_BY_ITEM: Record<string, LootClass> = {
+  gun_parts: 'military', armor_plate: 'military', bp_turret: 'military',
+  plate_carrier: 'military', armored_vest: 'military', riot_helmet: 'military',
+};
+
+/** The class an entry rolls as: explicit field > item override > category. */
+export function lootClassFor(entry: { id: string; lootClass?: LootClass }): LootClass {
+  if (entry.lootClass) return entry.lootClass;
+  const byItem = LOOT_CLASS_BY_ITEM[entry.id];
+  if (byItem) return byItem;
+  switch (ITEMS[entry.id]?.category) {
+    case 'food': return 'food';
+    case 'medical': return 'medical';
+    case 'weapon-melee':
+    case 'weapon-ranged':
+    case 'ammo':
+    case 'mod': return 'military';
+    default: return 'material';
+  }
+}
+
+/** Effective drop chance for an entry in a biome (clamped to certainty). */
+export function weightedChance(entry: HuskLootEntry, biome: LootBiome): number {
+  return Math.min(1, entry.chance * BIOME_LOOT_WEIGHT[biome][lootClassFor(entry)]);
+}
+
+/**
+ * The one loot roll, shared by containers and corpses: per entry, a
+ * biome-weighted chance check, then the shipped qty formula
+ * (min..max scaled by the difficulty resourceMult, floored at 1).
+ */
+export function rollLoot(
+  entries: HuskLootEntry[],
+  rng: () => number,
+  opts?: { resourceMult?: number; biome?: LootBiome },
+): { itemId: string; qty: number }[] {
+  const out: { itemId: string; qty: number }[] = [];
+  const mult = opts?.resourceMult ?? 1;
+  for (const e of entries) {
+    const chance = opts?.biome ? weightedChance(e, opts.biome) : e.chance;
+    if (rng() > chance) continue;
+    const qty = Math.max(1, Math.round((e.min + rng() * (e.max - e.min)) * mult));
+    out.push({ itemId: e.id, qty });
+  }
+  return out;
 }

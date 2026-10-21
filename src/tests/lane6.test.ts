@@ -6,6 +6,7 @@ import { describe, it, expect } from 'vitest';
 import {
   ITEMS, HUSK_LOOT, HUSK_KIND_LOOT, FURNITURE_LOOT, SAFE_LOOT, LOG_LOOT,
   BUSH_LOOT, FIELD_RECIPES, STATION_RECIPES, BARTER_VALUES, barterValueOf,
+  BIOME_LOOT_WEIGHT, lootClassFor, weightedChance, rollLoot,
 } from '../data/items';
 
 const has = (id: string) => Object.prototype.hasOwnProperty.call(ITEMS, id);
@@ -97,5 +98,42 @@ describe('barter (§3.5 anchors)', () => {
   it('prices respect the tier ladder (a carbine beats a pistol beats a pipe)', () => {
     expect(barterValueOf('carbine')).toBeGreaterThan(barterValueOf('pistol'));
     expect(barterValueOf('pistol')).toBeGreaterThan(barterValueOf('pipe'));
+  });
+});
+
+describe('biome loot weighting (§4.5)', () => {
+  it('the weight table is the spec table, verbatim', () => {
+    expect(BIOME_LOOT_WEIGHT.beach).toEqual({ material: 1.2, food: 0.8, military: 0.3, medical: 0.5 });
+    expect(BIOME_LOOT_WEIGHT.forest.food).toBe(1.4);
+    expect(BIOME_LOOT_WEIGHT.town.medical).toBe(1.2);
+    expect(BIOME_LOOT_WEIGHT.water.military).toBe(0.2);
+    expect(BIOME_LOOT_WEIGHT.water.medical).toBe(0.3);
+  });
+
+  it('loot class derives: override > item rule > category', () => {
+    expect(lootClassFor({ id: 'gun_parts' })).toBe('military'); // material category, military loot
+    expect(lootClassFor({ id: 'canned_food' })).toBe('food');
+    expect(lootClassFor({ id: 'bandage' })).toBe('medical');
+    expect(lootClassFor({ id: 'scrap' })).toBe('material');
+    expect(lootClassFor({ id: 'scrap', lootClass: 'food' })).toBe('food'); // explicit wins
+  });
+
+  it('weighted chance clamps at certainty and starves off-class loot', () => {
+    const ammo = { id: 'ammo_9mm', min: 1, max: 1, chance: 0.9 };
+    expect(weightedChance(ammo, 'forest')).toBeCloseTo(0.18); // military 0.2 in the trees
+    const feast = { id: 'canned_food', min: 1, max: 1, chance: 0.9 };
+    expect(weightedChance(feast, 'forest')).toBe(1); // food 1.4 clamps
+  });
+
+  it('rollLoot with a scripted rng is deterministic and biome-aware', () => {
+    const table = [{ id: 'ammo_9mm', min: 2, max: 2, chance: 0.5 }];
+    const seq = [0.4, 0.5]; // chance roll, qty roll
+    let i = 0;
+    const rng = () => seq[i++ % seq.length];
+    // town military weight 0.6 → effective 0.3; a 0.4 roll misses there…
+    expect(rollLoot(table, rng, { biome: 'town' })).toEqual([]);
+    i = 0;
+    // …but the beach material class isn't ammo's; use no-biome base chance: 0.4 < 0.5 hits
+    expect(rollLoot(table, rng)).toEqual([{ itemId: 'ammo_9mm', qty: 2 }]);
   });
 });

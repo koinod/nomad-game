@@ -3,13 +3,13 @@
 
 import * as THREE from 'three';
 import { useGameStore } from '../store/gameStore';
-import { ITEMS, HUSK_LOOT, HUSK_KIND_LOOT, LOG_LOOT, BUSH_LOOT } from '../data/items';
+import { ITEMS, HUSK_LOOT, HUSK_KIND_LOOT, LOG_LOOT, BUSH_LOOT, rollLoot, weightedChance } from '../data/items';
 import { DESIGNED_RECRUITS, SURVIVOR_LOOKS } from '../data/survivors';
 import { CLAIMABLE } from '../data/base';
 import { buildGroundMesh } from './weaponMeshes';
 import { buildFurnitureMesh, FURNITURE_LABEL, type FurnitureKind } from './furnitureMeshes';
 import { sfx } from '../systems/audio';
-import { CAMPFIRE_SPOTS } from './World';
+import { CAMPFIRE_SPOTS, biomeAt } from './World';
 
 export interface LootEntry {
   id: string;
@@ -185,15 +185,14 @@ export class InteractSystem {
             st.addToast('Nothing left here.');
             return;
           }
-          // loot preview: roll once, stash it, show the panel — take what you want
+          // loot preview: roll once, stash it, show the panel — take what you want.
+          // §4.5: the container's biome weights each entry's class, so the
+          // same crate table plays differently in the forest vs in town.
           if (!st.lootStash[c.id]) {
-            const rng = hooks.rng;
-            const items: { itemId: string; qty: number }[] = [];
-            for (const e of c.loot) {
-              if (rng() > e.chance) continue;
-              const qty = Math.max(1, Math.round((e.min + rng() * (e.max - e.min)) * hooks.resourceMult));
-              items.push({ itemId: e.id, qty });
-            }
+            const items = rollLoot(c.loot, hooks.rng, {
+              resourceMult: hooks.resourceMult,
+              biome: biomeAt(c.x, c.z),
+            });
             if (items.length === 0) {
               st.addToast('Nothing useful inside.');
               this.setContainerEmptied(c.id);
@@ -545,9 +544,10 @@ export class InteractSystem {
           return;
         }
         const rng = this.hooks.rng;
+        const biome = biomeAt(x, z); // §4.5 weighting applies to corpses too
         const taken: string[] = [];
         for (const e of table) {
-          if (rng() > e.chance) continue;
+          if (rng() > weightedChance(e, biome)) continue;
           const qty = Math.max(1, Math.round(e.min + rng() * (e.max - e.min)));
           if (!s.addItem(e.id, qty, true, { found: true })) {
             s.addToast('Pack full — left the rest on the body.');
