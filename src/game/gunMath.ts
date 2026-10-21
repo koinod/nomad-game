@@ -84,6 +84,62 @@ export function swayOffset(
   };
 }
 
+// ---------------------------------------------------------- convergence ---
+
+/** Plain-vector shape (gunMath stays THREE-free). */
+export interface Vec3Like {
+  x: number;
+  y: number;
+  z: number;
+}
+
+/**
+ * Item 6 (2026-10-21 playtest: "gun should be properly pointed at the
+ * crosshair") — crosshair convergence. The crosshair sits on the
+ * CAMERA ray; the gun fires from the EYE, which is offset from the
+ * camera (third person, lean, crouch). Firing parallel to the camera
+ * ray from the eye means shots land beside the crosshair at every
+ * range. The honest fix: aim the shot from the eye THROUGH the point
+ * the crosshair is actually on — the camera-ray point at the
+ * convergence distance (nearest husk / ground hit along the camera
+ * ray, else weapon range). At that distance the shot crosses the
+ * crosshair exactly; nearer/farther the error is the small residual
+ * of a real offset barrel, shrinking with distance.
+ */
+export function convergedDir(
+  eye: Vec3Like,
+  camOrigin: Vec3Like,
+  camDir: Vec3Like,
+  dist: number,
+): Vec3Like {
+  const tx = camOrigin.x + camDir.x * dist - eye.x;
+  const ty = camOrigin.y + camDir.y * dist - eye.y;
+  const tz = camOrigin.z + camDir.z * dist - eye.z;
+  const len = Math.hypot(tx, ty, tz);
+  if (len < 1e-6) return { x: camDir.x, y: camDir.y, z: camDir.z };
+  return { x: tx / len, y: ty / len, z: tz / len };
+}
+
+/**
+ * Distance along a ray to the first ground contact, stepped the same
+ * way Combat walks miss tracers (2 m steps, 0.05 skin). Null when the
+ * ray stays above terrain out to maxDist (sky shots).
+ */
+export function rayGroundDistance(
+  o: Vec3Like,
+  d: Vec3Like,
+  groundY: (x: number, z: number) => number,
+  maxDist: number,
+): number | null {
+  for (let dist = 2; dist <= maxDist; dist += 2) {
+    const x = o.x + d.x * dist;
+    const y = o.y + d.y * dist;
+    const z = o.z + d.z * dist;
+    if (y <= groundY(x, z) + 0.05) return dist;
+  }
+  return null;
+}
+
 // -------------------------------------------------------------- condition ---
 
 /** Wear: spec §1.3 — 1 condition per 25 shots / per 20 landed swings. */

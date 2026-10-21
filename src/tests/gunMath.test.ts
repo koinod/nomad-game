@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   armorMult, bloomAdd, bloomDecay, bloomSpread, conditionDamageMult,
-  jamChance, kickFor, moveSpread, rangeFalloff, recoveryStep, rollJam,
-  staggerPower, swayOffset, applyWear, WEAR_PER_SHOT,
+  convergedDir, jamChance, kickFor, moveSpread, rangeFalloff, rayGroundDistance,
+  recoveryStep, rollJam,
+  staggerPower, swayOffset, applyWear, WEAR_PER_SHOT, type Vec3Like,
 } from '../game/gunMath';
 import { ITEMS } from '../data/items';
 import { modAdsTimeMult, modRecoilMult } from '../data/mods';
@@ -163,5 +164,81 @@ describe('roster handling data', () => {
     expect(modRecoilMult([])).toBe(1);
     expect(modAdsTimeMult(['reflex_sight'])).toBeCloseTo(0.7);
     expect(modAdsTimeMult(['foregrip'])).toBeCloseTo(0.9);
+  });
+});
+
+// Item 6 (2026-10-21 playtest: "fix the cross hairs; gun should be
+// properly pointed at the crosshair") — shots converge on the
+// crosshair instead of firing parallel from an offset eye.
+describe('convergedDir (Item 6)', () => {
+  // third-person rig: camera behind/above, eye at the body — the eye
+  // is offset from the camera ray in both axes
+  const camO: Vec3Like = { x: 0.4, y: 2.6, z: -6.4 };
+  const camD: Vec3Like = { x: 0, y: -0.1, z: 0.995 }; // near-level, normalized-ish
+  const camDn: Vec3Like = { x: 0, y: camD.y / Math.hypot(camD.y, camD.z), z: camD.z / Math.hypot(camD.y, camD.z) };
+  const eye: Vec3Like = { x: 0, y: 1.82, z: 0 };
+
+  function crosshairMiss(eyePos: Vec3Like, dist: number): number {
+    // distance from the crosshair point (camera ray at dist) to the
+    // shot line fired from the eye along the converged direction
+    const d = convergedDir(eyePos, camO, camDn, dist);
+    const px = camO.x + camDn.x * dist - eyePos.x;
+    const py = camO.y + camDn.y * dist - eyePos.y;
+    const pz = camO.z + camDn.z * dist - eyePos.z;
+    // |P - eye - ((P-eye).d) d|
+    const t = px * d.x + py * d.y + pz * d.z;
+    return Math.hypot(px - t * d.x, py - t * d.y, pz - t * d.z);
+  }
+
+  it('the shot line passes through the crosshair point at every range', () => {
+    for (const dist of [3, 10, 25, 60]) {
+      expect(crosshairMiss(eye, dist)).toBeLessThan(1e-9);
+    }
+  });
+
+  it('an eye ON the camera ray fires exactly the camera direction', () => {
+    const onRay: Vec3Like = { x: camO.x, y: camO.y, z: camO.z };
+    const d = convergedDir(onRay, camO, camDn, 20);
+    expect(d.x).toBeCloseTo(camDn.x, 10);
+    expect(d.y).toBeCloseTo(camDn.y, 10);
+    expect(d.z).toBeCloseTo(camDn.z, 10);
+  });
+
+  it('parallel fire would miss by the eye offset; convergence error shrinks with range', () => {
+    // angle between the converged dir and the camera dir (what a
+    // parallel shot would use) — big up close, tiny far away
+    const angleAt = (dist: number) => {
+      const d = convergedDir(eye, camO, camDn, dist);
+      return Math.acos(Math.min(1, Math.max(-1, d.x * camDn.x + d.y * camDn.y + d.z * camDn.z)));
+    };
+    expect(angleAt(3)).toBeGreaterThan(angleAt(10));
+    expect(angleAt(10)).toBeGreaterThan(angleAt(60));
+    expect(angleAt(60)).toBeLessThan(0.02); // ~1 degree at range
+    expect(angleAt(3)).toBeGreaterThan(0.1); // parallel fire at 3 m is hopeless
+  });
+
+  it('degenerate convergence (eye at the target) falls back to the camera dir', () => {
+    const atTarget: Vec3Like = { x: camO.x + camDn.x * 5, y: camO.y + camDn.y * 5, z: camO.z + camDn.z * 5 };
+    const d = convergedDir(atTarget, camO, camDn, 5);
+    expect(d).toEqual({ x: camDn.x, y: camDn.y, z: camDn.z });
+  });
+});
+
+describe('rayGroundDistance (Item 6)', () => {
+  const flat = () => 0;
+  it('a level ray over flat ground never lands', () => {
+    expect(rayGroundDistance({ x: 0, y: 1.7, z: 0 }, { x: 0, y: 0, z: 1 }, flat, 45)).toBeNull();
+  });
+  it('a downward ray lands where it meets the ground', () => {
+    // 45 degrees down from 1.7 m: true contact at ~2.4 m along the
+    // ray; at the 2 m step the point is still at y ~ 0.29, so the
+    // first step at/below ground is 4 (2 m step granularity)
+    const d = rayGroundDistance({ x: 0, y: 1.7, z: 0 }, { x: 0, y: -0.7071, z: 0.7071 }, flat, 45);
+    expect(d).toBe(4);
+  });
+  it('rising terrain shortens the flight', () => {
+    const hill = (_x: number, z: number) => z * 0.2; // ground climbs along +z
+    const d = rayGroundDistance({ x: 0, y: 1.7, z: 0 }, { x: 0, y: 0, z: 1 }, hill, 45);
+    expect(d).toBe(10); // y=1.7 meets ground 0.2*z at z ~ 8.5 -> first step past is 10
   });
 });

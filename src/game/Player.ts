@@ -35,7 +35,8 @@ function awardXpEvent(id: XpEventId, mult = 1): void {
 }
 import { magSizeOf, modAdsTimeMult, modRecoilMult } from '../data/mods';
 import {
-  RECOIL_RECOVERABLE, bloomAdd, bloomDecay, kickFor, recoveryStep, swayOffset,
+  RECOIL_RECOVERABLE, bloomAdd, bloomDecay, convergedDir, kickFor, rayGroundDistance,
+  recoveryStep, swayOffset,
 } from './gunMath';
 
 /** Seconds to bring a weapon from carry to ready, by what it is. */
@@ -189,6 +190,8 @@ export class Player {
   private crouching = false;
   private landDip = 0; // camera dip on hard landing, decays
   private handAnchor!: THREE.Group; // right-hand weapon mount
+  private aimPoint = new THREE.Vector3(); // Item 6: smoothed crosshair convergence point (world)
+  private aimPointInit = false;
   private handItemId: string | null = null;
   private handKey = ''; // itemId + finish — the hand mesh's build signature
   private smoothCamMinY = 0; // smoothed ground clearance — kills the hard-clamp snap
@@ -392,14 +395,54 @@ export class Player {
   }
 
   /** Eye position + aim dir for hitscan (camera-driven). Leaning shifts the
-   *  eye toward the peek side so shots clear the cover you're peeking from. */
-  aim(camera: THREE.PerspectiveCamera): { eye: THREE.Vector3; dir: THREE.Vector3 } {
+   *  eye toward the peek side so shots clear the cover you're peeking from.
+   *  Item 6: also returns the camera ray itself (the crosshair's truth)
+   *  and the visible muzzle position, so shots converge on the
+   *  crosshair and tracers leave the barrel the player can see. */
+  aim(camera: THREE.PerspectiveCamera): {
+    eye: THREE.Vector3;
+    dir: THREE.Vector3;
+    camOrigin: THREE.Vector3;
+    muzzlePos: THREE.Vector3;
+  } {
     const dir = new THREE.Vector3();
     camera.getWorldDirection(dir);
-    const eye = this.pos.clone().add(new THREE.Vector3(0, 1.82, 0));
+    const camOrigin = camera.position.clone();
+    // eye height matches the lens in use — the FP/ADS eye is 1.2
+    // crouched / 1.82 standing; the old fixed 1.82 floated crouched
+    // shots ~0.6 m above the crosshair line
+    const eye = this.pos.clone().add(new THREE.Vector3(0, this.crouching ? 1.2 : 1.82, 0));
     const right = new THREE.Vector3(Math.cos(this.camYaw), 0, -Math.sin(this.camYaw));
     eye.addScaledVector(right, this.leanAmt * 0.75);
-    return { eye, dir };
+    let muzzlePos: THREE.Vector3;
+    if (this.firstPerson || this.aimLevel === 2) {
+      // body hidden: just ahead of the eye, where the view model sits
+      muzzlePos = eye.clone().addScaledVector(dir, 0.4);
+    } else {
+      // the in-hand weapon's barrel tip: hand anchor + its forward
+      // (the anchor is aimed at the convergence point while posing)
+      muzzlePos = new THREE.Vector3();
+      this.handAnchor.getWorldPosition(muzzlePos);
+      const mDir = new THREE.Vector3();
+      this.handAnchor.getWorldDirection(mDir);
+      muzzlePos.addScaledVector(mDir, 0.45);
+    }
+    return { eye, dir, camOrigin, muzzlePos };
+  }
+
+  /** Item 6: the distance along the camera ray to the crosshair's
+   *  world point — nearest husk, else ground contact, else range. */
+  private convDistFor(
+    camera: THREE.PerspectiveCamera,
+    husks: HuskManager,
+    groundY: (x: number, z: number) => number,
+    range: number,
+  ): number {
+    const dir = new THREE.Vector3();
+    camera.getWorldDirection(dir);
+    const hit = husks.raycastShot(camera.position, dir, range);
+    if (hit) return hit.dist;
+    return rayGroundDistance(camera.position, dir, groundY, range) ?? range;
   }
 
   /** Keep the right-hand mesh in sync with what's actually equipped. */
@@ -727,12 +770,35 @@ export class Player {
       const rangedNow = useGameStore.getState().equipped.ranged != null;
       const posing = rangedNow && this.attackT <= 0 && this.blockBlend < 0.5 && this.recoilT <= 0;
       if (posing && (!sprinting || this.aimLevel > 0)) {
-        const aimX = this.aimLevel > 0 ? -1.52 : -1.2;
+        // the arm shares the aim pitch: steep up/down aims bend the
+        // arm, not just the wrist — the old fixed -1.52/-1.2 left the
+        // gun level while shots followed the camera pitch (Item 6)
+        const aimX = clamp((this.aimLevel > 0 ? -1.52 : -1.2) - this.camPitch * 0.7, -2.7, -0.3);
         this.armR.rotation.x = lerp(this.armR.rotation.x, aimX, expDamp(10, dt));
         this.armL.rotation.x = lerp(this.armL.rotation.x, -1.1, expDamp(8, dt));
         this.armL.rotation.y = lerp(this.armL.rotation.y, 0.5, expDamp(8, dt));
+        // Item 6: the in-hand gun POINTS at the crosshair — the hand
+        // anchor aims at the camera ray's convergence point (nearest
+        // husk / ground / range), smoothed so target swaps don't snap
+        // the barrel. The view model needs no equivalent: it is
+        // camera-parented, so its barrel already rides the lens.
+        if (this.drawT <= 0) {
+          const dist = this.convDistFor(ctx.camera, ctx.husks, ctx.groundY, equippedRangedDef()?.range ?? 45);
+          const camDir = new THREE.Vector3();
+          ctx.camera.getWorldDirection(camDir);
+          const target = ctx.camera.position.clone().addScaledVector(camDir, dist);
+          if (!this.aimPointInit) {
+            this.aimPoint.copy(target);
+            this.aimPointInit = true;
+          }
+          this.aimPoint.lerp(target, expDamp(18, dt));
+          this.handAnchor.lookAt(this.aimPoint);
+        }
       } else {
         this.armL.rotation.y = lerp(this.armL.rotation.y, 0, expDamp(8, dt));
+        // restore the anchor's carry orientation (build-time tilt)
+        this.handAnchor.rotation.set(Math.PI / 2, 0, 0);
+        this.aimPointInit = false;
       }
     }
 
@@ -887,7 +953,12 @@ export class Player {
       const rdef = rangedEquipped;
       this.rangedCd = rdef?.cooldown ?? 0.4;
       this.recoilT = 0.16;
-      const { eye, dir } = this.aim(ctx.camera);
+      const { eye, dir, camOrigin, muzzlePos } = this.aim(ctx.camera);
+      // Item 6: measure the crosshair's world distance this shot and
+      // converge on it — the same value aims the visible gun (posing)
+      const convDist = rdef ? this.convDistFor(ctx.camera, ctx.husks, ctx.groundY, rdef.range ?? 45) : 25;
+      const conv = convergedDir(eye, camOrigin, dir, convDist);
+      const shotDir = new THREE.Vector3(conv.x, conv.y, conv.z);
       const sway = rdef
         ? swayOffset(this.timeS, rdef.sway ?? 0, this.stamina, this.crouching, this.aimLevel)
         : { x: 0, y: 0 };
@@ -898,6 +969,9 @@ export class Player {
         playerYaw: this.yaw,
         aimDir: dir,
         eyePos: eye,
+        camRay: { origin: camOrigin, dir },
+        convDist,
+        muzzlePos,
         spendStamina: (n) => this.spendStamina(n),
         flashMuzzle: () => this.flashMuzzle(),
         aimLevel: this.aimLevel,
@@ -960,9 +1034,11 @@ export class Player {
           }
         } else if (!fired.projectile) {
           // a miss can still drop a rabbit or deer downrange (hitscan only —
-          // projectile rounds report their own verdict when they land)
+          // projectile rounds report their own verdict when they land).
+          // Same converged line as the husk shot (Item 6) — wildlife on
+          // the crosshair is hit by the shot the crosshair promised.
           const rdef2 = equippedRangedDef();
-          ctx.animals.raycastShot(eye, dir, rdef2?.range ?? 45, rdef2?.damage ?? 20, (kill) =>
+          ctx.animals.raycastShot(eye, shotDir, rdef2?.range ?? 45, rdef2?.damage ?? 20, (kill) =>
             ctx.onAnimalKill(kill),
           );
         }

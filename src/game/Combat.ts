@@ -6,7 +6,7 @@ import { useGameStore } from '../store/gameStore';
 import { sfx } from '../systems/audio';
 import type { HuskManager } from './Husks';
 import { modSpreadMult } from '../data/mods';
-import { bloomSpread, moveSpread, rangeFalloff } from './gunMath';
+import { bloomSpread, convergedDir, moveSpread, rangeFalloff, rayGroundDistance } from './gunMath';
 import { gunshotRadius, noiseClassRadius } from './noise';
 import {
   applyWear, armorMult, conditionDamageMult, rollJam, WEAR_PER_SHOT, WEAR_PER_SWING,
@@ -46,6 +46,9 @@ export interface CombatHooks {
   bloom?: number; // 0..1 sustained-fire bloom (Player-owned)
   moveSpeedNorm?: number; // 0..1 of sprint speed — firing on the move
   sway?: { x: number; y: number }; // ADS sway offset, radians on right/up axes
+  camRay?: { origin: THREE.Vector3; dir: THREE.Vector3 }; // Item 6: the TRUE crosshair ray (camera)
+  convDist?: number; // Item 6: crosshair's world distance along camRay (Player-measured)
+  muzzlePos?: THREE.Vector3; // Item 6: visible barrel tip — tracers/projectiles start here
 }
 
 /** Per-weapon melee feel: reach, arc, swing speed, knockback, stamina cost. */
@@ -275,8 +278,25 @@ export function tryRanged(h: CombatHooks): RangedResult {
     (h.aimLevel === 2 ? 0.002 : 0.006) +
     bloomSpread(h.bloom ?? 0, def.bloomMax ?? 0) +
     moveSpread(h.moveSpeedNorm ?? 0, h.aimLevel);
-  // sway bends the whole shot group off the aim point before pellets scatter
+  // Item 6 crosshair convergence: the shot is aimed from the eye
+  // THROUGH the crosshair point — the camera-ray point at the
+  // convergence distance — not fired parallel to the camera ray from
+  // an offset eye (which landed every shot beside the crosshair).
+  // Player supplies camRay + a measured convDist; compute it here
+  // when only the ray is given; no ray = legacy parallel fire.
   const baseDir = h.aimDir.clone();
+  if (h.camRay) {
+    let convDist = h.convDist;
+    if (convDist == null) {
+      const camHit = h.husks.raycastShot(h.camRay.origin, h.camRay.dir, range);
+      if (camHit) convDist = camHit.dist;
+      else if (h.groundY) convDist = rayGroundDistance(h.camRay.origin, h.camRay.dir, h.groundY, range) ?? range;
+      else convDist = range;
+    }
+    const cd = convergedDir(h.eyePos, h.camRay.origin, h.camRay.dir, convDist);
+    baseDir.set(cd.x, cd.y, cd.z);
+  }
+  // sway bends the whole shot group off the aim point before pellets scatter
   if (h.sway && (h.sway.x !== 0 || h.sway.y !== 0)) {
     const r0 = new THREE.Vector3().crossVectors(baseDir, new THREE.Vector3(0, 1, 0)).normalize();
     const u0 = new THREE.Vector3().crossVectors(r0, baseDir).normalize();
@@ -307,7 +327,7 @@ export function tryRanged(h: CombatHooks): RangedResult {
       const r = Math.sqrt(Math.random()) * spread;
       dir.addScaledVector(right, Math.cos(a) * r).addScaledVector(up, Math.sin(a) * r).normalize();
     }
-    h.onProjectile(h.eyePos.clone().addScaledVector(dir, 0.3), dir, {
+    h.onProjectile((h.muzzlePos ? h.muzzlePos.clone() : h.eyePos.clone()).addScaledVector(dir, 0.3), dir, {
       damage: (def.damage ?? 20) * condMult,
       pen: def.ammoId ? (ITEMS[def.ammoId]?.pen ?? 0) : 0,
       weaponId: def.id,
@@ -331,7 +351,9 @@ export function tryRanged(h: CombatHooks): RangedResult {
       dir.addScaledVector(right, Math.cos(a) * r).addScaledVector(up, Math.sin(a) * r).normalize();
     }
     const res = h.husks.raycastShot(h.eyePos, dir, range);
-    const muzzle = h.eyePos.clone().addScaledVector(dir, 0.45);
+    // the tracer starts at the VISIBLE barrel tip when the caller
+    // knows it (Item 6) — never from inside the shooter's face
+    const muzzle = h.muzzlePos ? h.muzzlePos.clone() : h.eyePos.clone().addScaledVector(dir, 0.45);
     if (res) {
       const pen = def.ammoId ? (ITEMS[def.ammoId]?.pen ?? 0) : 0;
       let dmg = rangeFalloff((def.damage ?? 20) * condMult, res.dist) * armorMult(pen, res.husk.armorClass);
