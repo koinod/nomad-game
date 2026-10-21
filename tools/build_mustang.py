@@ -513,7 +513,7 @@ SHOTS = [
     ('04_front', (7.8, 0, 0.80), (0, 0, 0.58)),
     ('05_rear', (-7.8, 0, 0.95), (0, 0, 0.60)),
     ('06_top', (0.6, -0.9, 9.4), (0.2, 0, 0.3)),
-    ('07_interior', (0.02, 0.40, 1.13), (1.6, 0.18, 0.88)),
+    ('07_interior', (0.28, 0.40, 1.17), (1.45, 0.26, 0.92)),
 ]
 for (name, loc, tgt) in SHOTS:
     cam.location = loc
@@ -527,10 +527,14 @@ for (name, loc, tgt) in SHOTS:
             if nm in bpy.data.objects:
                 bpy.data.objects[nm].hide_render = True
         ld = bpy.data.lights.new('CabinFill', 'POINT')
-        ld.energy = 10
+        ld.energy = 60
         ld.shadow_soft_size = 0.4
+        try:
+            ld.cycles.cast_shadow = False  # proof fill must not shadow the dash
+        except Exception:
+            pass
         cabin_fill = bpy.data.objects.new('CabinFill', ld)
-        cabin_fill.location = (-0.3, 0, 1.45)
+        cabin_fill.location = (0.6, 0, 1.5)
         scene.collection.objects.link(cabin_fill)
     elif name == '06_top':
         cam_data.lens = 50
