@@ -11,6 +11,7 @@ import {
   SPIT_GRAVITY,
 } from './huskMath';
 import { buildHuskFigure, type FigureRig } from './figureKit';
+import { computeVisibility, canHuskSee } from './visibility';
 import { resolveCollisions, type Collider } from './Colliders';
 import { sfx } from '../systems/audio';
 import { useGameStore } from '../store/gameStore';
@@ -77,9 +78,9 @@ export interface HuskCtx {
   /** Wave 4: a screamer's shriek landed (Game hangs the sound off this). */
   onShriekFx?: (x: number, y: number, z: number) => void;
   // ---- LANE 8 (skills) interface — visibility model inputs. Game
-  // supplies these now; the perception swap that consumes them is
-  // integration step L8-1 in the Lane 4 report (Lane 8 merges first, so
-  // src/game/visibility.ts exists in the tree when the step is applied).
+  // supplies these per frame; the perception block below consumes
+  // them via computeVisibility/canHuskSee (integration step L8-1,
+  // applied at the stage-3 merge).
   /** Light level at the player, 0 (pitch black) .. 1 (full sun). */
   playerLight?: number;
   playerCrouched?: boolean;
@@ -428,26 +429,40 @@ export class Husk {
     const toPlayer = _v1.set(pp.x - g.position.x, 0, pp.z - g.position.z);
     const distP = toPlayer.length();
 
-    // ---- perception ----
+    // ---- perception (L8-1 APPLIED: Lane 8's visibility model) ----
+    // Exposure comes from the ctx inputs Game supplies — light at the
+    // player, posture, movement, flashlight, smoke, perks — replacing
+    // the old flat night factor (night now lives inside exposure via
+    // the ambient floor). Sight range = 25 × exposure × stealth factor,
+    // gated by canHuskSee so the gh_unseen capstone holds.
+    const vis = computeVisibility(
+      {
+        lightLevel: ctx.playerLight ?? (ctx.isNight ? 0.3 : 1),
+        isNight: ctx.isNight,
+        crouched: ctx.playerCrouched,
+        moving: ctx.playerMoving,
+        flashlightOn: ctx.playerFlashlight,
+        inSmoke: ctx.playerInSmoke,
+      },
+      ctx.playerPerks ?? [],
+    );
     let sees = false;
-    if (distP < 6) {
-      sees = true; // smell / hearing at close range
-    } else {
-      // INTEGRATION STEP L8-1 (Lane 8 merges first): replace the flat
-      // night factor below with the visibility model —
-      //   const vis = computeVisibility({ lightLevel: ctx.playerLight ?? (ctx.isNight ? 0.3 : 1),
-      //     isNight: ctx.isNight, crouched: ctx.playerCrouched, moving: ctx.playerMoving,
-      //     flashlightOn: ctx.playerFlashlight, inSmoke: ctx.playerInSmoke }, ctx.playerPerks ?? []);
-      //   const sightRange = huskSightRange(25, vis.exposure, ctx.playerStealthLevel ?? 0);
-      // and gate the range check on canHuskSee({ baseRange: 25, distance: distP,
-      // visibility: vis, stealthLevel: ctx.playerStealthLevel ?? 0 }) so the
-      // gh_unseen capstone (crouched+still+shadow = invisible beyond 3m) holds.
-      const sightRange = 25 * (ctx.isNight ? 0.55 : 1);
-      if (distP < sightRange) {
-        const fwd = _v2.set(Math.sin(g.rotation.y), 0, Math.cos(g.rotation.y));
-        const ang = fwd.angleTo(toPlayer.clone().normalize());
-        if (ang < (110 * Math.PI) / 360) sees = true;
-      }
+    if (distP < 6 && !(vis.unseenPosture && distP > 3)) {
+      // smell / hearing at close range — the gh_unseen capstone
+      // (crouched + still + shadowed) beats it beyond 3m; inside 3m
+      // the smell rule still finds the player.
+      sees = true;
+    } else if (
+      canHuskSee({
+        baseRange: 25,
+        distance: distP,
+        visibility: vis,
+        stealthLevel: ctx.playerStealthLevel ?? 0,
+      })
+    ) {
+      const fwd = _v2.set(Math.sin(g.rotation.y), 0, Math.cos(g.rotation.y));
+      const ang = fwd.angleTo(toPlayer.clone().normalize());
+      if (ang < (110 * Math.PI) / 360) sees = true;
     }
     if (sees) {
       this.lostSightT = 0;
