@@ -75,6 +75,14 @@ export function setTerrainPads(pads: TerrainPad[]): void {
   terrainPads = pads;
 }
 
+/** Terrain slope magnitude at a point (finite difference of heightAt). */
+export function slopeAt(x: number, z: number): number {
+  const e = 1.5;
+  const dx = heightAt(x + e, z) - heightAt(x - e, z);
+  const dz = heightAt(x, z + e) - heightAt(x, z - e);
+  return Math.hypot(dx, dz) / (2 * e);
+}
+
 /** Deterministic island height. Requires initTerrainField(seed) first. */
 export function heightAt(x: number, z: number): number {
   const az = Math.abs(z);
@@ -89,6 +97,12 @@ export function heightAt(x: number, z: number): number {
   h += r * r * 5.2 * duneBand(x, z) * shore;
   h += fbm(x * 0.006 + 7.3, z * 0.006 - 3.1) * 2.3 * shore; // broad swell
   h += detail(x * 0.045, z * 0.045) * 0.55 * shore; // detail
+  // TOPOGRAPHY PASS (environment wave): a second, offset relief swell
+  // inland + a micro octave so open ground has grain at foot scale.
+  // Both sit under the beach/airbase/pad overrides below — surveyed
+  // ground stays surveyed.
+  h += fbm(x * 0.0028 - 3.7, z * 0.0028 + 9.2) * 1.5 * shore * smoothstep(60, 190, az + 40);
+  h += detail(x * 0.16 + 11.7, z * 0.16 - 5.9) * 0.13 * shore; // micro grain
   // beach edges pull toward low sand
   const beach = smoothstep(205, 272, az);
   h = lerp(h, 1.15 + detail(x * 0.03, z * 0.03) * 0.7, beach * shore);
@@ -400,8 +414,8 @@ export class World {
   private buildTerrain(): void {
     const w = WORLD.xMax - WORLD.xMin;
     const d = WORLD.zMax - WORLD.zMin;
-    const segX = 256;
-    const segZ = 128;
+    const segX = 320;
+    const segZ = 160;
     const geo = new THREE.PlaneGeometry(w, d, segX, segZ);
     geo.rotateX(-Math.PI / 2);
     const pos = geo.attributes.position as THREE.BufferAttribute;
@@ -414,7 +428,12 @@ export class World {
       pos.setXYZ(i, x, h, z);
       const b = biomeAt(x, z);
       let [r, g, bl] = BIOME_COLORS[b];
-      const v = 1 + n(x * 0.05, z * 0.05) * 0.09; // subtle variation
+      const v = 1 + n(x * 0.05, z * 0.05) * 0.09 + n(x * 0.23, z * 0.23) * 0.05;
+      // steep faces read as rock/dirt, not lawn: blend by slope
+      const rock = clamp((slopeAt(x, z) - 0.32) * 1.5, 0, 0.65);
+      r = lerp(r, 0.44, rock);
+      g = lerp(g, 0.41, rock);
+      bl = lerp(bl, 0.38, rock);
       colors[i * 3] = clamp(r * v, 0, 1);
       colors[i * 3 + 1] = clamp(g * v, 0, 1);
       colors[i * 3 + 2] = clamp(bl * v, 0, 1);
