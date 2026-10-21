@@ -27,7 +27,7 @@ markers = [
     "headlight_left_projector", "headlight_right_projector",
 ]
 parts = [
-    "ChassisFrame_L", "AerodynamicHood", "GrilleSurround", "FrontPushBumper",
+    "ChassisFrame_L", "AerodynamicHood", "GrilleRail_T", "GrilleBar_00", "FrontPushBumper",
     "HighRoofSleeperCab", "SunVisor", "ExhaustStack_L", "ExhaustStack_R",
     "FuelTank_L", "FuelTank_R", "RearCatwalk_L", "FifthWheel",
     "CaptainChair_Driver", "SleeperBunk", "SteeringWheel",
