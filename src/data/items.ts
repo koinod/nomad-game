@@ -155,6 +155,24 @@ export const ITEMS: Record<string, ItemDef> = {
     id: 'gun_parts', name: 'Gun parts', category: 'material', weight: 0.5, slots: 1, stack: 8,
     desc: 'Springs, pins, a trigger group. Weapon maintenance and mods.',
   },
+  // ammo components (SYSTEMS_SPEC §4.2): the T2 reload ladder — brass and
+  // lead loot in the world, gunpowder cooks up at the Chemistry Station
+  gunpowder: {
+    id: 'gunpowder', name: 'Gunpowder', category: 'material', weight: 0.3, slots: 1, stack: 10,
+    desc: 'Black powder, kept dry. The loud half of every reload.',
+  },
+  brass: {
+    id: 'brass', name: 'Brass casings', category: 'material', weight: 0.2, slots: 1, stack: 20,
+    desc: 'Spent casings, picked up and cleaned. Reloaders\u2019 currency.',
+  },
+  lead: {
+    id: 'lead', name: 'Lead stock', category: 'material', weight: 0.5, slots: 1, stack: 10,
+    desc: 'Soft lead ingots and wheel weights. Cast it, load it.',
+  },
+  circuit_board: {
+    id: 'circuit_board', name: 'Circuit board', category: 'material', weight: 0.2, slots: 1, stack: 6,
+    desc: 'Salvaged PCB, traces intact. Turrets and T3 electronics eat these.',
+  },
   valuables: {
     id: 'valuables', name: 'Valuables', category: 'material', weight: 0.3, slots: 1, stack: 10,
     desc: 'Jewelry, cash, and pre-Static shine. Traders still want it.',
@@ -255,9 +273,12 @@ export const ITEMS: Record<string, ItemDef> = {
     thrown: { aoe: 7, dmg: 0, fuse: 0.4, blind: 4, smoke: true },
   },
   rock: {
+    // SYSTEMS_SPEC §2.4's rock_lure under its shipped id: 20m noise at
+    // the landing point. (Retrieval pickup on landing is a Game.ts step —
+    // enumerated in the lane report.)
     id: 'rock', name: 'Rock', category: 'weapon-melee', weight: 0.3, slots: 1, stack: 5,
     desc: 'Equip and throw: lands with a clatter that pulls attention.', damage: 2,
-    thrown: { aoe: 0, dmg: 0, fuse: 0.05, lure: 14 },
+    thrown: { aoe: 0, dmg: 0, fuse: 0.05, lure: 20 },
   },
   boombox: {
     id: 'boombox', name: 'Boombox', category: 'weapon-melee', weight: 3.5, slots: 3, stack: 1,
@@ -284,6 +305,22 @@ export const ITEMS: Record<string, ItemDef> = {
   laser_sight: {
     id: 'laser_sight', name: 'Laser sight', category: 'mod', weight: 0.2, slots: 1, stack: 3,
     desc: 'Underbarrel laser: hip-fire tightens up.',
+  },
+  // §3.2 roster completion (Lane 11 data request): the spec's mod_scope /
+  // mod_choke / mod_flashlight under the shipped roster's canonical
+  // naming. Effects + MODS defs + mesh anchors are Lane 11's follow-up;
+  // the items, recipes, loot, prices, and yields live here.
+  scope: {
+    id: 'scope', name: '4× scope', category: 'mod', weight: 0.3, slots: 1, stack: 3,
+    desc: 'A real optic: reach out — 1.15× effective range, slower to shoulder, −12° of view.',
+  },
+  choke: {
+    id: 'choke', name: 'Choke', category: 'mod', weight: 0.2, slots: 1, stack: 3,
+    desc: 'Muzzle choke: patterns land tighter and hit harder at the edge.',
+  },
+  flashlight: {
+    id: 'flashlight', name: 'Tac light', category: 'mod', weight: 0.2, slots: 1, stack: 3,
+    desc: 'Underbarrel light, 12m cone. What you can see can see you — the visibility tradeoff, in your hand.',
   },
   // wave 4: weapon finishes — lootable cosmetics, applied at a Weapons Bench
   finish_matte: {
@@ -318,6 +355,30 @@ export const ITEMS: Record<string, ItemDef> = {
     id: 'riot_helmet', name: 'Riot helmet', category: 'material', weight: 1.1, slots: 1, stack: 1,
     desc: 'Hard shell, cracked visor. Mitigates 15% of damage while carried.', armor: 0.15,
   },
+  // armor completion (SYSTEMS_SPEC §2.5): torso T3 + the legs slot. These
+  // ride the interim while-carried rule like the vest/helmet until Lane 5
+  // lands the 'armor' category + Equipped slots (FIELD REQUEST filed).
+  plate_carrier: {
+    id: 'plate_carrier', name: 'Plate carrier', category: 'material', weight: 3.4, slots: 2, stack: 1,
+    desc: 'Ceramic plates in a real carrier. Mitigates 40% of damage while carried.', armor: 0.40,
+  },
+  shin_guards: {
+    id: 'shin_guards', name: 'Shin guards', category: 'material', weight: 0.7, slots: 1, stack: 1,
+    desc: 'Molded guards, straps still good. Mitigates 10% of damage while carried.', armor: 0.10,
+  },
+  // the only blueprint in the game (SYSTEMS_SPEC §4.3): rides category
+  // 'key' until Lane 5 adds 'blueprint' to ItemCategory (FIELD REQUEST).
+  bp_turret: {
+    id: 'bp_turret', name: 'Blueprint — Automated Turret', category: 'key', weight: 0.1, slots: 1, stack: 1,
+    desc: 'Sodgame-era schematics, grease-pencil annotations. Unlocks the turret craft: gun parts, boards, an engine part, and a bench that can read.',
+  },
+  turret: {
+    // the blueprint craft's product (SYSTEMS_SPEC §4.3): a deployable
+    // defense for claim ground — placement/ghost logic is Lane 7 + 10's,
+    // the item and its economy live here. Feeds on 9mm once deployed.
+    id: 'turret', name: 'Automated turret', category: 'tool', weight: 12, slots: 3, stack: 1,
+    desc: 'A bench-built sentry gun: 20 damage out to 30m, drinks 9mm from the stockpile. Deploy inside a claim radius.',
+  },
 };
 
 // Husk corpse loot, keyed by spawn zone — Skyrim-style: what they were is
@@ -327,6 +388,9 @@ export interface HuskLootEntry {
   min: number;
   max: number;
   chance: number;
+  /** Loot class for biome weighting (§4.5). Absent = derived from the
+   *  item (LOOT_CLASS_BY_ITEM, then its category) — see lootClassFor(). */
+  lootClass?: LootClass;
 }
 
 // Wave 4: corpse loot keyed by KIND, rolled in addition to the zone table —
@@ -358,17 +422,33 @@ export const HUSK_KIND_LOOT: Record<string, HuskLootEntry[]> = {
     { id: 'bandage', min: 1, max: 1, chance: 0.3 },
     { id: 'water_bottle', min: 1, max: 1, chance: 0.25 },
   ],
+  // military husks (Lane 4): what it was is what it carried — the
+  // armored pack's per-kind salvage, on top of the zone table
+  armored: [
+    { id: 'gun_parts', min: 1, max: 2, chance: 0.35 },
+    { id: 'armor_plate', min: 1, max: 1, chance: 0.22 },
+    { id: 'ammo_556', min: 3, max: 8, chance: 0.5 },
+  ],
 };
 
 export const HUSK_LOOT: Record<string, HuskLootEntry[]> = {
-  // the carrier's armored guard pack drops military salvage
-  carrier: [
+  // the armored guard pack drops military salvage. Post-purge the pack
+  // holds the AIRBASE zone (Lane 4's formalization) — this table was
+  // keyed 'carrier' for the deleted carrier zone and orphaned there;
+  // re-homed to 'airbase' so the zone stops falling back to default.
+  airbase: [
     { id: 'ammo_556', min: 3, max: 8, chance: 0.55 },
     { id: 'gun_parts', min: 1, max: 2, chance: 0.35 },
     { id: 'armor_plate', min: 1, max: 1, chance: 0.22 },
     { id: 'bandage', min: 1, max: 1, chance: 0.4 },
     { id: 'ammo_9mm', min: 4, max: 9, chance: 0.3 },
     { id: 'finish_matte', min: 1, max: 1, chance: 0.12 },
+    // the armored guard pack is the island's military salvage stream:
+    // reload components, real armor, and (rarely) the turret blueprint
+    { id: 'brass', min: 4, max: 8, chance: 0.4 },
+    { id: 'lead', min: 1, max: 2, chance: 0.3 },
+    { id: 'plate_carrier', min: 1, max: 1, chance: 0.08 },
+    { id: 'bp_turret', min: 1, max: 1, chance: 0.05 },
   ],
   forest: [
     { id: 'cloth', min: 1, max: 2, chance: 0.6 },
@@ -393,6 +473,8 @@ export const HUSK_LOOT: Record<string, HuskLootEntry[]> = {
     { id: 'flare', min: 1, max: 1, chance: 0.2 },
     { id: 'cloth', min: 1, max: 1, chance: 0.15 },
     { id: 'chemicals', min: 1, max: 1, chance: 0.2 },
+    { id: 'circuit_board', min: 1, max: 1, chance: 0.25 },
+    { id: 'scope', min: 1, max: 1, chance: 0.15 },
   ],
   dunes: [
     { id: 'water_bottle', min: 1, max: 2, chance: 0.35 },
@@ -424,6 +506,11 @@ export interface FieldRecipe {
   resultId: string;
   resultQty: number;
   station?: StationId; // undefined = craftable anywhere from the phone
+  /** Crafting gate (SYSTEMS_SPEC §6.1): Lane 7's engine feature-detects
+   *  Lane 8's skill state — inert until both land, live after. */
+  skillReq?: { skill: string; level: number };
+  /** Item that must be in the pack to unlock the recipe (blueprints). */
+  requiresItem?: string;
 }
 
 export const FIELD_RECIPES: Record<string, FieldRecipe> = {
@@ -452,6 +539,20 @@ export const FIELD_RECIPES: Record<string, FieldRecipe> = {
     components: [{ itemId: 'raw_meat', qty: 1 }],
     resultId: 'cooked_meat', resultQty: 1,
   },
+  r_rock_lure: {
+    // SYSTEMS_SPEC §4.2: rocks are free — pick up a handful anywhere.
+    // (Spec id 'rock_lure' = the shipped 'rock' item; ids stay code-canonical.)
+    id: 'r_rock_lure', name: 'Gather throwing rocks',
+    components: [],
+    resultId: 'rock', resultQty: 5,
+  },
+  r_produce_meal: {
+    // SYSTEMS_SPEC §4.1: field cooking with actual yield — two produce
+    // and a cut of meat come back as two real meals
+    id: 'r_produce_meal', name: 'Field meal',
+    components: [{ itemId: 'produce', qty: 2 }, { itemId: 'raw_meat', qty: 1 }],
+    resultId: 'cooked_meat', resultQty: 2,
+  },
 };
 
 // Workstation recipes — need the matching station and must be close to it.
@@ -476,6 +577,50 @@ export const STATION_RECIPES: Record<string, FieldRecipe> = {
     id: 'r_reload_shells', name: 'Reload shells', station: 'workbench',
     components: [{ itemId: 'scrap', qty: 2 }],
     resultId: 'shells', resultQty: 4,
+  },
+  r_reload_9mm_t2: {
+    // SYSTEMS_SPEC §4.2: real components beat scrap-and-hope — same bench,
+    // double the yield. The crafting-depth ladder in one recipe.
+    id: 'r_reload_9mm_t2', name: 'Reload 9mm (components)', station: 'workbench',
+    components: [{ itemId: 'gunpowder', qty: 1 }, { itemId: 'brass', qty: 1 }, { itemId: 'lead', qty: 1 }],
+    resultId: 'ammo_9mm', resultQty: 12,
+  },
+  r_shin_guards: {
+    id: 'r_shin_guards', name: 'Shin guards', station: 'workbench',
+    components: [{ itemId: 'scrap', qty: 2 }, { itemId: 'cloth', qty: 2 }],
+    resultId: 'shin_guards', resultQty: 1,
+  },
+  r_spear: {
+    // SYSTEMS_SPEC §2.1: the forest_cache spear is also a bench craft
+    id: 'r_spear', name: 'Boar spear', station: 'workbench',
+    components: [{ itemId: 'wood', qty: 2 }, { itemId: 'scrap', qty: 1 }],
+    resultId: 'spear', resultQty: 1,
+  },
+  r_revolver: {
+    // SYSTEMS_SPEC §3.3 sink table: the honest gun — simple, no growth path
+    id: 'r_revolver', name: 'Revolver', station: 'workbench',
+    components: [{ itemId: 'gun_parts', qty: 2 }, { itemId: 'scrap', qty: 3 }],
+    resultId: 'revolver', resultQty: 1,
+    skillReq: { skill: 'mechanics', level: 1 },
+  },
+  r_smg: {
+    id: 'r_smg', name: 'SMG', station: 'workbench',
+    components: [{ itemId: 'gun_parts', qty: 3 }, { itemId: 'scrap', qty: 5 }, { itemId: 'wire', qty: 2 }],
+    resultId: 'smg', resultQty: 1,
+    skillReq: { skill: 'mechanics', level: 2 },
+  },
+  r_carbine: {
+    // SYSTEMS_SPEC §3.3: the carbine isn't bought, it's earned
+    id: 'r_carbine', name: 'Carbine', station: 'workbench',
+    components: [{ itemId: 'gun_parts', qty: 4 }, { itemId: 'scrap', qty: 6 }, { itemId: 'wire', qty: 3 }],
+    resultId: 'carbine', resultQty: 1,
+    skillReq: { skill: 'mechanics', level: 3 },
+  },
+  r_reload_shells_t2: {
+    // Lane 7's proposed T2 shell load, same component ladder as 9mm
+    id: 'r_reload_shells_t2', name: 'Reload shells (components)', station: 'workbench',
+    components: [{ itemId: 'gunpowder', qty: 1 }, { itemId: 'brass', qty: 1 }, { itemId: 'lead', qty: 1 }],
+    resultId: 'shells', resultQty: 8,
   },
   r_reflex: {
     id: 'r_reflex', name: 'Reflex sight', station: 'workbench',
@@ -502,6 +647,18 @@ export const STATION_RECIPES: Record<string, FieldRecipe> = {
     components: [{ itemId: 'gun_parts', qty: 2 }, { itemId: 'wire', qty: 1 }],
     resultId: 'laser_sight', resultQty: 1,
   },
+  r_choke: {
+    // SYSTEMS_SPEC §3.2: choke is a bench craft, gun_parts×2
+    id: 'r_choke', name: 'Choke', station: 'workbench',
+    components: [{ itemId: 'gun_parts', qty: 2 }],
+    resultId: 'choke', resultQty: 1,
+  },
+  r_flashlight: {
+    // SYSTEMS_SPEC §3.2 final cut: simple craft, no power cost in v1
+    id: 'r_flashlight', name: 'Tac light', station: 'workbench',
+    components: [{ itemId: 'gun_parts', qty: 1 }, { itemId: 'wire', qty: 1 }],
+    resultId: 'flashlight', resultQty: 1,
+  },
   // --- Chemistry Station ---
   r_medkit: {
     id: 'r_medkit', name: 'Medkit', station: 'chemistry',
@@ -512,6 +669,25 @@ export const STATION_RECIPES: Record<string, FieldRecipe> = {
     id: 'r_fuel_can', name: 'Fuel can', station: 'chemistry',
     components: [{ itemId: 'chemicals', qty: 2 }],
     resultId: 'fuel_can', resultQty: 1,
+  },
+  r_gunpowder: {
+    // SYSTEMS_SPEC §4.2: powder is a Chemistry product, never a drop
+    id: 'r_gunpowder', name: 'Gunpowder', station: 'chemistry',
+    components: [{ itemId: 'chemicals', qty: 2 }],
+    resultId: 'gunpowder', resultQty: 2,
+  },
+  r_molotov: {
+    id: 'r_molotov', name: 'Molotov', station: 'chemistry',
+    components: [{ itemId: 'chemicals', qty: 1 }, { itemId: 'cloth', qty: 1 }],
+    resultId: 'molotov', resultQty: 1,
+  },
+  r_smoke_grenade: {
+    // result is the shipped 'smoke' item — the spec's 'smoke_grenade' id
+    // (ids stay code-canonical; components/yield are spec-exact)
+    id: 'r_smoke_grenade', name: 'Smoke grenade', station: 'chemistry',
+    components: [{ itemId: 'chemicals', qty: 2 }, { itemId: 'scrap', qty: 1 }],
+    resultId: 'smoke', resultQty: 1,
+    skillReq: { skill: 'mechanics', level: 1 },
   },
   // --- Machine Shop ---
   r_tire: {
@@ -533,6 +709,21 @@ export const STATION_RECIPES: Record<string, FieldRecipe> = {
     id: 'r_armor_plate', name: 'Armor plate', station: 'industrial',
     components: [{ itemId: 'scrap', qty: 3 }, { itemId: 'gun_parts', qty: 1 }],
     resultId: 'armor_plate', resultQty: 1,
+  },
+  r_circuit_board: {
+    // SYSTEMS_SPEC §4.1: the Machine Shop prints the island's electronics
+    id: 'r_circuit_board', name: 'Circuit board', station: 'industrial',
+    components: [{ itemId: 'wire', qty: 3 }, { itemId: 'chemicals', qty: 1 }],
+    resultId: 'circuit_board', resultQty: 1,
+  },
+  r_turret: {
+    // SYSTEMS_SPEC §4.3: the only blueprint-gated craft in the game —
+    // sodgame's rule, kept. Needs the bp_turret drop in the pack.
+    id: 'r_turret', name: 'Automated turret', station: 'industrial',
+    components: [{ itemId: 'gun_parts', qty: 6 }, { itemId: 'circuit_board', qty: 2 }, { itemId: 'engine_part', qty: 1 }],
+    resultId: 'turret', resultQty: 1,
+    skillReq: { skill: 'mechanics', level: 5 },
+    requiresItem: 'bp_turret',
   },
 };
 
@@ -643,6 +834,8 @@ export const SAFE_LOOT: HuskLootEntry[] = [
   { id: 'ammo_9mm', min: 4, max: 10, chance: 0.5 },
   { id: 'medkit', min: 1, max: 1, chance: 0.3 },
   { id: 'lockpick', min: 1, max: 2, chance: 0.35 },
+  { id: 'circuit_board', min: 1, max: 2, chance: 0.3 },
+  { id: 'scope', min: 1, max: 1, chance: 0.12 },
 ];
 
 /** Harvest nodes in the wild: fallen logs give wood, berry bushes give produce. */
@@ -681,6 +874,29 @@ const DISASSEMBLY: Record<string, { itemId: string; qty: number }[]> = {
   riot_baton: [{ itemId: 'scrap', qty: 1 }],
   torch: [{ itemId: 'wood', qty: 1 }, { itemId: 'cloth', qty: 1 }],
   armored_vest: [{ itemId: 'cloth', qty: 3 }, { itemId: 'gun_parts', qty: 1 }],
+  // §3.4 completion pass: throwables, mods, tools, and the new armor —
+  // every equipment class strips to roughly half its build value
+  frag: [{ itemId: 'gunpowder', qty: 1 }, { itemId: 'scrap', qty: 1 }],
+  molotov: [{ itemId: 'chemicals', qty: 1 }],
+  flashbang: [{ itemId: 'scrap', qty: 1 }],
+  smoke: [{ itemId: 'chemicals', qty: 1 }],
+  boombox: [{ itemId: 'scrap', qty: 2 }, { itemId: 'wire', qty: 1 }],
+  reflex_sight: [{ itemId: 'gun_parts', qty: 1 }],
+  suppressor: [{ itemId: 'gun_parts', qty: 1 }, { itemId: 'scrap', qty: 1 }],
+  extended_mag: [{ itemId: 'gun_parts', qty: 1 }],
+  foregrip: [{ itemId: 'wood', qty: 1 }],
+  laser_sight: [{ itemId: 'gun_parts', qty: 1 }],
+  scope: [{ itemId: 'gun_parts', qty: 1 }],
+  choke: [{ itemId: 'gun_parts', qty: 1 }],
+  flashlight: [{ itemId: 'wire', qty: 1 }],
+  tool_kit: [{ itemId: 'scrap', qty: 2 }],
+  cleaning_kit: [{ itemId: 'cloth', qty: 1 }],
+  riot_helmet: [{ itemId: 'scrap', qty: 1 }, { itemId: 'cloth', qty: 1 }],
+  plate_carrier: [{ itemId: 'armor_plate', qty: 1 }, { itemId: 'cloth', qty: 2 }],
+  shin_guards: [{ itemId: 'scrap', qty: 1 }, { itemId: 'cloth', qty: 1 }],
+  turret: [{ itemId: 'gun_parts', qty: 3 }, { itemId: 'circuit_board', qty: 1 }],
+  pack_t1: [{ itemId: 'cloth', qty: 2 }],
+  pack_t2: [{ itemId: 'cloth', qty: 3 }, { itemId: 'scrap', qty: 1 }],
 };
 for (const [id, yields] of Object.entries(DISASSEMBLY)) {
   if (ITEMS[id]) ITEMS[id].disassembly = yields;
@@ -707,9 +923,12 @@ const FOOTPRINTS: Record<string, [number, number]> = {
   // ammo + small goods
   ammo_9mm: [1, 1], shells: [1, 1], ammo_rifle: [1, 1], ammo_556: [1, 1], bolts: [1, 1],
   scrap: [1, 1], wire: [1, 1], cloth: [1, 1], chemicals: [1, 1], gun_parts: [1, 1],
+  gunpowder: [1, 1], brass: [1, 1], lead: [1, 1], circuit_board: [1, 1], bp_turret: [1, 1],
+  plate_carrier: [2, 2], shin_guards: [1, 1], turret: [3, 2],
   valuables: [1, 1], lockpick: [1, 1], phone: [1, 1], relay_part: [1, 1], beacon_cell: [1, 1],
   flare: [1, 1], fire_starter: [1, 1], gun_oil: [1, 1], cleaning_kit: [1, 1],
   reflex_sight: [1, 1], suppressor: [1, 1], extended_mag: [1, 1], foregrip: [1, 1], laser_sight: [1, 1],
+  scope: [1, 1], choke: [1, 1], flashlight: [1, 1],
   finish_matte: [1, 1], finish_camo: [1, 1], finish_rust: [1, 1], finish_worn: [1, 1],
   // bulky goods
   fuel_can: [2, 2], tire: [2, 2], engine_part: [2, 2], armor_plate: [2, 2], tool_kit: [2, 2],
@@ -721,4 +940,115 @@ for (const [id, [w, h]] of Object.entries(FOOTPRINTS)) {
     ITEMS[id].w = w;
     ITEMS[id].h = h;
   }
+}
+
+// ---------- barter (SYSTEMS_SPEC §1.2; the §3.5 anchors) ----------
+// Trader prices in "value" units. The anchor is `valuables` = 100: one
+// unit of pre-Static shine is the island's hundred-dollar bill, and every
+// other price is scarcity + craft cost measured against it (a medkit is a
+// third of a valuables unit; a carbine is two and change). Traders
+// (Lane 9) key on barterValueOf(); an item with no entry is not tradable
+// (barterValueOf returns 0). Key/quest items are deliberately absent.
+// FIELD REQUEST (Lane 5): promote to ItemDef.barterValue when the type
+// opens up; this table folds into it 1:1.
+export const BARTER_VALUES: Record<string, number> = {
+  valuables: 100, // the anchor
+  // raw + worked materials
+  scrap: 3, wood: 2, cloth: 3, wire: 4, chemicals: 8, gun_parts: 12,
+  gunpowder: 8, brass: 3, lead: 4, circuit_board: 25,
+  tire: 15, engine_part: 30, car_battery: 25, armor_plate: 20, fuel_can: 20,
+  // food + medical
+  canned_food: 6, raw_meat: 3, cooked_meat: 10, water_bottle: 4, produce: 4,
+  bandage: 8, medkit: 35,
+  // ammo (per round/shell)
+  ammo_9mm: 2, shells: 3, ammo_rifle: 4, ammo_556: 3, bolts: 3,
+  // tools + stealth
+  flare: 5, torch: 4, fire_starter: 5, lockpick: 10, tool_kit: 40,
+  cleaning_kit: 12, gun_oil: 8, rock: 1, boombox: 30,
+  // melee
+  pipe: 8, baseball_bat: 10, combat_knife: 15, crowbar: 15, hatchet: 18,
+  spear: 20, machete: 25, riot_baton: 30, fire_axe: 35, sledgehammer: 35,
+  // ranged
+  flare_gun: 40, pistol: 60, revolver: 75, crossbow: 90, shotgun: 110,
+  hunting_rifle: 130, smg: 160, carbine: 220, dmr: 260,
+  // throwables
+  molotov: 20, smoke: 25, flashbang: 40, frag: 45,
+  // mods + finishes
+  reflex_sight: 45, suppressor: 60, extended_mag: 40, foregrip: 35, laser_sight: 45,
+  scope: 70, choke: 40, flashlight: 35,
+  finish_matte: 15, finish_camo: 15, finish_rust: 15, finish_worn: 15,
+  // armor (interim while-carried pieces price like the gear they are)
+  armored_vest: 90, riot_helmet: 55, shin_guards: 30, plate_carrier: 180,
+  // packs + the blueprint economy
+  pack_t1: 35, pack_t2: 70, bp_turret: 150, turret: 400,
+};
+
+/** Trader price for one unit; 0 = not tradable. */
+export function barterValueOf(itemId: string): number {
+  return BARTER_VALUES[itemId] ?? 0;
+}
+
+// ---------- biome loot weighting (SYSTEMS_SPEC §4.5) ----------
+// Where you loot shapes what you find: the same crate is food-heavy in
+// the forest and med-heavy in town. Mirrors Game.ts's BiomeId member-
+// for-member (declared locally — data must not import the engine).
+export type LootBiome = 'beach' | 'dune' | 'forest' | 'town' | 'marsh' | 'water';
+export type LootClass = 'material' | 'food' | 'military' | 'medical';
+
+export const BIOME_LOOT_WEIGHT: Record<LootBiome, Record<LootClass, number>> = {
+  beach: { material: 1.2, food: 0.8, military: 0.3, medical: 0.5 },
+  dune: { material: 0.8, food: 0.6, military: 0.5, medical: 0.5 },
+  forest: { material: 1.0, food: 1.4, military: 0.2, medical: 0.8 },
+  town: { material: 1.1, food: 1.0, military: 0.6, medical: 1.2 },
+  marsh: { material: 0.7, food: 1.1, military: 0.3, medical: 0.7 },
+  water: { material: 0.5, food: 0.6, military: 0.2, medical: 0.3 },
+};
+
+/** Item-level class overrides where the category lies: gun_parts and
+ *  armor are 'material'-category data but military loot in the fiction. */
+const LOOT_CLASS_BY_ITEM: Record<string, LootClass> = {
+  gun_parts: 'military', armor_plate: 'military', bp_turret: 'military',
+  plate_carrier: 'military', armored_vest: 'military', riot_helmet: 'military',
+};
+
+/** The class an entry rolls as: explicit field > item override > category. */
+export function lootClassFor(entry: { id: string; lootClass?: LootClass }): LootClass {
+  if (entry.lootClass) return entry.lootClass;
+  const byItem = LOOT_CLASS_BY_ITEM[entry.id];
+  if (byItem) return byItem;
+  switch (ITEMS[entry.id]?.category) {
+    case 'food': return 'food';
+    case 'medical': return 'medical';
+    case 'weapon-melee':
+    case 'weapon-ranged':
+    case 'ammo':
+    case 'mod': return 'military';
+    default: return 'material';
+  }
+}
+
+/** Effective drop chance for an entry in a biome (clamped to certainty). */
+export function weightedChance(entry: HuskLootEntry, biome: LootBiome): number {
+  return Math.min(1, entry.chance * BIOME_LOOT_WEIGHT[biome][lootClassFor(entry)]);
+}
+
+/**
+ * The one loot roll, shared by containers and corpses: per entry, a
+ * biome-weighted chance check, then the shipped qty formula
+ * (min..max scaled by the difficulty resourceMult, floored at 1).
+ */
+export function rollLoot(
+  entries: HuskLootEntry[],
+  rng: () => number,
+  opts?: { resourceMult?: number; biome?: LootBiome },
+): { itemId: string; qty: number }[] {
+  const out: { itemId: string; qty: number }[] = [];
+  const mult = opts?.resourceMult ?? 1;
+  for (const e of entries) {
+    const chance = opts?.biome ? weightedChance(e, opts.biome) : e.chance;
+    if (rng() > chance) continue;
+    const qty = Math.max(1, Math.round((e.min + rng() * (e.max - e.min)) * mult));
+    out.push({ itemId: e.id, qty });
+  }
+  return out;
 }

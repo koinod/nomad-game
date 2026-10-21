@@ -3,13 +3,14 @@
 
 import * as THREE from 'three';
 import { useGameStore } from '../store/gameStore';
-import { ITEMS, HUSK_LOOT, HUSK_KIND_LOOT, LOG_LOOT, BUSH_LOOT } from '../data/items';
+import { ITEMS, HUSK_LOOT, HUSK_KIND_LOOT, LOG_LOOT, BUSH_LOOT, rollLoot, weightedChance } from '../data/items';
 import { DESIGNED_RECRUITS, SURVIVOR_LOOKS } from '../data/survivors';
 import { CLAIMABLE } from '../data/base';
 import { buildGroundMesh } from './weaponMeshes';
-import { buildFurnitureMesh, FURNITURE_LABEL, type FurnitureKind } from './furnitureMeshes';
+import { buildFurnitureMesh, applyDisturbed, applyRestored, FURNITURE_LABEL, type FurnitureKind } from './furnitureMeshes';
 import { sfx } from '../systems/audio';
-import { CAMPFIRE_SPOTS } from './World';
+import { AlarmRegistry, type AlarmDef } from './alarm';
+import { CAMPFIRE_SPOTS, biomeAt } from './World';
 
 export interface LootEntry {
   id: string;
@@ -29,6 +30,10 @@ export interface ContainerDef {
   rotY?: number;
   /** Locked (safes): needs a lockpick to start searching. */
   locked?: boolean;
+  /** Alarm wiring (§4.4): this container stands at an alarmed POI, and
+   *  if `major`, opening it crosses the tripwire (unless disarmed). */
+  alarmPoiId?: string;
+  major?: boolean;
   /** Seconds of hold-to-search before the loot panel opens. */
   searchTime?: number;
   /** Explicit placement height (upstairs furniture in two-story houses);
@@ -50,6 +55,8 @@ export interface InteractHooks {
   hostilesNear?: (x: number, z: number, r: number) => number; // base-claim gate
   /** World Y of the lighthouse lamp room floor — the beacon lives there now. */
   lampRoomY?: number;
+  /** Extra alarm definitions (§4.4) beyond the spec's flagged set. */
+  alarmDefs?: AlarmDef[];
 }
 
 export interface Interactable {
@@ -102,6 +109,10 @@ function buildPickupMesh(itemId: string, qty: number): THREE.Group {
 
 export class InteractSystem {
   readonly interactables: Interactable[] = [];
+  /** POI alarm engine (§4.4): trips queue events here for Game to
+   *  execute (noise burst + scout pair); flags mirror each trip for
+   *  consumers that only read the store. */
+  readonly alarms = new AlarmRegistry();
   private crateMeshes = new Map<string, THREE.Object3D>();
   private emptyLabels = new Map<string, string>();
   private furnitureIds = new Set<string>(); // furniture stays visible when empty
@@ -111,6 +122,19 @@ export class InteractSystem {
   // hold-to-search bookkeeping (Game drives the timer)
   private containersById = new Map<string, ContainerDef>();
   private searchedContainers = new Set<string>();
+  // respawn clocks (§4.5): when an eligible container was emptied (abs
+  // game minutes) and which have since restocked. Session-scoped —
+  // cross-session clocks need lootedAt timestamps in the save
+  // (WorldDiff.lootedAt — FIELD REQUEST to Lane 5).
+  private lootedAtMin = new Map<string, number>();
+  private respawnedIds = new Set<string>();
+  private freshLabels = new Map<string, string>();
+  private respawnSweep = 0;
+
+  private absMinutes(): number {
+    const st = useGameStore.getState();
+    return st.daysElapsed * 1440 + st.timeMinutes;
+  }
 
   containerDef(id: string): ContainerDef | undefined {
     return this.containersById.get(id);
@@ -126,7 +150,7 @@ export class InteractSystem {
       const dz = c.z - z;
       if (dx * dx + dz * dz > r * r) continue;
       total++;
-      if (this.hooks.isLooted(c.id)) looted++;
+      if (this.hooks.isLooted(c.id) && !this.respawnedIds.has(c.id)) looted++;
     }
     return { total, looted };
   }
@@ -148,6 +172,10 @@ export class InteractSystem {
     this.hooks = hooks;
     const s = useGameStore.getState();
     const at = (id: string): [number, number] => pois[id] ?? [0, 0];
+    // the alarm registry starts with the spec's flagged set; world
+    // wiring can register more (or re-register to override) via hooks
+    this.alarms.registerAll(AlarmRegistry.specDefs());
+    if (hooks.alarmDefs) this.alarms.registerAll(hooks.alarmDefs);
 
     // ---- containers ----
     const crateMat = new THREE.MeshStandardMaterial({ color: 0x6e5a3e, roughness: 1 });
@@ -172,6 +200,12 @@ export class InteractSystem {
       this.crateMeshes.set(c.id, mesh);
       this.containersById.set(c.id, c);
       this.emptyLabels.set(c.id, c.label ? c.label.replace('Search', 'Empty') : 'Empty container');
+      this.freshLabels.set(c.id, c.label ?? 'Search container');
+      // a container a previous session emptied starts its respawn clock
+      // now — the island forgets slowly, and this is when you showed up
+      if (hooks.isLooted(c.id) && respawnEligible(c)) {
+        this.lootedAtMin.set(c.id, this.absMinutes());
+      }
       if (c.meshKind) this.furnitureIds.add(c.id);
       this.interactables.push({
         id: c.id,
@@ -181,19 +215,35 @@ export class InteractSystem {
         use: () => {
           // fresh state: the constructor's `s` snapshot goes stale after any set()
           const st = useGameStore.getState();
-          if (hooks.isLooted(c.id)) {
+          // a restocked container bypasses the save's looted flag and
+          // re-rolls fresh — the respawn clock already vouched for it
+          const restocked = this.respawnedIds.has(c.id);
+          if (restocked) this.respawnedIds.delete(c.id);
+          if (hooks.isLooted(c.id) && !restocked) {
             st.addToast('Nothing left here.');
             return;
           }
-          // loot preview: roll once, stash it, show the panel — take what you want
-          if (!st.lootStash[c.id]) {
-            const rng = hooks.rng;
-            const items: { itemId: string; qty: number }[] = [];
-            for (const e of c.loot) {
-              if (rng() > e.chance) continue;
-              const qty = Math.max(1, Math.round((e.min + rng() * (e.max - e.min)) * hooks.resourceMult));
-              items.push({ itemId: e.id, qty });
+          // §4.4 tripwire: opening the POI's major container crosses it.
+          // A lockpick doesn't help you here — only the disarm box does.
+          // Interact applies the toast/rep/flag; the 60m noise burst and
+          // the scout pair are Game's to fire (registry event queue).
+          if (c.alarmPoiId && c.major) {
+            const ev = this.alarms.trip(c.alarmPoiId, 'container_trip');
+            if (ev) {
+              st.addToast(ev.effect.toast);
+              sfx.play('beacon', { volume: 0.8 });
+              if (ev.effect.factionRep) st.addRep(ev.effect.factionRep.faction, ev.effect.factionRep.delta);
+              st.setFlag(`alarm_tripped:${c.alarmPoiId}`);
             }
+          }
+          // loot preview: roll once, stash it, show the panel — take what you want.
+          // §4.5: the container's biome weights each entry's class, so the
+          // same crate table plays differently in the forest vs in town.
+          if (restocked || !st.lootStash[c.id]) {
+            const items = rollLoot(c.loot, hooks.rng, {
+              resourceMult: hooks.resourceMult,
+              biome: biomeAt(c.x, c.z),
+            });
             if (items.length === 0) {
               st.addToast('Nothing useful inside.');
               this.setContainerEmptied(c.id);
@@ -206,6 +256,49 @@ export class InteractSystem {
           sfx.play('ui', { volume: 0.5 });
         },
       });
+    }
+
+    // ---- alarm boxes (§4.4): one per alarmed POI, by its first wired
+    // container. The 30s disarm timer is a hold interaction Game routes
+    // (DISARM_SECONDS in alarm.ts); the requirements + state are the
+    // engine's, checked here at the box.
+    {
+      const boxAt = new Map<string, ContainerDef>();
+      for (const c of containers) {
+        if (c.alarmPoiId && !boxAt.has(c.alarmPoiId)) boxAt.set(c.alarmPoiId, c);
+      }
+      for (const [poiId, c] of boxAt) {
+        const pos = new THREE.Vector3(c.x + 0.9, hooks.groundY(c.x + 0.9, c.z + 0.9), c.z + 0.9);
+        this.interactables.push({
+          id: `alarmbox:${poiId}`,
+          kind: 'switch',
+          pos,
+          label: 'Alarm box',
+          use: () => {
+            const st = useGameStore.getState();
+            const check = this.alarms.canDisarm(
+              poiId,
+              st.countItem('tool_kit') > 0,
+              st.skills?.mechanics?.level ?? 0,
+            );
+            if (!check.ok) {
+              st.addToast(
+                check.reason === 'no_toolkit' ? 'You need a tool kit to open the alarm box.'
+                : check.reason === 'low_skill' ? 'Disarming this needs Mechanics 2.'
+                : check.reason === 'not_armed' && this.alarms.state(poiId) === 'tripped' ? 'Too late — it\u2019s already blown.'
+                : 'The alarm is already dark.',
+              );
+              sfx.play('ui', { volume: 0.5 });
+              return;
+            }
+            if (this.alarms.disarm(poiId)) {
+              st.addToast('Alarm disarmed. The POI stays quiet.');
+              st.setFlag(`alarm_disarmed:${poiId}`);
+              sfx.play('switch', { volume: 0.8 });
+            }
+          },
+        });
+      }
     }
 
     // ---- campfires (safe points + rest) ----
@@ -473,15 +566,41 @@ export class InteractSystem {
   }
 
   /** Mark a container fully looted: hide the mesh (crates only — furniture
-   *  stays), relabel the prompt. */
+   *  stays, but shows its disturbed state), relabel the prompt, and start
+   *  the container's respawn clock if it has one. */
   setContainerEmptied(id: string): void {
     this.hooks.markLooted(id);
+    const def = this.containersById.get(id);
+    if (def && respawnEligible(def)) {
+      this.lootedAtMin.set(id, this.absMinutes());
+    }
     if (!this.furnitureIds.has(id)) {
       const m = this.crateMeshes.get(id);
       if (m) m.visible = false;
+    } else {
+      const m = this.crateMeshes.get(id);
+      if (m) applyDisturbed(m); // searched-out furniture reads searched-out
     }
     const it = this.interactables.find((i) => i.id === id);
     if (it) it.label = this.emptyLabels.get(id) ?? 'Empty container';
+  }
+
+  /** Respawn sweep: restock every container whose clock has run out —
+   *  mesh back, furniture restored, fresh label, loot re-rolls on open. */
+  private sweepRespawns(): void {
+    const now = this.absMinutes();
+    for (const [id, at] of this.lootedAtMin) {
+      if (now - at < respawnDaysFor(id) * 1440) continue;
+      this.lootedAtMin.delete(id);
+      this.respawnedIds.add(id);
+      const mesh = this.crateMeshes.get(id);
+      if (mesh) {
+        if (this.furnitureIds.has(id)) applyRestored(mesh);
+        mesh.visible = true;
+      }
+      const it = this.interactables.find((i) => i.id === id);
+      if (it) it.label = this.freshLabels.get(id) ?? 'Search container';
+    }
   }
 
   /** Visible ground pickup with its own mesh. One-shot: taken once. */
@@ -520,6 +639,12 @@ export class InteractSystem {
       mesh.position.y = (mesh.userData.baseY as number) + Math.sin(elapsed * 2 + (mesh.userData.phase as number)) * 0.06;
       mesh.rotation.y += _dt * 0.4;
     }
+    // respawn clocks tick on game time; a 2s real-time sweep is plenty
+    this.respawnSweep += _dt;
+    if (this.respawnSweep >= 2) {
+      this.respawnSweep = 0;
+      this.sweepRespawns();
+    }
   }
 
   /**
@@ -545,9 +670,10 @@ export class InteractSystem {
           return;
         }
         const rng = this.hooks.rng;
+        const biome = biomeAt(x, z); // §4.5 weighting applies to corpses too
         const taken: string[] = [];
         for (const e of table) {
-          if (rng() > e.chance) continue;
+          if (rng() > weightedChance(e, biome)) continue;
           const qty = Math.max(1, Math.round(e.min + rng() * (e.max - e.min)));
           if (!s.addItem(e.id, qty, true, { found: true })) {
             s.addToast('Pack full — left the rest on the body.');
@@ -579,6 +705,28 @@ export class InteractSystem {
     }
     return best;
   }
+}
+
+/**
+ * Respawn period in game days for a container — sodgame's 7–21d band
+ * (POIS_FACTIONS_VEHICLES / GAP_AUDIT), hashed per id so the island
+ * forgets unevenly: one crate is back in a week, its twin takes three.
+ */
+export function respawnDaysFor(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return 7 + (h % 15);
+}
+
+/**
+ * Which containers get a respawn clock at all. Locked one-shots (safes)
+ * never restock — their permanence is the reward structure — and a
+ * container carrying a guaranteed key item (the phone, relay parts)
+ * must never duplicate its quest item.
+ */
+export function respawnEligible(c: ContainerDef): boolean {
+  if (c.locked) return false;
+  return !c.loot.some((e) => e.chance >= 1 && ITEMS[e.id]?.category === 'key');
 }
 
 /** Container placement. Positions are offsets around their POI. */
