@@ -273,9 +273,12 @@ export const ITEMS: Record<string, ItemDef> = {
     thrown: { aoe: 7, dmg: 0, fuse: 0.4, blind: 4, smoke: true },
   },
   rock: {
+    // SYSTEMS_SPEC §2.4's rock_lure under its shipped id: 20m noise at
+    // the landing point. (Retrieval pickup on landing is a Game.ts step —
+    // enumerated in the lane report.)
     id: 'rock', name: 'Rock', category: 'weapon-melee', weight: 0.3, slots: 1, stack: 5,
     desc: 'Equip and throw: lands with a clatter that pulls attention.', damage: 2,
-    thrown: { aoe: 0, dmg: 0, fuse: 0.05, lure: 14 },
+    thrown: { aoe: 0, dmg: 0, fuse: 0.05, lure: 20 },
   },
   boombox: {
     id: 'boombox', name: 'Boombox', category: 'weapon-melee', weight: 3.5, slots: 3, stack: 1,
@@ -828,6 +831,26 @@ const DISASSEMBLY: Record<string, { itemId: string; qty: number }[]> = {
   riot_baton: [{ itemId: 'scrap', qty: 1 }],
   torch: [{ itemId: 'wood', qty: 1 }, { itemId: 'cloth', qty: 1 }],
   armored_vest: [{ itemId: 'cloth', qty: 3 }, { itemId: 'gun_parts', qty: 1 }],
+  // §3.4 completion pass: throwables, mods, tools, and the new armor —
+  // every equipment class strips to roughly half its build value
+  frag: [{ itemId: 'gunpowder', qty: 1 }, { itemId: 'scrap', qty: 1 }],
+  molotov: [{ itemId: 'chemicals', qty: 1 }],
+  flashbang: [{ itemId: 'scrap', qty: 1 }],
+  smoke: [{ itemId: 'chemicals', qty: 1 }],
+  boombox: [{ itemId: 'scrap', qty: 2 }, { itemId: 'wire', qty: 1 }],
+  reflex_sight: [{ itemId: 'gun_parts', qty: 1 }],
+  suppressor: [{ itemId: 'gun_parts', qty: 1 }, { itemId: 'scrap', qty: 1 }],
+  extended_mag: [{ itemId: 'gun_parts', qty: 1 }],
+  foregrip: [{ itemId: 'wood', qty: 1 }],
+  laser_sight: [{ itemId: 'gun_parts', qty: 1 }],
+  tool_kit: [{ itemId: 'scrap', qty: 2 }],
+  cleaning_kit: [{ itemId: 'cloth', qty: 1 }],
+  riot_helmet: [{ itemId: 'scrap', qty: 1 }, { itemId: 'cloth', qty: 1 }],
+  plate_carrier: [{ itemId: 'armor_plate', qty: 1 }, { itemId: 'cloth', qty: 2 }],
+  shin_guards: [{ itemId: 'scrap', qty: 1 }, { itemId: 'cloth', qty: 1 }],
+  turret: [{ itemId: 'gun_parts', qty: 3 }, { itemId: 'circuit_board', qty: 1 }],
+  pack_t1: [{ itemId: 'cloth', qty: 2 }],
+  pack_t2: [{ itemId: 'cloth', qty: 3 }, { itemId: 'scrap', qty: 1 }],
 };
 for (const [id, yields] of Object.entries(DISASSEMBLY)) {
   if (ITEMS[id]) ITEMS[id].disassembly = yields;
