@@ -5,6 +5,8 @@
 # Pure-stdlib GLB parse; exits non-zero on any failure.
 # Run: python3 tools/figures/verify_authored_glb2.py <kind|all>
 import json, os, struct, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from joint_check import joint_failures
 
 BASE = os.path.expanduser("~/workspace/nomad-wt/figures-authored-2/public/figures")
 
@@ -94,6 +96,13 @@ def verify(kind, spec):
                for m in g['meshes'] for p in m['primitives'] if 'indices' in p)
     print(f"TRIS total: {tris}")
     check(tris < 95000, "triangle budget sane for a mob-class figure")
+    # JOINT CONTINUITY (2026-10-21): telescoping joints, baked
+    # elbow/knee bend, parent-side coverage at every pivot.
+    jf = joint_failures(path)
+    for f in jf:
+        check(False, f)
+    if not jf:
+        check(True, "joint continuity: telescope + bend + parent coverage at all 4 pivots")
     print(f"[{kind}] RESULT:", "ALL PASS" if not fails else f"{len(fails)} FAILURES")
     return fails
 

@@ -3,8 +3,12 @@
 # Pure-stdlib GLB parse; exits non-zero on any failure.
 # Run: python3 tools/figures/verify_authored_glb.py
 import json, os, struct, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from joint_check import joint_failures
 
-PATH = os.path.expanduser("~/workspace/nomad-wt/figures-authored/public/figures/husk_shambler_authored.glb")
+# argv[1] overrides the GLB path (default: the wave-1 worktree build)
+PATH = (sys.argv[1] if len(sys.argv) > 1 else
+        os.path.expanduser("~/workspace/nomad-wt/figures-authored/public/figures/husk_shambler_authored.glb"))
 fails = []
 def check(cond, label):
     print(("PASS " if cond else "FAIL ") + label)
@@ -89,6 +93,14 @@ tris = sum(g['accessors'][p['indices']]['count'] // 3
            for m in g['meshes'] for p in m['primitives'] if 'indices' in p)
 print(f"TRIS total: {tris}")
 check(tris < 90000, "triangle budget sane for a mob-class figure")
+
+# JOINT CONTINUITY (2026-10-21): telescoping joints, baked elbow/knee
+# bend, parent-side coverage at every pivot.
+_jf = joint_failures(PATH)
+for f in _jf:
+    check(False, f)
+if not _jf:
+    check(True, "joint continuity: telescope + bend + parent coverage at all 4 pivots")
 
 print("RESULT:", "ALL PASS" if not fails else f"{len(fails)} FAILURES")
 sys.exit(1 if fails else 0)

@@ -276,7 +276,7 @@ def sculpt_face(skull, SKULL_Y, gaunt=0.0, elongate=0.0, mouth=0.0, jut=0.0):
     me.update()
 
 def build_head(SKULL_Y, hs, mats, gaunt=0.0, elongate=0.0, mouth=0.0, jut=0.0,
-               jaw_scale=(1.0, 1.0, 1.0), neck_depth=0.13, neck_r=(0.060, 0.052),
+               jaw_scale=(1.0, 1.0, 1.0), neck_depth=0.17, neck_r=(0.066, 0.056),
                hair='patchy', eye_spread=0.037, eye_dy=-0.096, eye_dz=0.004):
     """Skull + face sculpt + neck + hinged jaw + unlit eyes (+ hair).
     `hs` scales the wave-1 shambler head (built at H=1.8). Returns a dict
@@ -320,20 +320,54 @@ def build_head(SKULL_Y, hs, mats, gaunt=0.0, elongate=0.0, mouth=0.0, jut=0.0,
     return parts
 
 # --------------------------------------------------------------- limbs ---
-def build_hand(side, px, pz, s, mats, finger_len=1.0, fist=0.0, finger_r=1.0):
+def _swing(objs, center, ang):
+    """Rigidly rotate clay pieces around a world point about the X axis
+    (JOINT CONTINUITY PASS, 2026-10-21): bakes elbow/knee flexion into a
+    limb part. Each piece's center travels the arc around `center` and
+    the piece rotates in place; the rotation is baked so join/remesh
+    see final geometry. Pieces must be unrotated primitives (all limb
+    clay is). Sign: Blender figure faces -Y; rotation.x by `ang` maps a
+    point below the center toward +Y (backward) for ang > 0."""
+    from mathutils import Matrix
+    R = Matrix.Rotation(ang, 4, 'X')
+    C = Vector(center)
+    for o in objs:
+        o.location = C + R @ (Vector(o.location) - C)
+        o.rotation_euler = (o.rotation_euler.x + ang, o.rotation_euler.y, o.rotation_euler.z)
+        bpy.ops.object.select_all(action='DESELECT')
+        o.select_set(True)
+        bpy.context.view_layer.objects.active = o
+        bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
+    bpy.ops.object.select_all(action='DESELECT')
+
+def joint_caps(name, entries, mat, voxel=0.012, tris=1600):
+    """Pivot caps: organic masses centered ON the joint pivots, built to
+    be parented to the TORSO by the caller (assemble 'torso' list), so
+    they never rotate with the limb — the limb's own joint ball turns
+    inside them and the silhouette through the joint stays one
+    continuous mass at any pose angle (Ian playtest, 2026-10-21: limbs
+    read as disconnected sticks). entries: (loc, scale, k) with the
+    scale multiplied by k (the limb's s*rad, so caps track the limb)."""
+    clay = [blob(f"{name}_{i}", loc, tuple(c * k for c in scale), mat)
+            for i, (loc, scale, k) in enumerate(entries)]
+    return finish_part(join_all(clay, name), entries[0][0], voxel, mat, tris)
+
+def build_hand(side, px, pz, s, mats, finger_len=1.0, fist=0.0, finger_r=1.0, swing=None):
     """Wave-1 hand (own finer voxel) with knobs: `finger_len` stretches
     the fingers (crawler/stalker/screamer), `fist`>0 replaces fingers
-    with a club mass (brute)."""
+    with a club mass (brute). `swing` = (center, ang) bakes the elbow
+    flexion the arm applies, so the hand follows the forearm."""
     SKIN = mats['skin']
     if fist:
         clay = [
-            blob("h_wr", (px, 0.004, pz - 0.575 * s), (0.040 * s, 0.038 * s, 0.038 * s)),
+            blob("h_wr", (px, 0.004, pz - 0.575 * s), (0.046 * s, 0.044 * s, 0.044 * s)),
             blob("h_pa", (px, 0.006, pz - 0.640 * s), (0.062 * s * fist, 0.055 * s * fist, 0.075 * s * fist)),
             blob("h_kn", (px, -0.006, pz - 0.700 * s), (0.058 * s * fist, 0.048 * s * fist, 0.045 * s * fist)),
         ]
+        if swing: _swing(clay, swing[0], swing[1])
         return finish_part(join_all(clay, "handMesh"), (px, 0, pz), 0.007, SKIN, 1600)
     clay = [
-        blob("h_wr", (px, 0.004, pz - 0.575 * s), (0.036 * s, 0.034 * s, 0.034 * s)),
+        blob("h_wr", (px, 0.004, pz - 0.575 * s), (0.042 * s, 0.040 * s, 0.040 * s)),
         blob("h_pa", (px, 0.006, pz - 0.628 * s), (0.043 * s, 0.021 * s, 0.058 * s)),
     ]
     fl = 0.058 * finger_len
@@ -342,61 +376,108 @@ def build_hand(side, px, pz, s, mats, finger_len=1.0, fist=0.0, finger_r=1.0):
                           0.0068 * s * finger_r, 0.0078 * s * finger_r, fl * s))
     clay.append(taper("h_th", (px - side * 0.040 * s, -0.010, pz - 0.615 * s),
                       0.0075 * s * finger_r, 0.0088 * s * finger_r, 0.048 * s * finger_len))
+    if swing: _swing(clay, swing[0], swing[1])
     return finish_part(join_all(clay, "handMesh"), (px, 0, pz), 0.006, SKIN, 1500)
 
 def build_arm(side, px, pz, s, mats, sleeve_len, rad=1.0, finger_len=1.0, fist=0.0,
-              sleeve_mat_key='shirt'):
+              sleeve_mat_key='shirt', elbow=0.18):
     """Clay hangs -Z from the shoulder pivot (px, pz = pivot world x/z).
-    `s` scales the wave-1 arm (ARM_LEN .648 at H=1.8); `rad` fattens."""
+    `s` scales the wave-1 arm (ARM_LEN .648 at H=1.8); `rad` fattens.
+    JOINT CONTINUITY PASS (2026-10-21): the shoulder ball is a true
+    joint mass centered on the pivot and the upper taper telescopes
+    past it; `elbow` bakes flexion (radians, forearm swung FORWARD
+    around the elbow center) so the arm reads as a bent limb, not a
+    straight stick — the rig has no elbow pivot, so the bend lives in
+    the clay. Sleeves past the elbow are built in two pieces and the
+    forearm piece swings with the arm."""
     SKIN = mats['skin']
     SHIRT = mats[sleeve_mat_key]
-    clay = [
-        blob("a_sh", (px, 0, pz), (0.070 * s * rad, 0.068 * s * rad, 0.072 * s * rad)),
-        taper("a_up", (px, 0, pz - 0.155 * s), 0.046 * s * rad, 0.058 * s * rad, 0.27 * s),
-        blob("a_el", (px, 0.002, pz - 0.305 * s), (0.045 * s * rad, 0.044 * s * rad, 0.050 * s * rad)),
+    ELBOW_C = (px, 0.002, pz - 0.305 * s)
+    swung = [
         taper("a_fo", (px, 0.004, pz - 0.435 * s), 0.031 * s * rad, 0.041 * s * rad, 0.23 * s),
         taper("a_wr", (px, 0.004, pz - 0.545 * s), 0.027 * s * rad, 0.030 * s * rad, 0.06 * s),
     ]
+    _swing(swung, ELBOW_C, -elbow)
+    clay = [
+        blob("a_sh", (px, 0, pz), (0.082 * s * rad, 0.080 * s * rad, 0.084 * s * rad)),
+        taper("a_up", (px, 0, pz - 0.135 * s), 0.046 * s * rad, 0.066 * s * rad, 0.30 * s),
+        blob("a_el", (px, 0.002, pz - 0.305 * s), (0.050 * s * rad, 0.049 * s * rad, 0.055 * s * rad)),
+    ] + swung
     arm = finish_part(join_all(clay, "armMesh"), (px, 0, pz), 0.0085, SKIN, 3600)
-    hand = build_hand(side, px, pz, s, mats, finger_len=finger_len, fist=fist)
+    hand = build_hand(side, px, pz, s, mats, finger_len=finger_len, fist=fist,
+                      swing=(ELBOW_C, -elbow))
     if sleeve_len <= 0:
         return arm, hand, None
     sl_clay = [
-        blob("s_sh", (px, 0, pz + 0.01), (0.074 * s * rad, 0.072 * s * rad, 0.058 * s * rad)),
-        taper("s_up", (px, 0, pz - sleeve_len * s / 2), 0.052 * s * rad, 0.066 * s * rad, sleeve_len * s),
+        blob("s_sh", (px, 0, pz + 0.01), (0.086 * s * rad, 0.084 * s * rad, 0.066 * s * rad)),
     ]
+    if sleeve_len <= 0.30:
+        sl_clay.append(taper("s_up", (px, 0, pz - sleeve_len * s / 2),
+                             0.052 * s * rad, 0.066 * s * rad, sleeve_len * s))
+        hem_z = -sleeve_len * s - 0.01
+    else:
+        r_mid = (0.066 + (0.052 - 0.066) * (0.30 / sleeve_len)) * s * rad
+        sl_clay.append(taper("s_up", (px, 0, pz - 0.15 * s), r_mid, 0.066 * s * rad, 0.30 * s))
+        fore = taper("s_fo", (px, 0, pz - (0.30 + sleeve_len) * s / 2),
+                     0.052 * s * rad, r_mid, (sleeve_len - 0.30) * s)
+        _swing([fore], ELBOW_C, -elbow)
+        sl_clay.append(fore)
+        hem_z = -(0.305 + (sleeve_len - 0.305) * math.cos(elbow)) * s - 0.01
     sleeve = finish_part(join_all(sl_clay, "sleeveMesh"), (px, 0, pz), 0.0095, SHIRT, 2000)
-    jitter_hem_local(sleeve, -sleeve_len * s - 0.01, 0.03)
+    jitter_hem_local(sleeve, hem_z, 0.03)
     return arm, hand, sleeve
 
-def build_leg(side, px, pz, s, mats, pants_len, boot, rad=1.0):
-    """Wave-1 leg with `rad` fattening; origins at the hip pivot."""
+def build_leg(side, px, pz, s, mats, pants_len, boot, rad=1.0, knee=0.12):
+    """Wave-1 leg with `rad` fattening; origins at the hip pivot.
+    JOINT CONTINUITY PASS (2026-10-21): hip/knee/ankle masses enlarged
+    and the thigh telescopes past the hip pivot; `knee` bakes flexion
+    (radians, shin swung BACKWARD around the knee center) so the leg
+    reads bent, not a straight stick — the rig has no knee pivot, so
+    the bend lives in the clay. Pants past the knee are built in two
+    pieces and the shin piece swings with the leg; boots swing too."""
     SKIN, PANTS, DARK = mats['skin'], mats['pants'], mats['dark']
-    clay = [
-        blob("l_hip", (px, 0, pz - 0.01), (0.088 * s * rad, 0.082 * s * rad, 0.075 * s * rad)),
-        taper("l_th", (px, 0, pz - 0.225 * s), 0.058 * s * rad, 0.084 * s * rad, 0.37 * s),
-        blob("l_kn", (px, -0.006, pz - 0.435 * s), (0.057 * s * rad, 0.056 * s * rad, 0.058 * s * rad)),
+    KNEE_C = (px, -0.006, pz - 0.435 * s)
+    swung = [
         taper("l_sn", (px, 0, pz - 0.63 * s), 0.036 * s * rad, 0.052 * s * rad, 0.35 * s),
-        blob("l_ank", (px, 0, pz - 0.815 * s), (0.042 * s * rad, 0.042 * s * rad, 0.038 * s * rad)),
+        blob("l_ank", (px, 0, pz - 0.815 * s), (0.047 * s * rad, 0.047 * s * rad, 0.043 * s * rad)),
         blob("l_ft", (px, -0.048 * s, pz - 0.845 * s), (0.047 * s * rad, 0.088 * s, 0.030 * s)),
     ]
+    _swing(swung, KNEE_C, knee)
+    clay = [
+        blob("l_hip", (px, 0, pz - 0.01), (0.096 * s * rad, 0.090 * s * rad, 0.084 * s * rad)),
+        taper("l_th", (px, 0, pz - 0.205 * s), 0.058 * s * rad, 0.090 * s * rad, 0.41 * s),
+        blob("l_kn", (px, -0.006, pz - 0.435 * s), (0.062 * s * rad, 0.060 * s * rad, 0.062 * s * rad)),
+    ] + swung
     leg = finish_part(join_all(clay, "legMesh"), (px, 0, pz), 0.0095, SKIN, 4500)
     pants = None
     if pants_len > 0:
+        r_hem = (0.062 + (0.088 - 0.062) * (1 - pants_len / 0.62)) * s * rad
         p_clay = [
-            blob("p_hip", (px, 0, pz - 0.005), (0.096 * s * rad, 0.090 * s * rad, 0.082 * s * rad)),
-            taper("p_th", (px, 0, pz - pants_len * s / 2 - 0.01),
-                  (0.062 + (0.088 - 0.062) * (1 - pants_len / 0.62)) * s * rad, 0.092 * s * rad, pants_len * s),
+            blob("p_hip", (px, 0, pz - 0.005), (0.104 * s * rad, 0.098 * s * rad, 0.090 * s * rad)),
         ]
+        if pants_len <= 0.40:
+            p_clay.append(taper("p_th", (px, 0, pz - pants_len * s / 2 - 0.01),
+                                r_hem, 0.092 * s * rad, pants_len * s))
+            hem_z = -pants_len * s - 0.01
+        else:
+            r_mid = (0.092 + ((0.062 + (0.088 - 0.062) * (1 - pants_len / 0.62)) - 0.092)
+                     * (0.40 / pants_len)) * s * rad
+            p_clay.append(taper("p_th", (px, 0, pz - 0.21 * s), r_mid, 0.092 * s * rad, 0.40 * s))
+            low = taper("p_sn", (px, 0, pz - (0.41 + pants_len) * s / 2 - 0.005),
+                        r_hem, r_mid, (pants_len - 0.40) * s)
+            _swing([low], KNEE_C, knee)
+            p_clay.append(low)
+            hem_z = -(0.435 + (pants_len + 0.01 - 0.435) * math.cos(knee)) * s
         pants = finish_part(join_all(p_clay, "pantsMesh"), (px, 0, pz), 0.0105, PANTS, 2400)
-        jitter_hem_local(pants, -pants_len * s - 0.01, 0.035)
+        jitter_hem_local(pants, hem_z, 0.035)
     boot_mesh = None
     if boot:
         b_clay = [
-            taper("b_sh", (px, 0, pz - 0.775 * s), 0.052 * s * rad, 0.058 * s * rad, 0.13 * s),
+            taper("b_sh", (px, 0, pz - 0.775 * s), 0.052 * s * rad, 0.062 * s * rad, 0.13 * s),
             blob("b_ft", (px, -0.052 * s, pz - 0.85 * s), (0.055 * s * rad, 0.098 * s, 0.036 * s)),
             blob("b_toe", (px, -0.115 * s, pz - 0.855 * s), (0.052 * s * rad, 0.045 * s, 0.030 * s)),
         ]
+        _swing(b_clay, KNEE_C, knee)
         boot_mesh = finish_part(join_all(b_clay, "bootMesh"), (px, 0, pz), 0.0095, DARK, 1800)
     return leg, pants, boot_mesh
 
