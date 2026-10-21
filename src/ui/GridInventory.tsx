@@ -45,6 +45,7 @@ export default function GridInventory({
   onMove,
   equippedUids,
   dimmedUids,
+  onOpenContainer,
 }: {
   items: InvItem[];
   cols: number;
@@ -55,6 +56,11 @@ export default function GridInventory({
   onMove: (uid: string, gx: number, gy: number, rot: boolean) => void;
   equippedUids?: Set<string>;
   dimmedUids?: Set<string>;
+  /** Inventory v2 drill-in: double-clicking a CONTAINER item opens it
+   *  (its own contents grid) instead of rotating. Double-click still
+   *  rotates every non-container item, and R rotates anything — the
+   *  existing interaction map is otherwise untouched. */
+  onOpenContainer?: (uid: string) => void;
 }) {
   const gridRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -181,7 +187,10 @@ export default function GridInventory({
         onPointerMove={ghost ? undefined : moveDrag}
         onPointerUp={ghost ? undefined : endDrag}
         onPointerCancel={ghost ? undefined : () => setDragBoth(null)}
-        onDoubleClick={ghost ? undefined : () => rotateInPlace(it.uid)}
+        onDoubleClick={ghost ? undefined : () => {
+          if (onOpenContainer && ITEMS[it.itemId]?.container) onOpenContainer(it.uid);
+          else rotateInPlace(it.uid);
+        }}
         className={`absolute touch-none select-none overflow-hidden rounded-[4px] border bg-[#171d26] px-1 py-0.5 ${
           CAT_TINT[def.category] ?? 'border-[#2c3644]'
         } ${isSel ? 'ring-1 ring-[#e8b34b]' : ''} ${dim ? 'opacity-35' : ''} ${
@@ -203,6 +212,9 @@ export default function GridInventory({
           {(def.weight * it.qty).toFixed(1)} kg
           {equippedUids?.has(it.uid) ? <span className="ml-1 text-[#5aa469]">EQ</span> : null}
           {it.jammed ? <span className="ml-1 text-[#d9534f]">JAM</span> : null}
+          {def.container ? (
+            <span className="ml-1 text-[#7fb0d9]">▣ {it.contents?.length ?? 0}</span>
+          ) : null}
         </div>
         {it.qty > 1 && (
           <div className="pointer-events-none absolute bottom-0.5 right-1 font-mono text-[10px] font-semibold text-[#e8b34b]">

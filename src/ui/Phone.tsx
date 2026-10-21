@@ -19,8 +19,7 @@ import { UPGRADES, canInstallUpgrade } from '../data/upgrades';
 import { carParams, estimatePerformance, UPGRADE_MASS_KG } from '../game/carSpec';
 import { VEHICLE_DEFS } from '../game/Vehicles';
 import { carryLimitKg, encumbranceTier, totalWeightKg } from '../store/inventoryUtils';
-import { packGridDims, canPlace, layoutItems } from '../store/gridUtils';
-import GridInventory from './GridInventory';
+import InventoryDeck from './InventoryDeck';
 import SkillsPanel from './SkillsPanel';
 import { CraftPanel } from './CraftPanel';
 import DispatchPanel from './DispatchPanel';
@@ -51,55 +50,18 @@ function fmtAbs(absMin: number): string {
 /* ---------------- LOADOUT tab ---------------- */
 
 function LoadoutTab() {
+  // Inventory v2: the Pack app IS the inventory deck — the same
+  // shared surface the phone-free overlay renders (InventoryDeck).
+  // The phone keeps only its own chrome (weight + battery strip).
   const inventory = useGameStore((s) => s.inventory);
   const equipped = useGameStore((s) => s.equipped);
   const difficulty = useGameStore((s) => s.difficulty);
   const battery = useGameStore((s) => s.battery);
-  const equipUid = useGameStore((s) => s.equipUid);
-  const unequipSlot = useGameStore((s) => s.unequipSlot);
-  const useItemUid = useGameStore((s) => s.useItemUid);
-  const dropUid = useGameStore((s) => s.dropUid);
-  const hotbar = useGameStore((s) => s.hotbar);
-  const useHotbar = useGameStore((s) => s.useHotbar);
-  const assignHotbar = useGameStore((s) => s.assignHotbar);
-  const moveInvItem = useGameStore((s) => s.moveInvItem);
-  const arrangeInventory = useGameStore((s) => s.arrangeInventory);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [query, setQuery] = useState('');
-  const [chip, setChip] = useState<string>('all');
-
-  const sel = selected ? inventory.find((i) => i.uid === selected) : undefined;
-  const selDef = sel ? ITEMS[sel.itemId] : undefined;
-  const equippedUids = [equipped.melee, equipped.ranged, equipped.pack];
-  const equippedSlot =
-    selected === equipped.melee ? 'melee'
-    : selected === equipped.ranged ? 'ranged'
-    : selected === equipped.pack ? 'pack'
-    : null;
-
   const weight = totalWeightKg(inventory);
   const limit = carryLimitKg(equipped, inventory, difficulty);
   const tier = encumbranceTier(weight, limit);
   const tierLabel = { ok: 'Pack light', heavy: 'Heavy', overloaded: 'Overloaded', immobile: 'Immobile' }[tier];
   const tierColor = tier === 'ok' ? 'text-[#5aa469]' : tier === 'heavy' ? 'text-[#e8b34b]' : 'text-[#d9534f]';
-
-  const act = (label: string, fn: () => void, opts?: { danger?: boolean; disabled?: boolean }) => (
-    <button
-      key={label}
-      onClick={() => {
-        sfx.play('ui');
-        fn();
-      }}
-      disabled={opts?.disabled}
-      className={`rounded border px-3 py-1.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-        opts?.danger
-          ? 'border-[#232b36] bg-[#0b0e12] text-[#d9534f] hover:border-[#d9534f]'
-          : 'border-[#232b36] bg-[#0b0e12] text-[#d7dde5] hover:border-[#e8b34b]'
-      }`}
-    >
-      {label}
-    </button>
-  );
 
   return (
     <div className="flex h-full flex-col gap-3">
@@ -124,179 +86,9 @@ function LoadoutTab() {
           <div className="font-mono text-sm text-[#d7dde5]">{Math.round(battery)}%</div>
         </div>
       </div>
-
-      {/* equipped */}
-      <div className="rounded border border-[#232b36] bg-[#0b0e12] p-2.5">
-        <div className="mb-1.5 text-xs text-[#8a94a3]">Equipped</div>
-        <div className="flex flex-col gap-1 text-sm">
-          {(['melee', 'ranged', 'pack'] as const).map((slot) => {
-            const uid = equipped[slot];
-            const it = uid ? inventory.find((i) => i.uid === uid) : undefined;
-            return (
-              <div key={slot} className="flex justify-between">
-                <span className="text-[#8a94a3] capitalize">{slot}</span>
-                <span className="text-[#d7dde5]">{it ? ITEMS[it.itemId]?.name : '—'}</span>
-              </div>
-            );
-          })}
-        </div>
+      <div className="nomad-scroll min-h-0 flex-1 overflow-y-auto">
+        <InventoryDeck compact />
       </div>
-
-      {/* inventory — wave 3: the true grid. Drag to move, R or double-tap
-          rotates, red frame = illegal spot. Search/chips dim non-matches. */}
-      <div className="flex min-h-0 flex-1 flex-col">
-        <div className="mb-1.5 flex items-center gap-1.5">
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search pack…"
-            aria-label="Search inventory"
-            className="min-w-0 flex-1 rounded border border-[#232b36] bg-[#0b0e12] px-2 py-1 text-xs text-[#d7dde5] placeholder:text-[#8a94a3] focus:border-[#e8b34b] focus:outline-none"
-          />
-          <button
-            onClick={() => { sfx.play('ui'); arrangeInventory('size'); }}
-            className="shrink-0 rounded border border-[#232b36] px-2 py-1 text-[11px] text-[#d7dde5] hover:border-[#e8b34b]"
-          >
-            Auto-arrange
-          </button>
-          <button
-            onClick={() => { sfx.play('ui'); arrangeInventory('category'); }}
-            className="shrink-0 rounded border border-[#232b36] px-2 py-1 text-[11px] text-[#d7dde5] hover:border-[#e8b34b]"
-          >
-            Sort
-          </button>
-        </div>
-        <div className="mb-1.5 flex flex-wrap gap-1">
-          {['all', ...new Set(inventory.map((i) => ITEMS[i.itemId]?.category ?? ''))].map((c) => (
-            <button
-              key={c}
-              onClick={() => { sfx.play('ui'); setChip(c); }}
-              className={`rounded-full border px-2 py-0.5 text-[10px] capitalize ${
-                chip === c ? 'border-[#e8b34b] text-[#e8b34b]' : 'border-[#232b36] text-[#8a94a3]'
-              }`}
-            >
-              {c === 'all' ? 'All' : c.replace('weapon-', '')}
-            </button>
-          ))}
-        </div>
-        {/* quick-use row 1-4 */}
-        <div className="mb-1.5 flex gap-1.5">
-          {hotbar.map((uid, i) => {
-            const it = uid ? inventory.find((x) => x.uid === uid) : undefined;
-            return (
-              <button
-                key={i}
-                onClick={() => { if (it) { sfx.play('ui'); useHotbar(i); } }}
-                className="flex-1 truncate rounded border border-[#232b36] bg-[#0b0e12] px-1.5 py-1 text-left text-[10px] text-[#d7dde5]"
-                aria-label={`Quick slot ${i + 1}`}
-              >
-                <span className="mr-1 font-mono text-[#8a94a3]">{i + 1}</span>
-                {it ? ITEMS[it.itemId]?.name : '—'}
-              </button>
-            );
-          })}
-        </div>
-        <div className="nomad-scroll min-h-0 flex-1 overflow-y-auto">
-          {inventory.length === 0 ? (
-            <p className="p-3 text-sm text-[#8a94a3]">Nothing carried.</p>
-          ) : (
-            <GridInventory
-              items={inventory}
-              cols={packGridDims(equipped.pack ? inventory.find((i) => i.uid === equipped.pack)?.itemId : null).cols}
-              rows={packGridDims(equipped.pack ? inventory.find((i) => i.uid === equipped.pack)?.itemId : null).rows}
-              cell={40}
-              selectedUid={selected}
-              onSelect={setSelected}
-              onMove={moveInvItem}
-              equippedUids={new Set(equippedUids.filter((u): u is string => !!u))}
-              dimmedUids={
-                query.trim() || chip !== 'all'
-                  ? new Set(
-                      inventory
-                        .filter((it) => {
-                          const def = ITEMS[it.itemId];
-                          if (!def) return true;
-                          if (chip !== 'all' && def.category !== chip) return true;
-                          return !def.name.toLowerCase().includes(query.trim().toLowerCase());
-                        })
-                        .map((it) => it.uid),
-                    )
-                  : undefined
-              }
-            />
-          )}
-          <p className="mt-1 text-[10px] text-[#5a6472]">Drag to move · R / double-tap rotates · red frame = no fit</p>
-        </div>
-      </div>
-
-      {/* selection detail + actions */}
-      {sel && selDef && (
-        <div className="rounded border border-[#232b36] bg-[#0b0e12] p-2.5">
-          <div className="mb-1 text-sm font-medium text-[#d7dde5]">
-            {selDef.name}
-            {sel.qty > 1 && <span className="ml-2 text-[#8a94a3]">×{sel.qty}</span>}
-          </div>
-          <p className="mb-2 text-xs leading-relaxed text-[#8a94a3]">{selDef.desc}</p>
-          {(selDef.category === 'weapon-ranged' || selDef.category === 'weapon-melee' || sel.condition !== undefined) && (
-            <div className="mb-2 flex items-center gap-2">
-              <span className="text-[11px] text-[#8a94a3]">Condition</span>
-              <div className="h-1.5 flex-1 overflow-hidden rounded bg-[#232b36]">
-                <div
-                  className={`h-full ${(sel.condition ?? 100) < 30 ? 'bg-[#d9534f]' : (sel.condition ?? 100) < 60 ? 'bg-[#e8b34b]' : 'bg-[#7fb069]'}`}
-                  style={{ width: `${Math.round(sel.condition ?? 100)}%` }}
-                />
-              </div>
-              <span className={`font-mono text-[11px] ${(sel.condition ?? 100) < 30 ? 'text-[#d9534f]' : 'text-[#d7dde5]'}`}>
-                {Math.round(sel.condition ?? 100)}%{sel.jammed ? ' · JAM' : ''}
-              </span>
-            </div>
-          )}
-          <div className="flex flex-wrap gap-2">
-            {equippedSlot
-              ? act('Unequip', () => {
-                  unequipSlot(equippedSlot);
-                  useGameStore.getState().addToast(`Unequipped ${selDef.name}.`);
-                })
-              : act('Equip', () => equipUid(sel.uid), {
-                  disabled: selDef.category !== 'weapon-melee' && selDef.category !== 'weapon-ranged' && selDef.category !== 'pack',
-                })}
-            {act('Use', () => useItemUid(sel.uid))}
-            {act('Drop', () => {
-              dropUid(sel.uid);
-              setSelected(null);
-            }, { danger: true })}
-            {act('Rotate', () => {
-              const dims = packGridDims(equipped.pack ? inventory.find((i) => i.uid === equipped.pack)?.itemId : null);
-              const lay = layoutItems(inventory, dims.cols, dims.rows);
-              const p = lay.placed.get(sel.uid);
-              if (!p) return;
-              const byUid = new Map(inventory.map((i) => [i.uid, i]));
-              if (canPlace(lay.placed, byUid, sel.uid, p.gx, p.gy, !p.rot, dims.cols, dims.rows)) {
-                moveInvItem(sel.uid, p.gx, p.gy, !p.rot);
-              }
-            })}
-          </div>
-          <div className="mt-2 flex items-center gap-1.5">
-            <span className="text-[11px] text-[#8a94a3]">Quick slot:</span>
-            {[0, 1, 2, 3].map((i) => (
-              <button
-                key={i}
-                onClick={() => {
-                  sfx.play('ui');
-                  assignHotbar(i, sel.uid);
-                  useGameStore.getState().addToast(`${selDef.name} → quick slot ${i + 1}.`);
-                }}
-                aria-label={`Assign to quick slot ${i + 1}`}
-                className={`rounded border px-2 py-0.5 font-mono text-[11px] ${
-                  hotbar[i] === sel.uid ? 'border-[#e8b34b] text-[#e8b34b]' : 'border-[#232b36] text-[#d7dde5]'
-                }`}
-              >
-                {i + 1}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -8,7 +8,8 @@
 import { useState } from 'react';
 import { useGameStore } from '../store/gameStore';
 import { ITEMS } from '../data/items';
-import { containerGridDims, packGridDims } from '../store/gridUtils';
+import { containerGridDims } from '../store/gridUtils';
+import { findCarried, gridSpecForItem, pocketsSpec } from '../store/containers';
 import GridInventory from './GridInventory';
 import { sfx } from '../systems/audio';
 
@@ -38,10 +39,15 @@ export default function StoragePanel() {
   if (storageOpen.kind === 'crate') capKg = 150;
 
   const storeDims = containerGridDims(capKg ?? 150);
-  const packDims = packGridDims(equipped.pack ? inventory.find((i) => i.uid === equipped.pack)?.itemId : null);
+  // inventory v2: the put-source is the worn backpack's own grid (the
+  // main storage) — or pockets when no backpack is worn. Everything
+  // else you carry is reachable through the inventory deck.
+  const packHolder = equipped.backpack ? findCarried(inventory, equipped.backpack)?.item : undefined;
+  const packItems = packHolder ? (packHolder.contents ?? []) : inventory.filter((i) => i.loc === 'pockets');
+  const packDims = packHolder ? gridSpecForItem(packHolder) ?? pocketsSpec() : pocketsSpec();
   const storedSel = selStored ? items.find((it) => it.uid === selStored) : undefined;
   const storedSelIdx = storedSel ? items.indexOf(storedSel) : -1;
-  const packSel = selPack ? inventory.find((it) => it.uid === selPack) : undefined;
+  const packSel = selPack ? packItems.find((it) => it.uid === selPack) : undefined;
 
   const close = () => {
     sfx.play('ui');
@@ -101,7 +107,7 @@ export default function StoragePanel() {
           </div>
           <div>
             <div className="mb-1 flex items-center justify-between">
-              <div className="text-[11px] font-semibold tracking-wide text-[#8a94a3]">YOUR PACK</div>
+              <div className="text-[11px] font-semibold tracking-wide text-[#8a94a3]">{packHolder ? `YOUR PACK — ${ITEMS[packHolder.itemId]?.name ?? ''}` : 'YOUR POCKETS'}</div>
               <button
                 disabled={!packSel}
                 onClick={() => { sfx.play('ui'); storagePut(packSel!.uid); setSelPack(null); }}
@@ -110,11 +116,11 @@ export default function StoragePanel() {
                 Put{packSel ? ` ${ITEMS[packSel.itemId]?.name}` : ''}
               </button>
             </div>
-            {inventory.length === 0 ? (
-              <p className="text-xs text-[#8a94a3]">Nothing carried.</p>
+            {packItems.length === 0 ? (
+              <p className="text-xs text-[#8a94a3]">Nothing there.</p>
             ) : (
               <GridInventory
-                items={inventory}
+                items={packItems}
                 cols={packDims.cols}
                 rows={packDims.rows}
                 cell={30}
