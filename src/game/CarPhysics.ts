@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { carParams, torqueAt, type CarParams } from './carSpec';
 import { GT500_PARAMS } from './gt500Def';
+import { PRIME_PARAMS } from './primeDef';
+import { SPRINTER_PARAMS } from './sprinterDef';
 import { GROUND_COLS, GROUND_ROWS } from './World';
 import type { Vehicle } from './Vehicles';
 import type { Collider } from './Colliders';
@@ -128,6 +130,12 @@ const CHASSIS_GEOM: Record<string, ChassisGeom> = {
   mustang: { half: [0.82, 0.3, 2.22], wheelX: WHEEL_X, wheelZ: WHEEL_Z },
   // S197: 1.88 m wide, 4.77 m long, 2.71 m wheelbase, ~1.58 m track
   gt500: { half: [0.94, 0.32, 2.39], wheelX: 0.79, wheelZ: 1.355 },
+  // Class-8 tractor: 2.55 m wide, ~8.6 m long. Physics stays 4-corner:
+  // steer axle at +2.60 and the tandem centroid at -2.98 in model
+  // space -> symmetric half-wheelbase 2.79 about the group origin.
+  nomad_prime: { half: [1.27, 0.45, 4.3], wheelX: 0.97, wheelZ: 2.79 },
+  // Sprinter 170": 2.02 m wide, 6.97 m long, 4.32 m wheelbase
+  sprinter_van: { half: [1.01, 0.35, 3.49], wheelX: 0.86, wheelZ: 2.16 },
 };
 export function geomFor(defId: string): ChassisGeom {
   return CHASSIS_GEOM[defId] ?? CHASSIS_GEOM.mustang;
@@ -153,10 +161,26 @@ export interface SuspTune {
   travel: number;
   archTravelM: number;
   archTopM: number;
+  /** Rapier's per-wheel max suspension force. The engine DEFAULT
+   *  silently caps at ~car mass per wheel (measured: a 2,200 kg
+   *  vehicle settles, a 2,600 kg one collapses to its travel floor
+   *  at ANY stiffness) — the cars never reach it, so they keep the
+   *  default and their tuned behavior is untouched. Heavy defs set
+   *  it explicitly: ~3x the static corner load, so landings can
+   *  still spike and bottom like the cars do. */
+  maxForceN?: number;
 }
 export const SUSP_TUNES: Record<string, SuspTune> = {
   mustang: { stiffness: 32, travel: 0.28, archTravelM: 0.18, archTopM: 0.87 },
   gt500: { stiffness: 46, compression: 4.5, relaxation: 6.5, travel: 0.24, archTravelM: 0.17, archTopM: 0.86 },
+  // Class-8 air-ride class tune for ~9.8 t: springs an order stiffer
+  // than the cars', travel long, but the arch clamp stays tight —
+  // the steer arch lip (measured from the GLB) sits at 1.17 m and a
+  // 1.05 m wheel may rise only 0.11 m before its top would pass it.
+  nomad_prime: { stiffness: 110, compression: 7, relaxation: 9, travel: 0.3, archTravelM: 0.11, archTopM: 1.17, maxForceN: 72000 },
+  // Lifted 4x4 van: softer, longer travel; flare lip measured at
+  // 1.025 m over a 0.84 m wheel -> 0.16 m of visual tuck.
+  sprinter_van: { stiffness: 60, compression: 5, relaxation: 7, travel: 0.26, archTravelM: 0.16, archTopM: 1.02, maxForceN: 26000 },
 };
 export function suspTuneFor(defId: string): SuspTune {
   return SUSP_TUNES[defId] ?? SUSP_TUNES.mustang;
@@ -177,6 +201,15 @@ export function clampSuspensionVisual(len: number, rest: number, tune: SuspTune)
 export function paramsForDef(defId: string, upgrades: readonly string[], cargoKg: number): CarParams {
   if (defId === 'gt500') {
     return { ...GT500_PARAMS, massKg: GT500_PARAMS.massKg + Math.max(0, cargoKg) };
+  }
+  // The fleet diesels run their fixed spec sheets (primeDef /
+  // sprinterDef) — the Stallion upgrade tree's carSpec deltas do not
+  // transfer; cargo is real mass on top, same as the Shelby.
+  if (defId === 'nomad_prime') {
+    return { ...PRIME_PARAMS, massKg: PRIME_PARAMS.massKg + Math.max(0, cargoKg) };
+  }
+  if (defId === 'sprinter_van') {
+    return { ...SPRINTER_PARAMS, massKg: SPRINTER_PARAMS.massKg + Math.max(0, cargoKg) };
   }
   return carParams(upgrades, cargoKg);
 }
@@ -318,6 +351,7 @@ export class CarPhysics {
       ctrl.setWheelSuspensionStiffness(i, tune.stiffness);
       if (tune.compression !== undefined) ctrl.setWheelSuspensionCompression(i, tune.compression);
       if (tune.relaxation !== undefined) ctrl.setWheelSuspensionRelaxation(i, tune.relaxation);
+      if (tune.maxForceN !== undefined) ctrl.setWheelMaxSuspensionForce(i, tune.maxForceN);
       ctrl.setWheelMaxSuspensionTravel(i, tune.travel);
       ctrl.setWheelFrictionSlip(i, this.params.tireMu * this.gripScale * 4.0);
       ctrl.setWheelSideFrictionStiffness(i, 0.9);
