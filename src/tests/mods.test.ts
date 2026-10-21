@@ -1,9 +1,10 @@
 // Wave 4: mod-slot coverage across the ranged roster + the finish system.
 // Data-driven guards: a weapon that claims a slot no mod fills, or a finish
 // with no kit item, fails here instead of in the player's hands.
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { FINISHES, MODS, finishDef, type ModSlot } from '../data/mods';
 import { ITEMS } from '../data/items';
+import { useGameStore } from '../store/gameStore';
 
 const SLOTS: ModSlot[] = ['optic', 'muzzle', 'magazine', 'underbarrel'];
 const ranged = Object.values(ITEMS).filter((i) => i.category === 'weapon-ranged');
@@ -73,5 +74,72 @@ describe('finishes', () => {
   it('finishDef tolerates junk', () => {
     expect(finishDef(undefined)).toBeUndefined();
     expect(finishDef('nope')).toBeUndefined();
+  });
+});
+
+// The restored Craft-tab Finishes UI (src/ui/FinishRow.tsx) is a thin view
+// over this action — pin the contract it relies on: bench gate, kit
+// consumed, coat replaced.
+describe('applyFinish (store)', () => {
+  function give(itemId: string, qty = 1): string {
+    const s = useGameStore.getState();
+    s.addItem(itemId, qty, true);
+    const inv = useGameStore.getState().inventory;
+    return inv[inv.length - 1].uid;
+  }
+
+  beforeEach(() => {
+    useGameStore.setState({
+      inventory: [],
+      equipped: { melee: null, ranged: null, pack: null },
+      nearStation: null,
+      toasts: [],
+    });
+  });
+
+  it('does nothing away from a Weapons Bench', () => {
+    const s = useGameStore.getState();
+    const gun = give('pistol');
+    const kit = give('finish_matte');
+    s.applyFinish(gun, kit);
+    const st = useGameStore.getState();
+    expect(st.inventory.find((i) => i.uid === gun)?.finish).toBeUndefined();
+    expect(st.countItem('finish_matte')).toBe(1);
+  });
+
+  it('at the bench: sets the coat and consumes the kit', () => {
+    const s = useGameStore.getState();
+    const gun = give('pistol');
+    const kit = give('finish_matte');
+    useGameStore.setState({ nearStation: 'workbench' });
+    s.applyFinish(gun, kit);
+    const st = useGameStore.getState();
+    expect(st.inventory.find((i) => i.uid === gun)?.finish).toBe('finish_matte');
+    expect(st.countItem('finish_matte')).toBe(0);
+  });
+
+  it('re-coating replaces the old finish; re-applying the same one keeps the kit', () => {
+    const s = useGameStore.getState();
+    const gun = give('machete');
+    const kit1 = give('finish_rust');
+    useGameStore.setState({ nearStation: 'workbench' });
+    s.applyFinish(gun, kit1);
+    expect(useGameStore.getState().inventory.find((i) => i.uid === gun)?.finish).toBe('finish_rust');
+    const kit2 = give('finish_rust');
+    s.applyFinish(gun, kit2);
+    const st = useGameStore.getState();
+    expect(st.inventory.find((i) => i.uid === gun)?.finish).toBe('finish_rust');
+    expect(st.countItem('finish_rust')).toBe(1);
+  });
+
+  it('refuses non-weapon targets', () => {
+    const s = useGameStore.getState();
+    const food = give('canned_food');
+    const kit = give('finish_camo');
+    useGameStore.setState({ nearStation: 'workbench' });
+    s.applyFinish(food, kit);
+    const st = useGameStore.getState();
+    expect(st.inventory.find((i) => i.uid === food)?.finish).toBeUndefined();
+    expect(st.countItem('finish_camo')).toBe(1);
   });
 });

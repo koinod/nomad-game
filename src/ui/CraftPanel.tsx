@@ -38,6 +38,7 @@ import {
   type CraftContext,
 } from '../systems/crafting';
 import { sfx } from '../systems/audio';
+import { FinishesSection } from './FinishRow';
 
 const STATION_ORDER: StationId[] = ['workbench', 'chemistry', 'industrial'];
 
@@ -197,6 +198,8 @@ export function CraftPanel() {
           <div className="flex flex-col gap-1.5">{stationRecipes(st).map((r) => recipeRow(r))}</div>
         </section>
       ))}
+
+      <FinishesSection />
     </div>
   );
 }
