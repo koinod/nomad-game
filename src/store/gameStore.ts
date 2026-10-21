@@ -7,11 +7,13 @@ import { FACILITIES as FACILITY_DEFS, baseHeat, buildMinutes } from '../data/bas
 import { dispatchDurationMin, poiName, resolveDispatch } from '../data/dispatch';
 import { TRAITS as TRAIT_DEFS } from '../data/survivors';
 import { QUESTS } from '../data/quests';
+import { FACTIONS } from '../data/factions';
 import { DEFAULT_APPEARANCE, DIFFICULTIES } from './types';
 import type {
   Appearance, DifficultyId, Equipped, FleetEntry, InvItem, PhoneTab, QuestProgress, QuestStepType,
   SaveMeta, SaveSnapshot, Screen, ToastMsg, TrailerFleetEntry,
   Dispatch, JournalEntry, ScoutReport, BaseBuildOrder, CraftJob, BaseExt,
+  ClaimsState, MoraleRuntime, BaseInstance,
 } from './types';
 import {
   carryLimitKg, encumbranceTier, slotLimit, totalWeightKg, usedSlots,
@@ -99,6 +101,12 @@ interface GameState {
   noiseLevel: number;
   setNoiseLevel: (n: number) => void;
 
+  // visibility: how exposed the player is right now (0..1, Lane 8's
+  // visibility engine computes it per frame; Lane 11's LightIndicator
+  // reads it for the HUD). Runtime-only — never persisted.
+  visibility: number;
+  setVisibility: (v: number) => void;
+
   // skills & archetypes (SYSTEMS_SPEC §6)
   skills: Record<import('../data/skills').SkillId, { level: number; xp: number }>;
   perkPoints: number;
@@ -136,6 +144,16 @@ interface GameState {
   setStoryChoice: (key: string, value: string) => void;
   baseExt: BaseExt;
   setBaseExt: (patch: Partial<BaseExt>) => void;
+  // second batch: Lane 10's claims model + morale counters (persisted;
+  // legacy `base` above stays readable and migrates into claims on
+  // load), Lane 9's explicit beacon ending state (derived from the
+  // beacon_lit / beacon_dark flags by setFlag + on load).
+  claims: ClaimsState;
+  setClaims: (claims: ClaimsState) => void;
+  moraleRuntime: MoraleRuntime;
+  setMoraleRuntime: (m: MoraleRuntime) => void;
+  beaconChoice: 'light' | 'dark' | null;
+  setBeaconChoice: (c: 'light' | 'dark' | null) => void;
   dayStats: { kills: number; crafts: number; pickups: number };
   addJournal: (title: string, lines: string[]) => void;
   startDispatch: (
@@ -292,6 +310,87 @@ export const craftQueueBridge: {
   read: (() => CraftJob[]) | null;
   write: ((jobs: CraftJob[]) => void) | null;
 } = { read: null, write: null };
+
+/**
+ * Faction canon mirrors (Lane 9 field requests F1/F2). The canonical
+ * STARTING_REP / LEGACY_REP_ALIAS live in Lane 9's src/data/factions.ts
+ * (easymode-era startRep values; folds from FACTION_FOLDS) — that file
+ * only lands at merge, so the values are mirrored here verbatim:
+ * remnants −50, union +25, skulls −30, tollkeepers/drowned/lighthouse 0;
+ * pier→union, refuge→union, hollow→skulls. At merge, swap these consts
+ * for imports from '../data/factions' (same names there).
+ */
+export const STARTING_REP: Record<string, number> = {
+  remnants: -50, union: 25, skulls: -30, tollkeepers: 0, drowned: 0, lighthouse: 0,
+};
+export const LEGACY_REP_ALIAS: Record<string, string> = {
+  pier: 'union', refuge: 'union', hollow: 'skulls',
+};
+
+/** Fold a loaded save's rep onto the canon roster (Lane 9, F2): start
+ *  from STARTING_REP, let saved standings override, then add any legacy
+ *  folded-faction standing into its absorbing faction (the pier crew IS
+ *  the Union now — standing earned with them carries, on top of the
+ *  Union's starting goodwill). Alias keys never survive the fold. */
+export function foldLegacyRep(saved: Record<string, number>): Record<string, number> {
+  const out: Record<string, number> = { ...STARTING_REP };
+  for (const [id, value] of Object.entries(saved)) {
+    if (!(id in LEGACY_REP_ALIAS)) out[id] = value;
+  }
+  for (const [oldId, newId] of Object.entries(LEGACY_REP_ALIAS)) {
+    if (oldId in saved) out[newId] = (out[newId] ?? 0) + saved[oldId];
+  }
+  return out;
+}
+
+/** Legacy facility → Lane 10 tiered facility defId, matched by NAME
+ *  (Lane 10's migration rule): the flat list's Rain Collector is the
+ *  tiered 'water' line, Garage Bay is 'garage'. Tier 1 on migration. */
+const LEGACY_FACILITY_MAP: Record<string, string> = {
+  command_post: 'command_post',
+  garden: 'garden',
+  infirmary: 'infirmary',
+  salvage_rig: 'salvage_rig',
+  rain_collector: 'water',
+  garage_bay: 'garage',
+};
+/** Legacy flat facilities that are PREFABS in Lane 10's model. */
+const LEGACY_PREFAB_MAP: Record<string, string> = {
+  palisade: 'palisade_wall',
+  watchtower: 'watchtower',
+  storage_crate: 'storage_crate',
+};
+
+/** Migrate a legacy `base: { poiId, facilities }` snapshot value into
+ *  Lane 10's ClaimsState (their migration rule): the old base becomes
+ *  the home BaseInstance with a Command Post at tier 1 (the claim always
+ *  included it) plus every legacy facility mapped by name at tier 1;
+ *  defense/storage flat facilities become prefabs. Ids in neither map
+ *  are dropped — none exist in the shipped flat list. Stockpile starts
+ *  empty (the legacy model had none). */
+export function claimsFromLegacyBase(
+  base: { poiId: string; facilities: string[] } | null,
+): ClaimsState {
+  if (!base) return { home: null, outposts: [] };
+  const facilities: BaseInstance['facilities'] = [
+    { defId: 'command_post', tier: 1, staffId: null, paused: false },
+  ];
+  const prefabs: BaseInstance['prefabs'] = [];
+  for (const id of base.facilities) {
+    if (id === 'command_post') continue;
+    const tiered = LEGACY_FACILITY_MAP[id];
+    if (tiered) {
+      facilities.push({ defId: tiered, tier: 1, staffId: null, paused: false });
+      continue;
+    }
+    const prefab = LEGACY_PREFAB_MAP[id];
+    if (prefab) prefabs.push({ defId: prefab });
+  }
+  const home: BaseInstance = {
+    siteId: base.poiId, role: 'home', facilities, prefabs, stockpile: [],
+  };
+  return { home, outposts: [] };
+}
 
 export const useGameStore = create<GameState>()((set, get) => {
   /** Wave 3: settle every dispatch whose ETA has passed. Runs off
@@ -459,7 +558,7 @@ export const useGameStore = create<GameState>()((set, get) => {
     quests: [],
     doneQuests: [],
     flags: {},
-    rep: { lighthouse: 0, pier: 0 },
+    rep: { ...STARTING_REP },
 
     phoneOpen: false,
     phoneTab: 'home',
@@ -476,6 +575,7 @@ export const useGameStore = create<GameState>()((set, get) => {
     interactPrompt: null,
 
     noiseLevel: 0,
+    visibility: 0,
     search: null,
 
     meleeTarget: false,
@@ -512,7 +612,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         quests: [{ id: 'q_prologue', stepIndex: 0, progress: 0 }],
         doneQuests: [],
         flags: {},
-        rep: { lighthouse: 0, pier: 0 },
+        rep: { ...STARTING_REP },
         phoneOpen: false, phoneTab: 'home', phoneUnlocked: false, battery: 100,
         backpackOpen: false, sleepOpen: false, restedMinutesLeft: 0, lootOpenId: null, lootStash: {},
         storageOpen: null, storageItems: [], vehicle: null, fleet: [], trailerFleet: [],
@@ -536,6 +636,9 @@ export const useGameStore = create<GameState>()((set, get) => {
         base: null,
         dispatches: [], journal: [], scouted: {}, baseQueue: [],
         craftQueue: [], storyChoices: {}, baseExt: {},
+        claims: { home: null, outposts: [] },
+        moraleRuntime: { idleDays: {}, breakingDays: {} },
+        beaconChoice: null,
         dayStats: { kills: 0, crafts: 0, pickups: 0 },
       });
       // a new run starts with an empty bench — clear Lane 7's store too
@@ -1078,6 +1181,11 @@ export const useGameStore = create<GameState>()((set, get) => {
       if (s.flags[flag]) return;
       const patch: Record<string, unknown> = { flags: { ...s.flags, [flag]: true } };
       if (flag === 'phone_unlocked') patch.phoneUnlocked = true;
+      // Lane 9 (F3): the beacon ending is explicit state, kept in sync
+      // with the flags at the moment they land — consumers read
+      // beaconChoice, never scrape flags.
+      if (flag === 'beacon_lit') patch.beaconChoice = 'light';
+      if (flag === 'beacon_dark') patch.beaconChoice = 'dark';
       set(patch);
       get().checkQuestStarts();
     },
@@ -1086,7 +1194,11 @@ export const useGameStore = create<GameState>()((set, get) => {
       const s = get();
       const next = (s.rep[faction] ?? 0) + amount;
       set({ rep: { ...s.rep, [faction]: next } });
-      s.addToast(`${faction === 'lighthouse' ? 'Lighthouse Collective' : faction} rep ${amount >= 0 ? '+' : ''}${amount} (${next})`);
+      // Lane 9 (F4): display names come from the FACTIONS table for
+      // every faction, not a lighthouse special case. Unknown ids fall
+      // back to the raw id. Post-merge this reads Lane 9's canon table.
+      const name = FACTIONS.find((f) => f.id === faction)?.name ?? faction;
+      s.addToast(`${name} rep ${amount >= 0 ? '+' : ''}${amount} (${next})`);
     },
 
     questEvent: (type, target, count = 1) => {
@@ -1168,6 +1280,10 @@ export const useGameStore = create<GameState>()((set, get) => {
     setNoiseLevel: (n) => {
       const v = Math.max(0, Math.min(100, n));
       if (Math.abs(get().noiseLevel - v) > 0.5) set({ noiseLevel: v });
+    },
+    setVisibility: (v) => {
+      const c = Math.max(0, Math.min(1, v));
+      if (Math.abs(get().visibility - c) > 0.02) set({ visibility: c });
     },
     setSearch: (s) => set({ search: s }),
 
@@ -1421,6 +1537,12 @@ export const useGameStore = create<GameState>()((set, get) => {
     setBaseExt: (patch) => {
       set({ baseExt: { ...get().baseExt, ...patch } });
     },
+    claims: { home: null, outposts: [] },
+    moraleRuntime: { idleDays: {}, breakingDays: {} },
+    beaconChoice: null,
+    setClaims: (claims) => set({ claims }),
+    setMoraleRuntime: (moraleRuntime) => set({ moraleRuntime }),
+    setBeaconChoice: (beaconChoice) => set({ beaconChoice }),
 
     addJournal: (title, lines) => {
       const s = get();
@@ -1716,6 +1838,9 @@ export const useGameStore = create<GameState>()((set, get) => {
         craftQueue: [...craftJobs],
         storyChoices: s.storyChoices,
         baseExt: s.baseExt,
+        claims: s.claims,
+        moraleRuntime: s.moraleRuntime,
+        beaconChoice: s.beaconChoice,
       };
       try {
         await saveGameToSlot(slot, snapshot);
@@ -1733,6 +1858,7 @@ export const useGameStore = create<GameState>()((set, get) => {
       const s = get();
       if (!snap) { s.addToast('No save in that slot.'); return false; }
       if (snap.version > 3) { s.addToast('Save is from a newer version.'); return false; }
+      const cleanBase = sanitizeBase(snap.base);
       set({
         screen: 'game',
         difficulty: snap.difficulty,
@@ -1749,7 +1875,10 @@ export const useGameStore = create<GameState>()((set, get) => {
         quests: snap.quests,
         doneQuests: snap.doneQuests,
         flags: snap.flags,
-        rep: snap.rep,
+        // Lane 9 (F1/F2): fold onto the canon roster — legacy folded
+        // factions (pier/refuge/hollow) land in their absorbing faction
+        // and missing canon factions take their STARTING_REP values.
+        rep: foldLegacyRep(snap.rep),
         phoneOpen: false, phoneTab: 'home', phoneUnlocked: snap.phoneUnlocked, battery: snap.battery,
         dialogue: null, interactPrompt: null,
         dead: false, deathCause: null, endingChoice: null, cutsceneLine: 0,
@@ -1758,7 +1887,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         perkPoints: snap.perkPoints,
         perks: snap.perks,
         survivors: snap.survivors,
-        base: sanitizeBase(snap.base),
+        base: cleanBase,
         // wave 3 fields: absent on older v3 saves — default them here.
         // Lane 13: legacy dispatch entries predate instance ids + fuel —
         // default per entry (instance := def, fuel := 0 unaccounted).
@@ -1778,6 +1907,14 @@ export const useGameStore = create<GameState>()((set, get) => {
         craftQueue: snap.craftQueue ?? [],
         storyChoices: snap.storyChoices ?? {},
         baseExt: snap.baseExt ?? {},
+        // Lane 10: claims absent on legacy saves — migrate the old
+        // single base into a home BaseInstance (name-mapped facilities).
+        claims: snap.claims ?? claimsFromLegacyBase(cleanBase),
+        moraleRuntime: snap.moraleRuntime ?? { idleDays: {}, breakingDays: {} },
+        // Lane 9 (F3): derive the beacon state from the flags when the
+        // save predates the explicit field.
+        beaconChoice: snap.beaconChoice
+          ?? (snap.flags.beacon_lit ? 'light' : snap.flags.beacon_dark ? 'dark' : null),
         dayStats: { kills: 0, crafts: 0, pickups: 0 },
         pendingSnapshot: snap,
       });

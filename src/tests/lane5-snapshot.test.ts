@@ -65,7 +65,12 @@ beforeEach(() => {
   captured.loadResult = null;
   craftQueueBridge.read = null;
   craftQueueBridge.write = null;
-  useGameStore.setState({ craftQueue: [], storyChoices: {}, baseExt: {}, toasts: [] });
+  useGameStore.setState({
+    craftQueue: [], storyChoices: {}, baseExt: {}, toasts: [],
+    claims: { home: null, outposts: [] },
+    moraleRuntime: { idleDays: {}, breakingDays: {} },
+    beaconChoice: null,
+  });
 });
 
 describe('store snapshot round-trip (field contract)', () => {
@@ -73,7 +78,7 @@ describe('store snapshot round-trip (field contract)', () => {
     const s = useGameStore.getState();
     s.setCraftQueue(JOBS);
     s.setStoryChoice('beacon', 'lit');
-    s.setBaseExt({ heat: 42, stockpile: [{ uid: 's1', itemId: 'scrap', qty: 9 }] });
+    s.setBaseExt({ heat: 42, localKillsNearBase: 3 });
 
     const ok = await useGameStore.getState().saveToSlot('1');
     expect(ok).toBe(true);
@@ -81,7 +86,7 @@ describe('store snapshot round-trip (field contract)', () => {
     expect(captured.saved?.snap.craftQueue).toEqual(JOBS);
     expect(captured.saved?.snap.storyChoices).toEqual({ beacon: 'lit' });
     expect(captured.saved?.snap.baseExt?.heat).toBe(42);
-    expect(captured.saved?.snap.baseExt?.stockpile).toHaveLength(1);
+    expect(captured.saved?.snap.baseExt?.localKillsNearBase).toBe(3);
   });
 
   it('saveToSlot harvests Lane 7 jobs through the bridge when registered', async () => {
@@ -136,6 +141,102 @@ describe('store snapshot round-trip (field contract)', () => {
     expect(d2.vehicleInstanceId).toBe('stallion_fx');
     expect(d2.trailerInstanceId).toBe('trailer_box');
     expect(d2.fuelLiters).toBe(18.5);
+  });
+
+  it('saveToSlot writes claims / moraleRuntime / beaconChoice', async () => {
+    const s = useGameStore.getState();
+    s.setClaims({
+      home: {
+        siteId: 'lighthouse_base', role: 'home',
+        facilities: [{ defId: 'garden', tier: 2, staffId: 'mara', paused: false }],
+        prefabs: [{ defId: 'palisade_wall', upgraded: true }],
+        stockpile: [{ itemId: 'scrap', qty: 9 }],
+      },
+      outposts: [],
+    });
+    s.setMoraleRuntime({ idleDays: { mara: 2 }, breakingDays: {} });
+    s.setBeaconChoice('light');
+
+    const ok = await useGameStore.getState().saveToSlot('1');
+    expect(ok).toBe(true);
+    expect(captured.saved?.snap.claims?.home?.stockpile).toEqual([{ itemId: 'scrap', qty: 9 }]);
+    expect(captured.saved?.snap.claims?.home?.facilities[0].tier).toBe(2);
+    expect(captured.saved?.snap.moraleRuntime).toEqual({ idleDays: { mara: 2 }, breakingDays: {} });
+    expect(captured.saved?.snap.beaconChoice).toBe('light');
+  });
+
+  it('loadFromSlot migrates a legacy base into claims (name-mapped, T1)', async () => {
+    captured.loadResult = minimalSnapshot({
+      base: {
+        poiId: 'lighthouse_base',
+        facilities: ['command_post', 'garden', 'infirmary', 'salvage_rig', 'rain_collector', 'garage_bay', 'palisade', 'watchtower', 'storage_crate'],
+      },
+      // no claims / moraleRuntime / beaconChoice — pre-request save
+    });
+    const ok = await useGameStore.getState().loadFromSlot('1');
+    expect(ok).toBe(true);
+    const st = useGameStore.getState();
+    expect(st.claims.home?.siteId).toBe('lighthouse_base');
+    expect(st.claims.home?.role).toBe('home');
+    expect(st.claims.home?.facilities).toEqual([
+      { defId: 'command_post', tier: 1, staffId: null, paused: false },
+      { defId: 'garden', tier: 1, staffId: null, paused: false },
+      { defId: 'infirmary', tier: 1, staffId: null, paused: false },
+      { defId: 'salvage_rig', tier: 1, staffId: null, paused: false },
+      { defId: 'water', tier: 1, staffId: null, paused: false },
+      { defId: 'garage', tier: 1, staffId: null, paused: false },
+    ]);
+    expect(st.claims.home?.prefabs).toEqual([
+      { defId: 'palisade_wall' }, { defId: 'watchtower' }, { defId: 'storage_crate' },
+    ]);
+    expect(st.claims.home?.stockpile).toEqual([]);
+    expect(st.claims.outposts).toEqual([]);
+    expect(st.moraleRuntime).toEqual({ idleDays: {}, breakingDays: {} });
+    expect(st.beaconChoice).toBeNull();
+    // the legacy field itself still loads for the current consumers
+    expect(st.base?.poiId).toBe('lighthouse_base');
+  });
+
+  it('loadFromSlot prefers stored claims over legacy migration', async () => {
+    captured.loadResult = minimalSnapshot({
+      base: { poiId: 'lighthouse_base', facilities: ['garden'] },
+      claims: { home: null, outposts: [{ siteId: 'relay', role: 'outpost', facilities: [], prefabs: [], stockpile: [] }] },
+      moraleRuntime: { idleDays: { dez: 1 }, breakingDays: { dez: 2 } },
+    });
+    const ok = await useGameStore.getState().loadFromSlot('1');
+    expect(ok).toBe(true);
+    const st = useGameStore.getState();
+    expect(st.claims.home).toBeNull();
+    expect(st.claims.outposts).toHaveLength(1);
+    expect(st.moraleRuntime.breakingDays).toEqual({ dez: 2 });
+  });
+
+  it('loadFromSlot folds legacy rep onto the canon roster (Lane 9 F1/F2)', async () => {
+    captured.loadResult = minimalSnapshot({
+      rep: { lighthouse: 12, pier: 30, hollow: -20 },
+    });
+    const ok = await useGameStore.getState().loadFromSlot('1');
+    expect(ok).toBe(true);
+    const { rep } = useGameStore.getState();
+    expect(rep.lighthouse).toBe(12); // saved standing overrides the default
+    expect(rep.union).toBe(55); // STARTING_REP 25 + pier's folded 30
+    expect(rep.skulls).toBe(-50); // STARTING_REP −30 + hollow's folded −20
+    expect(rep.remnants).toBe(-50);
+    expect(rep.tollkeepers).toBe(0);
+    expect(rep.drowned).toBe(0);
+    expect('pier' in rep).toBe(false);
+    expect('hollow' in rep).toBe(false);
+  });
+
+  it('loadFromSlot derives beaconChoice from flags when the field is absent (F3)', async () => {
+    captured.loadResult = minimalSnapshot({ flags: { beacon_lit: true } });
+    expect(await useGameStore.getState().loadFromSlot('1')).toBe(true);
+    expect(useGameStore.getState().beaconChoice).toBe('light');
+
+    captured.loadResult = minimalSnapshot({ flags: { beacon_dark: true }, beaconChoice: 'light' });
+    expect(await useGameStore.getState().loadFromSlot('1')).toBe(true);
+    // an explicit stored field wins over flag derivation
+    expect(useGameStore.getState().beaconChoice).toBe('light');
   });
 
   it('loadFromSlot defaults the fields when an older snapshot lacks them', async () => {

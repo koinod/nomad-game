@@ -367,17 +367,76 @@ export interface CraftJob {
  *  with no base extensions saves and loads exactly as before. The home
  *  base itself stays `SaveSnapshot.base`; this is everything around it. */
 export interface BaseExt {
-  /** Secondary claimed sites (home base is `base`, never repeated here). */
-  outposts?: { poiId: string; facilities: string[] }[];
   /** Last computed base heat (Lane 10's heat math owns the value). */
   heat?: number;
   /** Siege-loop state (Lane 10): absent = the loop has never stirred. */
   siegeState?: 'calm' | 'scouted' | 'warning' | 'siege';
   /** Absolute game minutes of the next scheduled siege beat, if any. */
   siegeNextMin?: number;
-  /** Base shelves (SYSTEMS_SPEC §7.5 stockpile screen), distinct from
-   *  vehicle storage — items physically left at the home base. */
-  stockpile?: InvItem[];
+  /** Husk kills near the base — a heat input (Lane 10's computeHeat
+   *  takes it as a parameter; the store persists the running count). */
+  localKillsNearBase?: number;
+  // NOTE: outposts + stockpile lived here in the first contract draft;
+  // Lane 10's ClaimsState/BaseInstance (below) supersede them — outposts
+  // are ClaimsState.outposts and the stockpile is per-base
+  // (BaseInstance.stockpile, {itemId, qty} stacks, no uids).
+}
+
+/** A plain item stack — Lane 10's StockItem (src/systems/morale.ts).
+ *  Mirrored here so the save contract is self-contained; structurally
+ *  identical, re-export Lane 10's at merge if preferred. */
+export interface StockItem {
+  itemId: string;
+  qty: number;
+}
+
+/** Lane 10's FacilityInstance (src/systems/baseClaims.ts) — mirror. */
+export interface FacilityInstance {
+  defId: string;
+  tier: number;
+  /** Survivor id staffing this facility, or null. */
+  staffId: string | null;
+  /** Production paused (injured staff, siege prep). */
+  paused: boolean;
+}
+
+/** Lane 10's PrefabInstance (src/systems/baseClaims.ts) — mirror. */
+export interface PrefabInstance {
+  defId: string;
+  /** Palisade scrap-plating (upgrade-in-place). */
+  upgraded?: boolean;
+  /** Survivor id posted here (watchtower guard posts). */
+  staffId?: string | null;
+}
+
+/** Lane 10's BaseInstance (src/systems/baseClaims.ts) — mirror. One
+ *  claimed site: tiered facility instances, placed prefabs, and the
+ *  per-base stockpile Lane 10 asked to persist ({itemId, qty} stacks). */
+export interface BaseInstance {
+  siteId: string;
+  role: 'home' | 'outpost' | 'field';
+  facilities: FacilityInstance[];
+  prefabs: PrefabInstance[];
+  stockpile: StockItem[];
+}
+
+/** Lane 10's ClaimsState (src/systems/baseClaims.ts) — mirror. The
+ *  canonical base model going forward; it SUPERSEDES the single legacy
+ *  `base: { poiId, facilities }` snapshot field, which stays readable
+ *  forever: on load, a save with `base` but no `claims` is migrated
+ *  (see claimsFromLegacyBase in gameStore.ts). */
+export interface ClaimsState {
+  home: BaseInstance | null;
+  outposts: BaseInstance[];
+}
+
+/** Lane 10's MoraleRuntime (src/systems/morale.ts) — mirror. Persisted
+ *  alongside `survivors`; SurvivorDef itself carries no counters. */
+export interface MoraleRuntime {
+  /** Consecutive days with no job (idle −1/day starts at 3+). */
+  idleDays: Record<string, number>;
+  /** Consecutive days spent Breaking (<20). 3 → the survivor leaves. */
+  breakingDays: Record<string, number>;
 }
 
 export interface SaveSnapshot {
@@ -426,6 +485,15 @@ export interface SaveSnapshot {
   craftQueue?: CraftJob[];
   storyChoices?: Record<string, string>;
   baseExt?: BaseExt;
+  // field requests, second batch — optional on v3, same rule. Lane 10:
+  // the claims model (supersedes `base`; legacy saves migrate on load)
+  // and the morale counters that ride alongside `survivors`. Lane 9:
+  // the explicit beacon ending state, derived from the beacon_lit /
+  // beacon_dark flags when absent — hardmode's seed reads this field,
+  // never the flags.
+  claims?: ClaimsState;
+  moraleRuntime?: MoraleRuntime;
+  beaconChoice?: 'light' | 'dark' | null;
 }
 
 export interface SaveMeta {

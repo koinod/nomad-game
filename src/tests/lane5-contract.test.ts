@@ -6,8 +6,10 @@
 // state starts empty, and the Lane 7 bridge harvests/rehydrates.
 import { beforeEach, describe, expect, it } from 'vitest';
 import { migrate, type RawSaveRecord } from '../systems/save';
-import { craftQueueBridge, useGameStore } from '../store/gameStore';
-import type { CraftJob, SaveSnapshot } from '../store/types';
+import {
+  STARTING_REP, claimsFromLegacyBase, craftQueueBridge, foldLegacyRep, useGameStore,
+} from '../store/gameStore';
+import type { ClaimsState, CraftJob, SaveSnapshot } from '../store/types';
 
 function baseV3(): RawSaveRecord {
   return {
@@ -47,12 +49,17 @@ const CRAFT: CraftJob[] = [
   { uid: 'job_2_ammo_9mm', recipeId: 'ammo_9mm', startedAtMin: 1700, bankedMin: 12, durationMin: 45, status: 'interrupted' },
 ];
 const CHOICES = { beacon: 'lit', ending_path: 'leave' };
-const BASE_EXT = {
-  heat: 42,
-  siegeState: 'scouted' as const,
-  outposts: [{ poiId: 'dune_camp', facilities: ['watch_post'] }],
-  stockpile: [{ uid: 's1', itemId: 'scrap', qty: 9 }],
+const BASE_EXT = { heat: 42, siegeState: 'scouted' as const, localKillsNearBase: 7 };
+const CLAIMS: ClaimsState = {
+  home: {
+    siteId: 'lighthouse_base', role: 'home',
+    facilities: [{ defId: 'command_post', tier: 1, staffId: null, paused: false }],
+    prefabs: [{ defId: 'watchtower', staffId: 'mara' }],
+    stockpile: [{ itemId: 'canned_food', qty: 12 }],
+  },
+  outposts: [{ siteId: 'relay', role: 'outpost', facilities: [], prefabs: [], stockpile: [] }],
 };
+const MORALE = { idleDays: { mara: 3 }, breakingDays: { dez: 1 } };
 
 describe('field-contract fields survive the save migration path', () => {
   it('a v3 record carrying them migrates with every field intact', () => {
@@ -72,6 +79,17 @@ describe('field-contract fields survive the save migration path', () => {
     expect(snap.craftQueue).toBeUndefined();
     expect(snap.storyChoices).toBeUndefined();
     expect(snap.baseExt).toBeUndefined();
+  });
+
+  it('a v3 record carrying claims / moraleRuntime / beaconChoice migrates intact', () => {
+    const rec = baseV3();
+    rec.claims = CLAIMS;
+    rec.moraleRuntime = MORALE;
+    rec.beaconChoice = 'dark';
+    const snap = migrate(rec) as SaveSnapshot;
+    expect(snap.claims).toEqual(CLAIMS);
+    expect(snap.moraleRuntime).toEqual(MORALE);
+    expect(snap.beaconChoice).toBe('dark');
   });
 
   it('a v0 record still migrates to v3 and simply lacks the new fields', () => {
@@ -126,5 +144,72 @@ describe('field-contract store plumbing', () => {
     expect(st.storyChoices).toEqual({});
     expect(st.baseExt).toEqual({});
     expect(cleared).toEqual([[]]);
+  });
+});
+
+describe('second-batch field requests (Lanes 9 + 10 + 8)', () => {
+  beforeEach(() => {
+    useGameStore.setState({
+      flags: {}, beaconChoice: null, toasts: [], visibility: 0,
+      claims: { home: null, outposts: [] },
+      moraleRuntime: { idleDays: {}, breakingDays: {} },
+    });
+  });
+
+  it('foldLegacyRep: empty save rep yields exactly STARTING_REP', () => {
+    expect(foldLegacyRep({})).toEqual(STARTING_REP);
+  });
+
+  it('foldLegacyRep: saved standings override, aliases fold additively', () => {
+    const folded = foldLegacyRep({ union: 40, refuge: 5, skulls: -60 });
+    expect(folded.union).toBe(45); // its own 40 + refuge's folded 5
+    expect(folded.skulls).toBe(-60); // saved value replaces the −30 start
+    expect('refuge' in folded).toBe(false);
+  });
+
+  it('claimsFromLegacyBase: null base → empty claims; unknown ids dropped', () => {
+    expect(claimsFromLegacyBase(null)).toEqual({ home: null, outposts: [] });
+    const claims = claimsFromLegacyBase({ poiId: 'lighthouse_base', facilities: ['mystery_box', 'garden'] });
+    expect(claims.home?.facilities.map((f) => f.defId)).toEqual(['command_post', 'garden']);
+  });
+
+  it('setFlag keeps beaconChoice in sync with the beacon flags (F3)', () => {
+    useGameStore.getState().setFlag('beacon_lit');
+    expect(useGameStore.getState().beaconChoice).toBe('light');
+    useGameStore.setState({ flags: {}, beaconChoice: null });
+    useGameStore.getState().setFlag('beacon_dark');
+    expect(useGameStore.getState().beaconChoice).toBe('dark');
+  });
+
+  it('addRep toast names factions from the FACTIONS table (F4)', () => {
+    const s = useGameStore.getState();
+    s.addRep('lighthouse', 5);
+    expect(useGameStore.getState().toasts.slice(-1)[0]?.text).toContain('Lighthouse Collective rep +5');
+    s.addRep('uncharted_faction', 2);
+    // unknown ids fall back to the raw id rather than crashing
+    expect(useGameStore.getState().toasts.slice(-1)[0]?.text).toContain('uncharted_faction rep +2');
+  });
+
+  it('setVisibility clamps to 0..1 and ignores sub-threshold jitter (Lane 8)', () => {
+    const s = useGameStore.getState();
+    s.setVisibility(1.7);
+    expect(useGameStore.getState().visibility).toBe(1);
+    s.setVisibility(0.5);
+    expect(useGameStore.getState().visibility).toBe(0.5);
+    s.setVisibility(0.51);
+    expect(useGameStore.getState().visibility).toBe(0.5);
+  });
+
+  it('startNewGame resets claims / morale / beacon and canon rep', () => {
+    const s = useGameStore.getState();
+    s.setClaims(CLAIMS);
+    s.setMoraleRuntime(MORALE);
+    s.setBeaconChoice('dark');
+    s.startNewGame('survivor');
+    const st = useGameStore.getState();
+    expect(st.claims).toEqual({ home: null, outposts: [] });
+    expect(st.moraleRuntime).toEqual({ idleDays: {}, breakingDays: {} });
+    expect(st.beaconChoice).toBeNull();
+    expect(st.rep).toEqual(STARTING_REP);
   });
 });
