@@ -79,6 +79,7 @@ export interface Vehicle {
    *  written by CarPhysics, consumed by the GLB visual rig. */
   wheelSpinAngle: number;
   suspension: number[];
+  suspRest: number;
   /** Piece 2: the Blender GLB rig (wrapper + wheel pivots), when loaded.
    *  Until it lands (or if it fails), the procedural body stands in. */
   glb?: {
@@ -121,7 +122,7 @@ function makeVehicle(def: VehicleDef, x: number, z: number, heading: number, gro
     uid: def.id, def, group: g, heading, speed: 0,
     fuel: def.fuelMax * (0.2 + Math.random() * 0.4),
     condition: 0.2 + Math.random() * 0.4,
-    wheelSpin: [], wheelPivots: [], steerVis: 0, wheelSpinAngle: 0, suspension: [0.32, 0.32, 0.32, 0.32], bobT: Math.random() * 10,
+    wheelSpin: [], wheelPivots: [], steerVis: 0, wheelSpinAngle: 0, suspension: [0.32, 0.32, 0.32, 0.32], suspRest: 0.32, bobT: Math.random() * 10,
     steerAngle: 0, wheelR: 0.35, bodyPitch: 0, bodyRoll: 0, suspV: 0,
     storage: [], upgrades: [], tiresFlat: 0, flatSide: 1, blewTire: false,
     wasClipped: false, doors: [], variant,
@@ -284,6 +285,7 @@ export function applyGlbVisuals(v: Vehicle): void {
   for (const p of g.spinPivots) p.rotation.z = -v.wheelSpinAngle;
   for (const s of g.suspPivots) {
     const len = v.suspension[s.wheelIdx] ?? 0.32;
-    s.obj.position.y = s.baseY + (len - 0.32);
+    // shorter ray = compressed = wheel travels UP into the arch
+    s.obj.position.y = s.baseY + (v.suspRest - len);
   }
 }

@@ -35,6 +35,8 @@ export interface CarParams {
   dragK: number;
   rollingCoef: number;
   drivetrainEff: number;
+  /** Lift kit fitted: longer, softer suspension (real clearance). */
+  lifted: boolean;
 }
 
 /** Stock Stallion FX (S650 GT-class): 460 hp Coyote-class V8. */
@@ -58,6 +60,7 @@ export const UPGRADE_MASS_KG: Record<string, number> = {
   supercharger: 55,
   final_drive: 0,
   grip_tires: 0,
+  lift_kit: 6,
   weight_reduction: -95,
 };
 
@@ -112,6 +115,7 @@ export function carParams(upgrades: readonly string[], cargoKg = 0): CarParams {
     dragK: 1.05,
     rollingCoef: 0.011,
     drivetrainEff: 0.87,
+    lifted: upgrades.includes('lift_kit'),
   };
 }
 

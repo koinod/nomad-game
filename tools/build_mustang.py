@@ -246,16 +246,16 @@ loft('Glasshouse', glass_stations, GLASS, subsurf=1, cap=False)
 
 # paint roof panel over the glass (FX: painted roof + glass sunroof inset)
 ROOF_STATIONS = [
-    (0.16, 0.690, 1.358),
-    (-0.20, 0.700, 1.378),
-    (-0.55, 0.700, 1.386),
-    (-0.86, 0.685, 1.360),
+    (0.16, 0.720, 1.356),
+    (-0.20, 0.730, 1.376),
+    (-0.55, 0.730, 1.384),
+    (-0.86, 0.715, 1.358),
 ]
 
 
 def roof_loop(halfW, top):
-    return [(0.0, top), (0.6 * halfW, top - 0.002), (halfW, top - 0.012),
-            (-halfW, top - 0.012), (-0.6 * halfW, top - 0.002)]
+    return [(0.0, top), (0.6 * halfW, top - 0.010), (halfW, top - 0.078),
+            (-halfW, top - 0.078), (-0.6 * halfW, top - 0.010)]
 
 
 loft('RoofPanel', [(x, roof_loop(w, t)) for (x, w, t) in ROOF_STATIONS], PAINT, subsurf=1, cap=False)
@@ -325,8 +325,8 @@ for (wx, side) in [(1.359, 1), (1.359, -1), (-1.359, 1), (-1.359, -1)]:
 
 # ================================================================ INTERIOR
 box('CabinFloor', (0, 0, 0.30), (3.30, 1.46, 0.07), CABIN)
-box('Dash', (0.84, 0, 0.90), (0.32, 1.40, 0.15), CABIN, rot=(0, -0.18, 0), bevel=0.03)
-box('DashScreen', (0.72, -0.05, 0.99), (0.03, 0.34, 0.15), SCREEN, rot=(0, -0.35, 0))
+box('Dash', (0.84, 0, 0.875), (0.32, 1.40, 0.13), CABIN, rot=(0, -0.18, 0), bevel=0.03)
+box('DashScreen', (0.72, -0.05, 0.965), (0.03, 0.34, 0.15), SCREEN, rot=(0, -0.35, 0))
 box('Console', (0.18, 0, 0.52), (0.85, 0.30, 0.17), CABIN, bevel=0.03)
 cyl('Shifter', (0.28, 0, 0.65), 0.022, 0.12, DARKMETAL, vertices=10)
 # steering wheel (driver = left, +Y): torus in the YZ plane + column + hub
@@ -357,7 +357,7 @@ def build_wheel(name, width):
     # rounded shoulder rings
     for s in (1, -1):
         ring = torus('TireShoulder', (0, s * (width / 2 - 0.012), 0), 0.298, 0.048, RUBBER,
-                     rot=(0, 0, 0), major_seg=28, minor_seg=10)
+                     rot=(math.pi / 2, 0, 0), major_seg=28, minor_seg=10)
         ring.parent = g
     # rim barrel + white multi-hole rally face
     barrel = cyl('RimBarrel', (0, 0, 0), 0.262, width - 0.03, DARKMETAL, rot=(math.pi / 2, 0, 0), vertices=28)
@@ -398,7 +398,7 @@ world = bpy.data.worlds.new('Studio')
 scene.world = world
 world.use_nodes = True
 world.node_tree.nodes['Background'].inputs[0].default_value = (0.028, 0.032, 0.038, 1)
-world.node_tree.nodes['Background'].inputs[1].default_value = 0.55
+world.node_tree.nodes['Background'].inputs[1].default_value = 1.05
 
 floor = box('StudioFloor', (0, 0, -0.012), (40, 40, 0.02),
             principled('FloorMat', srgb(0x14181D), roughness=0.95))

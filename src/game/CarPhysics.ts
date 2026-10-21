@@ -171,8 +171,16 @@ export class CarPhysics {
     if (this.controller) {
       for (let i = 0; i < 4; i++) {
         this.controller.setWheelFrictionSlip(i, this.params.tireMu * 4.0);
+        // the lift kit is geometry, not a stat: longer rest length,
+        // softer springs — clearance you can see, roll you can feel
+        this.controller.setWheelSuspensionRestLength(i, this.restLen());
+        this.controller.setWheelSuspensionStiffness(i, this.params.lifted ? 26 : 32);
       }
     }
+  }
+
+  private restLen(): number {
+    return this.params.lifted ? 0.44 : REST_LEN;
   }
 
   teleport(v: Vehicle): void {
@@ -330,8 +338,9 @@ export class CarPhysics {
     v.wheelSpinAngle = this.spin;
     for (let i = 0; i < 4; i++) {
       const len = this.controller.wheelSuspensionLength(i);
-      v.suspension[i] = len ?? REST_LEN;
+      v.suspension[i] = len ?? this.restLen();
     }
+    v.suspRest = this.restLen();
   }
 
   // ------------------------------------------------------------ fallback

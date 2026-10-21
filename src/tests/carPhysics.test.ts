@@ -17,7 +17,7 @@ function fakeVehicle(x = 0, z = 0, heading = 0): Vehicle {
   return {
     uid: 'mustang', def, group, heading, speed: 0, fuel: 61, condition: 1,
     wheelSpin: [], wheelPivots: [], steerVis: 0, wheelSpinAngle: 0,
-    suspension: [0.32, 0.32, 0.32, 0.32], bobT: 0, steerAngle: 0, wheelR: 0.345,
+    suspension: [0.32, 0.32, 0.32, 0.32], suspRest: 0.32, bobT: 0, steerAngle: 0, wheelR: 0.345,
     bodyPitch: 0, bodyRoll: 0, suspV: 0, storage: [], upgrades: [], tiresFlat: 0,
     flatSide: 1, blewTire: false, wasClipped: false, doors: [],
   } as Vehicle;
