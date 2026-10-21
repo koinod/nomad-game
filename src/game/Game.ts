@@ -17,7 +17,7 @@ import { HuskManager } from './Husks';
 import type { Husk, SpawnZone } from './Husks';
 import { InteractSystem, buildContainerDefs } from './Interact';
 import { AnimalManager } from './Animals';
-import { VehicleManager, applyUpgradeVisuals, attachMustangGlb, attachGt500Glb, placeSeahawk, applyGlbVisuals, itemsWeightKg, type Vehicle } from './Vehicles';
+import { VehicleManager, applyUpgradeVisuals, attachGt500Glb, placeSeahawk, applyGlbVisuals, itemsWeightKg, type Vehicle } from './Vehicles';
 import { CarPhysics } from './CarPhysics';
 import { WeatherSystem } from './Weather';
 import { CloudLayer, updateWindUniforms } from './Clouds';
@@ -25,7 +25,7 @@ import { PostFX } from './PostFX';
 import { canInstallUpgrade, storageCapKg, collisionLossFactor, ramDamageFactor } from '../data/upgrades';
 import type { InvItem, TrailerSave } from '../store/types'; // TrailerSave: legacy snapshot field, always [] now
 import { floorYAt, floorYAtRef, resolveCollisions, type Collider, type FloorRect } from './Colliders';
-import { survivingVehicleSave } from './saveMigration';
+import { restorableVehicleSave } from './saveMigration';
 import { sfx, ambience } from '../systems/audio';
 import { useCraftQueue } from '../systems/crafting';
 import { XP_EVENTS } from '../systems/skills';
@@ -188,7 +188,8 @@ export class Game {
     this.fx = new Fx(this.scene);
     this.projectiles = new ProjectileManager(this.scene);
 
-    // VEHICLE RESET: exactly one vehicle — the Stallion FX at the lighthouse
+    // FX DELETED (Ian, 2026-10-21): the sole vehicle is the GT500 at
+    // the lighthouse — see VEHICLE_SPAWNS / saveMigration
     this.vehicles = new VehicleManager();
     this.vehicles.spawn(this.scene!, this.world.poiPositions, (x, z) => heightAt(x, z));
 
@@ -210,12 +211,14 @@ export class Game {
       for (const id of snap.world.looted) this.looted.add(id);
       for (const id of snap.world.deadHusks) this.deadHusks.add(id);
       for (const id of snap.world.cleared) this.cleared.add(id);
-      // VEHICLE RESET migration: old saves carry a whole fleet (and
-      // trailers). Only the Mustang survives — see saveMigration.ts.
-      // Trailer state is dropped entirely (snap.trailers never read).
-      const vs = survivingVehicleSave(snap.vehicles);
-      const v = this.vehicles.vehicles[0];
-      if (vs && v) {
+      // Save migration: each live vehicle restores ONLY its own
+      // def-id save — see saveMigration.ts. A saved Stallion FX is
+      // deleted content (Ian, 2026-10-21) and strips silently; it is
+      // never stamped onto the GT500. Trailer state is dropped
+      // entirely (snap.trailers never read).
+      for (const v of this.vehicles.vehicles) {
+        const vs = restorableVehicleSave(snap.vehicles, v.def.id);
+        if (!vs) continue;
         v.group.position.set(vs.x, vs.y, vs.z);
         v.group.rotation.y = vs.heading;
         v.heading = vs.heading;
@@ -233,7 +236,7 @@ export class Game {
     this.player = new Player(this.scene);
     const s0 = useGameStore.getState();
     // New games start at the DEPOT MOTOR POOL (Ian's beta-test logic):
-    // TOTAL PURGE: you wake on the lighthouse grounds, the one Mustang
+    // TOTAL PURGE: you wake on the lighthouse grounds, the GT500
     // parked beside you on open ground. The shore camp is a drive west —
     // q_prologue step 2 ('Reach the shore camp') is earned on the road;
     // Jonah and his camp don't move. Loaded games keep their saved
@@ -254,11 +257,12 @@ export class Game {
       this.player.camYaw = Math.PI * 0.75;
     }
 
-    // Piece 2/3: the Blender GLB replaces the procedural stand-in when
-    // it loads; the Rapier rigid body is built at the car's final
-    // (possibly save-restored) position.
-    const mustang = this.vehicles.vehicles[0];
-    if (mustang) attachMustangGlb(mustang);
+    // The GT500 GLB replaces its stand-in when it loads; the Rapier
+    // rigid body is built at the car's final (possibly save-restored)
+    // position. (The Stallion's GLB attach is gone with its spawn —
+    // attachMustangGlb stays exported in Vehicles.ts for the Dark
+    // Horse wave, which will rig through the same contract.)
+    const firstCar = this.vehicles.vehicles[0];
     const gt500 = this.vehicles.vehicles.find((v) => v.def.id === 'gt500');
     if (gt500) attachGt500Glb(gt500);
     // Lane 2 staged placement: the Seahawk sits on the airbase apron as
@@ -270,11 +274,11 @@ export class Game {
       (x, z) => heightAt(x, z),
       [...this.world.lighthouseKit.colliders, ...this.world.stationColliders],
     );
-    if (mustang) {
-      this.carPhysics.spawnCar(mustang, mustang.upgrades, itemsWeightKg(mustang.storage));
+    if (firstCar) {
+      this.carPhysics.spawnCar(firstCar, firstCar.upgrades, itemsWeightKg(firstCar.storage));
       // settle the suspension before anyone sees it
       for (let i = 0; i < 30; i++) this.carPhysics.parkBrake();
-      applyGlbVisuals(mustang);
+      applyGlbVisuals(firstCar);
     }
 
     // husks

@@ -4,8 +4,9 @@ import { CLAIMABLE, CLAIM_SITES } from '../data/base';
 import { UPGRADES, canInstallUpgrade } from '../data/upgrades';
 import {
   DELETED_UPGRADE_IDS,
+  DELETED_VEHICLE_IDS,
   sanitizeBase,
-  survivingVehicleSave,
+  restorableVehicleSave,
 } from '../game/saveMigration';
 import type { VehicleSave } from '../store/types';
 
@@ -28,10 +29,18 @@ import type { VehicleSave } from '../store/types';
  * new assertion pins the tiered roster that supersedes it. In the
  * tiered model the lighthouse is 'never' — the story home is the
  * legacy claim, migrated into claims by claimsFromLegacyBase.
+ *
+ * SUPERSESSION (2026-10-21, Vehicle Truth Wave): Ian ordered the
+ * procedural Stallion FX deleted ("the FX teal version — delete
+ * that"). The GT500 is the sole spawned car; the mustang DEF data
+ * stays (build sheet + Dark Horse). A saved Stallion is deleted
+ * content: restorableVehicleSave matches strictly by def id, so it
+ * strips and can never be stamped onto the GT500. The migration
+ * assertions below were rewritten for the new roster deliberately.
  */
 
 describe('the reset fleet', () => {
-  it('is the Stallion FX Mustang plus the one gate-approved return', () => {
+  it('defs: the Stallion data plus the one gate-approved return', () => {
     expect(VEHICLE_DEFS).toHaveLength(2);
     expect(VEHICLE_DEFS[0].id).toBe('mustang');
     expect(VEHICLE_DEFS[0].kind).toBe('car');
@@ -39,13 +48,11 @@ describe('the reset fleet', () => {
     expect(VEHICLE_DEFS[1].kind).toBe('car');
   });
 
-  it('spawns the Mustang at the lighthouse, the GT500 beside it', () => {
-    expect(VEHICLE_SPAWNS).toHaveLength(2);
-    expect(VEHICLE_SPAWNS[0].id).toBe('mustang');
+  it('spawns: the GT500 alone at the lighthouse (the FX stand-in is deleted)', () => {
+    expect(VEHICLE_SPAWNS).toHaveLength(1);
+    expect(VEHICLE_SPAWNS[0].id).toBe('gt500');
     expect(VEHICLE_SPAWNS[0].poi).toBe('lighthouse_base');
-    expect(VEHICLE_SPAWNS[0].variant).toBe('fx');
-    expect(VEHICLE_SPAWNS[1].id).toBe('gt500');
-    expect(VEHICLE_SPAWNS[1].poi).toBe('lighthouse_base');
+    expect(DELETED_VEHICLE_IDS).toContain('mustang');
   });
 
   it('no upgrade references a deleted vehicle or a deleted upgrade', () => {
@@ -69,35 +76,47 @@ describe('save migration', () => {
       storage: [{ uid: 'a', itemId: 'bandage', qty: 2 }],
       upgrades: ['armor', 'mg_mount', 'engine_tune'], tiresFlat: 1, variant: 'fx',
     },
+    {
+      defId: 'gt500', x: 30, y: 3, z: 40, heading: 0.4, fuel: 48, condition: 0.92,
+      storage: [{ uid: 'b', itemId: 'medkit', qty: 1 }],
+      upgrades: ['armor', 'mg_mount'], tiresFlat: 0,
+    },
     { defId: 'goliath', x: 0, y: 0, z: 0, heading: 0, fuel: 10, condition: 0.5, storage: [], upgrades: [], tiresFlat: 0 },
   ];
 
-  it('strips a pre-reset fleet to the Mustang, keeping its state', () => {
-    const vs = survivingVehicleSave(oldFleet);
+  it('the deleted Stallion strips — and is never stamped onto the GT500', () => {
+    // matching is by def id: asking for the mustang's save is asking
+    // for deleted content; asking for the GT500 returns ONLY its own
+    expect(restorableVehicleSave(oldFleet, 'mustang')).toBeNull();
+    const vs = restorableVehicleSave(oldFleet, 'gt500');
     expect(vs).not.toBeNull();
-    expect(vs!.defId).toBe('mustang');
-    expect(vs!.fuel).toBe(33);
-    expect(vs!.condition).toBeCloseTo(0.77);
+    expect(vs!.defId).toBe('gt500');
+    expect(vs!.fuel).toBe(48);
+    expect(vs!.condition).toBeCloseTo(0.92);
+    expect(vs!.x).toBe(30);
     expect(vs!.storage).toHaveLength(1);
-    expect(vs!.variant).toBe('fx');
   });
 
-  it('strips deleted upgrade ids from the surviving car', () => {
-    const vs = survivingVehicleSave(oldFleet);
-    expect(vs!.upgrades ?? []).toEqual(['armor', 'engine_tune']);
+  it('strips deleted upgrade ids from the restored car', () => {
+    const vs = restorableVehicleSave(oldFleet, 'gt500');
+    expect(vs!.upgrades ?? []).toEqual(['armor']);
   });
 
-  it('a fleet with no Mustang migrates to nothing (fresh spawn stands)', () => {
-    expect(survivingVehicleSave([oldFleet[0], oldFleet[1]])).toBeNull();
-    expect(survivingVehicleSave([])).toBeNull();
-    expect(survivingVehicleSave(undefined)).toBeNull();
-    expect(survivingVehicleSave(null)).toBeNull();
+  it('unknown/absent defs and empty saves migrate to nothing (fresh spawn stands)', () => {
+    // matching is exact by def id — a def with no save gets nothing,
+    // and only LIVE vehicles ever ask (a 'tank' record can sit in an
+    // old save forever; no tank exists to receive it)
+    expect(restorableVehicleSave(oldFleet, 'nonexistent')).toBeNull();
+    expect(restorableVehicleSave([oldFleet[0], oldFleet[1]], 'gt500')).toBeNull();
+    expect(restorableVehicleSave([], 'gt500')).toBeNull();
+    expect(restorableVehicleSave(undefined, 'gt500')).toBeNull();
+    expect(restorableVehicleSave(null, 'gt500')).toBeNull();
   });
 
-  it('every surviving upgrade still installs on the Mustang', () => {
-    const vs = survivingVehicleSave(oldFleet)!;
+  it('every restored upgrade still installs on the GT500', () => {
+    const vs = restorableVehicleSave(oldFleet, 'gt500')!;
     for (const u of vs.upgrades ?? []) {
-      expect(canInstallUpgrade({ kind: 'car', id: 'mustang' }, u, [])).toBe(true);
+      expect(canInstallUpgrade({ kind: 'car', id: 'gt500' }, u, [])).toBe(true);
     }
   });
 });

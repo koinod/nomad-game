@@ -154,10 +154,14 @@ export interface SpawnDef {
 }
 
 export const VEHICLE_SPAWNS: SpawnDef[] = [
-  // VEHICLE RESET: the one Mustang on open ground beside the lighthouse.
-  { id: 'mustang', poi: 'lighthouse_base', dx: -14, dz: 16, heading: Math.PI * 0.75, variant: 'fx' },
-  // The GT500 parks on the same grounds, clear of the Stallion's spot —
-  // the island's first two-car moment (fleet >= 2 unlocks dispatch).
+  // FX STAND-IN DELETED (Ian, 2026-10-21): "the FX teal version —
+  // delete that." The procedural Stallion no longer spawns; the
+  // GT500 is the sole car at the lighthouse until the Dark Horse
+  // lands (separate asset wave). The mustang DEF + carSpec data stay
+  // (build sheet, Dark Horse) — only the spawn/visual is gone. A
+  // saved Stallion instance is stripped by saveMigration like other
+  // deleted content. (Dispatch's >=2-car unlock now waits for the
+  // Dark Horse — the roster is honestly one car.)
   GT500_SPAWN,
 ];
 

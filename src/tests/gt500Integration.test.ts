@@ -22,14 +22,13 @@ describe('registration', () => {
     expect(VEHICLE_DEFS[1]).toBe(GT500_DEF);
   });
 
-  it('the GT500 spawns on the lighthouse grounds, clear of the Stallion', () => {
-    const s = VEHICLE_SPAWNS.find((x) => x.id === 'gt500');
-    expect(s).toBe(GT500_SPAWN);
-    expect(s!.poi).toBe('lighthouse_base');
-    expect(s!.dx).toBe(12);
-    expect(s!.dz).toBe(20);
-    const m = VEHICLE_SPAWNS.find((x) => x.id === 'mustang')!;
-    expect(Math.hypot(s!.dx - m.dx, s!.dz - m.dz)).toBeGreaterThan(20);
+  it('the GT500 is the SOLE spawn (Ian 2026-10-21: the FX stand-in is deleted)', () => {
+    // The mustang DEF stays registered (above) — its data feeds the
+    // build sheet and the Dark Horse — but nothing spawns it.
+    expect(VEHICLE_SPAWNS).toEqual([GT500_SPAWN]);
+    expect(GT500_SPAWN.poi).toBe('lighthouse_base');
+    expect(GT500_SPAWN.dx).toBe(12);
+    expect(GT500_SPAWN.dz).toBe(20);
   });
 });
 
