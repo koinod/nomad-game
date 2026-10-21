@@ -282,12 +282,12 @@ def render() -> None:
     key.rotation_euler = (Vector((5, 5, 7))).to_track_quat("Z", "Y").to_euler()
 
     scene.render.engine = "CYCLES"
-    scene.cycles.samples = 24
+    scene.cycles.samples = int(ARGS.get("samples", 16))
     scene.cycles.use_adaptive_sampling = True
     scene.cycles.adaptive_threshold = 0.05
     scene.cycles.use_denoising = True
-    scene.render.resolution_x = 900
-    scene.render.resolution_y = 675
+    scene.render.resolution_x = int(ARGS.get("resx", 800))
+    scene.render.resolution_y = int(ARGS.get("resy", 600))
     scene.view_settings.view_transform = "AgX"
     scene.view_settings.look = "AgX - Medium High Contrast"
 
@@ -297,7 +297,9 @@ def render() -> None:
     cam.data.lens = 42
 
     os.makedirs(RENDER_DIR, exist_ok=True)
-    for name, pos, tgt in SHOTS:
+    only = ARGS.get("shot")
+    shots = [s for s in SHOTS if only in (None, "1", s[0])]
+    for name, pos, tgt in shots:
         if name == "07_interior.png":
             bpy.ops.object.light_add(type="POINT", location=(0.1, 0, 1.15))
             bpy.context.active_object.data.energy = 6
