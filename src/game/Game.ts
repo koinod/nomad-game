@@ -22,7 +22,7 @@ import { CarPhysics } from './CarPhysics';
 import { WeatherSystem } from './Weather';
 import { CloudLayer, updateWindUniforms } from './Clouds';
 import { PostFX } from './PostFX';
-import { canInstallUpgrade, storageCapKg, collisionLossFactor, ramDamageFactor } from '../data/upgrades';
+import { canInstallUpgrade, storageCapKg, ramDamageFactor } from '../data/upgrades';
 import type { InvItem, TrailerSave } from '../store/types'; // TrailerSave: legacy snapshot field, always [] now
 import { floorYAt, floorYAtRef, resolveCollisions, type Collider, type FloorRect } from './Colliders';
 import { captureVehicleSave, restoreVehicleFleet } from './saveMigration';
@@ -265,11 +265,11 @@ export class Game {
     // a static landmark — no flight model yet, and deliberately not a
     // Vehicle instance, so the save shape is untouched
     placeSeahawk(this.scene, (x, z) => heightAt(x, z));
-    this.carPhysics = await CarPhysics.create(
-      { onImpact: (dv) => this.onCarImpact(dv) },
-      (x, z) => heightAt(x, z),
-      [...this.world.lighthouseKit.colliders, ...this.world.stationColliders],
-    );
+    // vehicle collision is DELETED (Ian, 2026-10-21): CarPhysics gets
+    // the terrain field only — no building colliders, no impact
+    // callback. The kit/station colliders above still serve the
+    // PLAYER's collision (houseColliders), never the car's.
+    this.carPhysics = await CarPhysics.create((x, z) => heightAt(x, z));
     if (firstCar) {
       this.carPhysics.spawnCar(firstCar, firstCar.upgrades, itemsWeightKg(firstCar.storage));
       // settle the suspension before anyone sees it
@@ -1586,33 +1586,14 @@ export class Game {
   // vehicles
   // ------------------------------------------------------------------
 
-  /** Rigid-body impacts cost condition (the existing damage economy),
-   *  scaled by fitted armor; a hard enough hit can blow a tire. */
-  private onCarImpact(dv: number): void {
-    // the live body is the driven car's (or the last-bound car's when
-    // parked) — impact damage lands on the car that actually hit
-    const v = this.driving ?? this.vehicles?.vehicles[0];
-    if (!v || dv < 3.2) return;
-    // Lane 11 wiring: a real impact is LOUD — the crash class (150m)
-    // carries to every husk in earshot, not just the ones watching
-    this.noiseAt(v.group.position.x, v.group.position.z, noiseClassRadius('vehicle_crash'));
-    const loss = Math.min(0.3, (dv - 2.5) * 0.02) * collisionLossFactor(v.upgrades);
-    if (loss > 0.004) {
-      v.condition = Math.max(0.03, v.condition - loss);
-      if (this.driving && dv > 5.2) {
-        useGameStore.getState().addToast(
-          dv > 8 ? 'Hard hit — the car took real damage.' : 'Impact — the bodywork felt that.',
-        );
-        this.requestHitstop(0.05);
-      }
-      sfx.play('hit', { volume: 0.55 });
-    }
-    if (dv > 7.5 && v.tiresFlat < 2 && !v.upgrades.includes('run_flats')) {
-      v.tiresFlat += 1;
-      v.blewTire = true;
-    }
-    this.cleanMeters = 0;
-  }
+  // onCarImpact DELETED (Ian's order, 2026-10-21 — vehicle collision
+  // deleted completely): rigid-body impacts no longer cost condition,
+  // blow tires, emit the crash noise class, or reset the clean-miles
+  // streak. The coupled fields stay parked, not removed: v.condition
+  // and v.tiresFlat still exist for the repair/dispatch systems and
+  // the phone UI, collisionLossFactor stays as upgrade data, and the
+  // 'vehicle_crash' noise class stays defined — none of them fire
+  // from collisions anymore because there are none.
 
   private updateDriving(dt: number, s: ReturnType<typeof useGameStore.getState>, playerCtx: import('./Player').PlayerCtx): void {
     const v = this.driving;
@@ -1641,8 +1622,9 @@ export class Game {
       const speedF = 0.35 + 0.65 * Math.min(1, Math.abs(v.speed) / 28);
       v.fuel = Math.max(0, v.fuel - dt * v.def.burnClass * (0.006 + 0.03 * load * speedF));
     }
-    // driving noise + husk rams, from speed and proximity (the physics
-    // body handles buildings; husks are not physics bodies)
+    // driving noise + husk rams, from speed and proximity. Rams are
+    // proximity combat, NOT physics collision (husks are not physics
+    // bodies) — they survive the vehicle-collision deletion untouched
     const spd = Math.abs(v.speed);
     if (spd > 1.5) {
       // at speed: the def's drive radius (the class table's 55m for the
@@ -1686,7 +1668,11 @@ export class Game {
       ax: v.seatAnchor?.lx,
       az: v.seatAnchor?.lz,
     });
-    // Driver XP: clean miles count — a collision resets the streak
+    // Driver XP: clean miles count. The streak used to reset on
+    // collision condition loss; with vehicle collision deleted
+    // (2026-10-21) condition no longer drops while driving, so the
+    // streak simply accrues — the check stays for any future
+    // in-drive condition change.
     if (v.condition < condBefore - 0.001) {
       this.cleanMeters = 0;
     } else {

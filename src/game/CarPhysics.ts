@@ -6,7 +6,6 @@ import { PRIME_PARAMS } from './primeDef';
 import { SPRINTER_PARAMS } from './sprinterDef';
 import { GROUND_COLS, GROUND_ROWS } from './World';
 import type { Vehicle } from './Vehicles';
-import type { Collider } from './Colliders';
 
 /** The Rapier heightfield for the ground, built from the ground
  *  field's own nodes sampled through the same groundY the game passes
@@ -72,10 +71,21 @@ export interface DriveInput {
   hasFuel: boolean;
 }
 
-export interface CarPhysicsEvents {
-  /** impactSpeed in m/s whenever the chassis takes a hard contact. */
-  onImpact: (impactSpeed: number) => void;
-}
+/**
+ * VEHICLE COLLISION — DELETED (Ian's order, 2026-10-21: "delete
+ * collision logic for now, it's not working properly, COMPLETE
+ * DELETION"). This module used to take a CarPhysicsEvents.onImpact
+ * callback (velocity-spike crash detection) and a set of building
+ * colliders the chassis smashed into; Game answered impacts with
+ * condition loss, blown tires, crash noise and hitstop. All of it is
+ * gone: vehicles drive on the terrain heightfield + the raycast
+ * suspension model only, and nothing in the game damages a vehicle
+ * for hitting the world. The chassis body remains — the vehicle
+ * controller needs a rigid body — but the world holds no building/
+ * prop colliders for it to hit. Player-vs-world collision lives in
+ * Game/Colliders and is untouched; husk rams are proximity combat in
+ * Game.updateDriving, never physics collision, and are untouched.
+ */
 
 const WHEEL_X = 0.8; // half track
 const WHEEL_Z = 1.359; // half wheelbase (S650: 2718 mm)
@@ -140,6 +150,45 @@ const CHASSIS_GEOM: Record<string, ChassisGeom> = {
 export function geomFor(defId: string): ChassisGeom {
   return CHASSIS_GEOM[defId] ?? CHASSIS_GEOM.mustang;
 }
+
+/**
+ * Ackermann steering (Item 4, 2026-10-21): the front wheels do NOT turn
+ * by the same angle. For a steer angle δ at the front-axle center, the
+ * turn center sits on the REAR AXLE line at radius R = L / tan δ; the
+ * inner wheel (closer to the center) must steer MORE, the outer less,
+ * so both front tires roll around the same center instead of scrubbing
+ * in parallel. Returns [wheel0, wheel1] in chassis order — wheel0 sits
+ * at x = -wheelX (the car's right side, facing +Z), wheel1 at +wheelX.
+ * Pure — geometry tests pin it.
+ */
+export function ackermannSteer(steer: number, wheelX: number, wheelZ: number): [number, number] {
+  if (Math.abs(steer) < 1e-4) return [steer, steer];
+  const L = wheelZ * 2;
+  const T = wheelX * 2;
+  const R = L / Math.tan(Math.abs(steer));
+  const inner = Math.atan(L / Math.max(0.6, R - T / 2));
+  const outer = Math.atan(L / (R + T / 2));
+  const s = Math.sign(steer);
+  // steer < 0 = right turn: the inner wheel is the -X side (wheel 0)
+  // steer > 0 = left turn: the inner wheel is the +X side (wheel 1)
+  return s < 0 ? [s * inner, s * outer] : [s * outer, s * inner];
+}
+
+/** Side-friction stiffness, front and rear (Item 4, 2026-10-21).
+ *  Swept hard while hunting the yaw pivot (carSteering.test.ts):
+ *  a stiffer rear made the powered pivot WORSE, a softer rear held
+ *  the powered pivot but walked the gentle-speed pivot forward of
+ *  the axle and shrank every radius (compliance oversteer), and
+ *  friction-capacity biases and load-split drive torque moved
+ *  nothing at all. The pivot is held on the rear axle line by the
+ *  Ackermann geometry itself in the constant-speed regime (within
+ *  ~0.02 m at 7/15/24 m/s), so the split ships NEUTRAL — both axles
+ *  at the pre-wave shared value. Under sustained half-throttle at
+ *  25 m/s the pivot still falls ~0.7 m behind the axle (power
+ *  saturation in the raycast tire model) — bounded, documented in
+ *  the steering tests, and never near the body center. */
+export const SIDE_FRICTION_FRONT = 0.9;
+export const SIDE_FRICTION_REAR = 0.9;
 
 /** Per-def suspension tune (Item 3, 2026-10-21). Until this wave
  *  every car ran one hardcoded stiffness (32), NO damping was ever
@@ -221,14 +270,16 @@ export class CarPhysics {
   private body: RAPIER.RigidBody | null = null;
   private chassisCollider: RAPIER.Collider | null = null;
   private controller: RAPIER.DynamicRayCastVehicleController | null = null;
-  private events: RAPIER.EventQueue | null = null;
   private defId = 'mustang'; // def the live body is bound to
+  private geom: ChassisGeom = CHASSIS_GEOM.mustang;
   private params: CarParams = carParams([]);
   private fallback = false;
 
   // shared state (both modes)
   speed = 0; // signed m/s along the car's forward
   steerAngle = 0;
+  /** Per-wheel front steer angles after Ackermann (visuals + tests). */
+  steerWheels: [number, number] = [0, 0];
   /** Water interaction state, refreshed every step (Item 2). */
   submerged = 0;
   stalled = false;
@@ -237,27 +288,22 @@ export class CarPhysics {
    *  visual value. */
   rawSuspension: [number, number, number, number] = [0.32, 0.32, 0.32, 0.32];
   private spin = 0;
-  private prevVel = new THREE.Vector3();
-  private impactCooldown = 0;
   // kinematic fallback state
   private kinGear = 0;
   private shiftT = 0;
 
-  private constructor(private ev: CarPhysicsEvents) {}
+  private constructor() {}
 
   static async create(
-    ev: CarPhysicsEvents,
     groundY: (x: number, z: number) => number,
-    buildingColliders: Collider[],
   ): Promise<CarPhysics> {
-    const cp = new CarPhysics(ev);
+    const cp = new CarPhysics();
     try {
       await RAPIER.init();
       cp.rapier = RAPIER;
       const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
       world.timestep = 1 / 120;
       cp.world = world;
-      cp.events = new RAPIER.EventQueue(true);
       // terrain heightfield: the ground field's nodes, verbatim — the
       // same surface the mesh renders (World.bakeGroundField)
       const hf = buildRapierHeightfield(groundY);
@@ -275,18 +321,8 @@ export class CarPhysics {
         .setTranslation(0, -1.88, 0)
         .setFriction(0.3);
       world.createCollider(seabed);
-      // buildings: fixed cuboids from the kit AABBs
-      for (const c of buildingColliders) {
-        const cx = (c.x0 + c.x1) / 2;
-        const cz = (c.z0 + c.z1) / 2;
-        const hw = Math.max(0.1, (c.x1 - c.x0) / 2);
-        const hd = Math.max(0.1, (c.z1 - c.z0) / 2);
-        const gy = groundY(cx, cz);
-        const desc = RAPIER.ColliderDesc.cuboid(hw, 2.2, hd)
-          .setTranslation(cx, gy + 2.2, cz)
-          .setFriction(0.4);
-        world.createCollider(desc);
-      }
+      // NO building/prop colliders are created — vehicle collision is
+      // deleted (see the note at CarPhysicsEvents' grave above)
     } catch (err) {
       console.warn('[CarPhysics] Rapier unavailable, kinematic fallback:', err);
       cp.fallback = true;
@@ -325,12 +361,12 @@ export class CarPhysics {
       .setCanSleep(true);
     this.body = this.world.createRigidBody(bodyDesc);
     const geom = geomFor(v.def.id);
+    this.geom = geom;
     const colDesc = R.ColliderDesc.cuboid(geom.half[0], geom.half[1], geom.half[2])
       .setTranslation(0, 0, 0)
       .setMass(this.params.massKg)
       .setFriction(0.3)
       .setRestitution(0.05);
-    colDesc.setActiveEvents(R.ActiveEvents.COLLISION_EVENTS);
     this.chassisCollider = this.world.createCollider(colDesc, this.body);
     const ctrl = this.world.createVehicleController(this.body);
     // wheels: FL, FR, RL, RR — connection points in chassis space
@@ -355,10 +391,9 @@ export class CarPhysics {
       if (tune.maxForceN !== undefined) ctrl.setWheelMaxSuspensionForce(i, tune.maxForceN);
       ctrl.setWheelMaxSuspensionTravel(i, tune.travel);
       ctrl.setWheelFrictionSlip(i, this.params.tireMu * this.gripScale * 4.0);
-      ctrl.setWheelSideFrictionStiffness(i, 0.9);
+      ctrl.setWheelSideFrictionStiffness(i, i >= 2 ? SIDE_FRICTION_REAR : SIDE_FRICTION_FRONT);
     }
     this.controller = ctrl;
-    this.prevVel.set(0, 0, 0);
   }
 
   /** Upgrade/cargo changes re-derive mass + tire grip on the live body.
@@ -460,7 +495,6 @@ export class CarPhysics {
   }
 
   step(dt: number, input: DriveInput, v: Vehicle, groundY: (x: number, z: number) => number): void {
-    this.impactCooldown = Math.max(0, this.impactCooldown - dt);
     this.shiftT = Math.max(0, this.shiftT - dt);
     if (this.fallback || !this.world || !this.body || !this.controller) {
       this.stepKinematic(dt, input, v, groundY);
@@ -481,8 +515,11 @@ export class CarPhysics {
     const steerTarget = -input.steer * MAX_STEER * speedTaper;
     const rate = 2.8 * dt;
     this.steerAngle += THREE.MathUtils.clamp(steerTarget - this.steerAngle, -rate, rate);
-    ctrl.setWheelSteering(0, this.steerAngle);
-    ctrl.setWheelSteering(1, this.steerAngle);
+    // true Ackermann: inner front wheel steers more than the outer
+    const [steer0, steer1] = ackermannSteer(this.steerAngle, this.geom.wheelX, this.geom.wheelZ);
+    ctrl.setWheelSteering(0, steer0);
+    ctrl.setWheelSteering(1, steer1);
+    this.steerWheels = [steer0, steer1];
 
     // water state for this step: the seabed under the car is the
     // ground field itself; a drowned engine makes no force
@@ -524,20 +561,38 @@ export class CarPhysics {
       }
     }
 
+    // DIRECTIONAL STABILITY (Item 4b, 2026-10-21): the raycast
+    // controller models no caster, so it has NO self-aligning torque:
+    // on real terrain every crest and facet adds a small random
+    // heading increment that never decays, and the car random-walks
+    // off its line with the wheel untouched (measured on the island
+    // field at cruise: +10 deg of heading and 5.3 m of lateral drift
+    // over ~130 m). A real car's tires self-center through trail and
+    // caster — the aligning moment pulls the nose toward the
+    // velocity vector. Emulate that moment, NOT a driver: only when
+    // the driver is not steering, apply a yaw torque proportional to
+    // the sideslip angle. It cannot fight an input (it switches off
+    // the moment steer is applied) and it does not touch the cornering
+    // geometry measured in carSteering.test.ts.
+    if (Math.abs(input.steer) < 0.05 && Math.abs(this.steerAngle) < 0.03 && this.speed > 3) {
+      const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0));
+      const latV = lv.x * right.x + lv.z * right.z;
+      const fwdV = lv.x * fwd.x + lv.z * fwd.z;
+      if (fwdV > 3) {
+        const beta = Math.atan2(latV, fwdV); // sideslip: velocity vs nose
+        const tq = THREE.MathUtils.clamp(
+          -beta * p.massKg * 4.0 * Math.min(1, fwdV / 12),
+          -p.massKg * 3, p.massKg * 3,
+        );
+        body.addTorque({ x: 0, y: tq, z: 0 }, true);
+      }
+    }
+
     // two physics substeps per frame step
     const sub = 2;
     for (let s = 0; s < sub; s++) {
       ctrl.updateVehicle(dt / sub);
-      this.world.step(this.events!);
-    }
-
-    // impacts: chassis velocity spikes across the step
-    const lv2 = body.linvel();
-    const dv = Math.hypot(lv2.x - this.prevVel.x, lv2.y - this.prevVel.y, lv2.z - this.prevVel.z);
-    this.prevVel.set(lv2.x, lv2.y, lv2.z);
-    if (dv > 2.2 && this.impactCooldown <= 0) {
-      this.impactCooldown = 0.35;
-      this.ev.onImpact(dv);
+      this.world.step();
     }
 
     this.syncVisual(dt, v);
@@ -551,11 +606,7 @@ export class CarPhysics {
       this.controller.setWheelBrake(i, 30000);
     }
     this.controller.updateVehicle(1 / 60);
-    this.world.step(this.events!);
-    if (this.body) {
-      const lv = this.body.linvel();
-      this.prevVel.set(lv.x, lv.y, lv.z);
-    }
+    this.world.step();
   }
 
   private syncVisual(dt: number, v: Vehicle): void {
@@ -572,6 +623,7 @@ export class CarPhysics {
     v.speed = this.speed;
     this.spin += (this.speed / this.params.wheelRadiusM) * dt;
     v.steerVis = this.steerAngle;
+    v.steerVisWheels = this.steerWheels;
     v.wheelSpinAngle = this.spin;
     const tune = suspTuneFor(this.defId);
     for (let i = 0; i < 4; i++) {
@@ -632,5 +684,6 @@ export class CarPhysics {
     this.spin += (this.speed / p.wheelRadiusM) * dt;
     v.wheelSpinAngle = this.spin;
     v.steerVis = this.steerAngle;
+    v.steerVisWheels = ackermannSteer(this.steerAngle, this.geom.wheelX, this.geom.wheelZ);
   }
 }

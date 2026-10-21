@@ -74,7 +74,7 @@ describe('driving into the sea', () => {
   const flat = (): number => 2;
 
   async function drive(groundY: (x: number, z: number) => number, steps: number) {
-    const cp = await CarPhysics.create({ onImpact: () => undefined }, groundY, []);
+    const cp = await CarPhysics.create(groundY);
     const v = fakeVehicle('gt500', 40, 0, groundY);
     cp.spawnCar(v, [], 0);
     let sawStall = false;

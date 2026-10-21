@@ -151,7 +151,7 @@ describe('the rigid body rides the same ground the player sees', () => {
   ];
   for (const [name, x, z] of sites) {
     it(`settles on the field at ${name}`, async () => {
-      const cp = await CarPhysics.create({ onImpact: () => undefined }, (gx, gz) => heightAt(gx, gz), []);
+      const cp = await CarPhysics.create((gx, gz) => heightAt(gx, gz));
       const v = fakeVehicle('gt500', x, z);
       cp.spawnCar(v, [], 0);
       for (let i = 0; i < 240; i++) {

@@ -8,6 +8,13 @@ import { estimatePerformance, carParams } from '../game/carSpec';
  * Piece 3: the RIGID BODY must hit the same figures the math promises.
  * Full-throttle runs on a flat heightfield, measured from the body —
  * stock clears 220 km/h in the metal, not just on paper.
+ *
+ * VEHICLE COLLISION RETIRED (Ian's order, 2026-10-21 — complete
+ * deletion): CarPhysics.create used to take an onImpact events
+ * object and a building-collider set; both are gone from the
+ * signature and the sim. Call sites here were updated deliberately:
+ * create(groundY) is the whole contract now — terrain field in,
+ * driving physics out, no collision layer to wire.
  */
 
 function fakeVehicle(x = 0, z = 0, heading = 0): Vehicle {
@@ -26,7 +33,7 @@ function fakeVehicle(x = 0, z = 0, heading = 0): Vehicle {
 const flat = () => 0;
 
 async function runFullThrottle(upgrades: string[], seconds: number) {
-  const cp = await CarPhysics.create({ onImpact: () => undefined }, flat, []);
+  const cp = await CarPhysics.create(flat);
   const v = fakeVehicle();
   cp.spawnCar(v, upgrades, 0);
   expect(cp.isRigidBody).toBe(true);
@@ -47,7 +54,7 @@ async function runFullThrottle(upgrades: string[], seconds: number) {
 
 describe('Rapier rigid-body Mustang', () => {
   it('settles on its suspension without falling through the world', async () => {
-    const cp = await CarPhysics.create({ onImpact: () => undefined }, flat, []);
+    const cp = await CarPhysics.create(flat);
     const v = fakeVehicle();
     cp.spawnCar(v, [], 0);
     for (let i = 0; i < 240; i++) {
@@ -80,7 +87,7 @@ describe('Rapier rigid-body Mustang', () => {
   }, 120000);
 
   it('steering right yaws the car right', async () => {
-    const cp = await CarPhysics.create({ onImpact: () => undefined }, flat, []);
+    const cp = await CarPhysics.create(flat);
     const v = fakeVehicle();
     cp.spawnCar(v, [], 0);
     const dt = 1 / 60;
@@ -99,7 +106,7 @@ describe('Rapier rigid-body Mustang', () => {
   // Evidence: no lean without lateral load, real lean with it — read
   // straight off the body-driven group quaternion.
   it('gravity lean: upright in a straight line, rolled by the body in a corner', async () => {
-    const cp = await CarPhysics.create({ onImpact: () => undefined }, flat, []);
+    const cp = await CarPhysics.create(flat);
     const v = fakeVehicle();
     cp.spawnCar(v, [], 0);
     const dt = 1 / 60;

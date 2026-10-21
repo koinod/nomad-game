@@ -171,7 +171,7 @@ function fakeVehicle(defId: string): Vehicle {
 const flat = () => 0;
 
 async function settle(defId: string): Promise<{ cp: CarPhysics; v: Vehicle }> {
-  const cp = await CarPhysics.create({ onImpact: () => undefined }, flat, []);
+  const cp = await CarPhysics.create(flat);
   const v = fakeVehicle(defId);
   cp.spawnCar(v, [], 0);
   expect(cp.boundDefId).toBe(defId);
@@ -219,7 +219,7 @@ describe('rigid-body fleet', () => {
   }, 30000);
 
   it('the live body rebinds across the fleet: car out, truck in, van in', async () => {
-    const cp = await CarPhysics.create({ onImpact: () => undefined }, flat, []);
+    const cp = await CarPhysics.create(flat);
     const g = fakeVehicle('gt500');
     cp.spawnCar(g, [], 0);
     expect(cp.boundDefId).toBe('gt500');
@@ -237,7 +237,7 @@ describe('rigid-body fleet', () => {
   }, 30000);
 
   it('the Sprinter runs full throttle in its class, near the estimate', async () => {
-    const cp = await CarPhysics.create({ onImpact: () => undefined }, flat, []);
+    const cp = await CarPhysics.create(flat);
     const v = fakeVehicle('sprinter_van');
     cp.spawnCar(v, [], 0);
     const dt = 1 / 60;
@@ -259,7 +259,7 @@ describe('rigid-body fleet', () => {
   }, 90000);
 
   it('the Prime hauls to highway speed like 9.8 t of diesel should', async () => {
-    const cp = await CarPhysics.create({ onImpact: () => undefined }, flat, []);
+    const cp = await CarPhysics.create(flat);
     const v = fakeVehicle('nomad_prime');
     cp.spawnCar(v, [], 0);
     const dt = 1 / 60;

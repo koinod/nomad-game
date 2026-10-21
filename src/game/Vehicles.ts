@@ -108,6 +108,10 @@ export interface Vehicle {
   wheelSpin: THREE.Object3D[];
   wheelPivots: THREE.Object3D[];
   steerVis: number;
+  /** Item 4: per-wheel front steer angles after Ackermann, in
+   *  CarPhysics wheel order [0 = FR, 1 = FL]; visuals steer each
+   *  front wheel by its own angle. Written by CarPhysics. */
+  steerVisWheels?: [number, number];
   /** Piece 3: accumulated wheel spin (rad) + per-wheel suspension length,
    *  written by CarPhysics, consumed by the GLB visual rig. */
   wheelSpinAngle: number;
@@ -117,7 +121,7 @@ export interface Vehicle {
    *  Until it lands (or if it fails), the procedural body stands in. */
   glb?: {
     wrapper: THREE.Group;
-    steerPivots: THREE.Object3D[];
+    steerPivots: { obj: THREE.Object3D; wheelIdx: number }[];
     spinPivots: THREE.Object3D[];
     suspPivots: { obj: THREE.Object3D; baseY: number; wheelIdx: number }[];
     headLights: THREE.SpotLight[];
@@ -290,7 +294,7 @@ export function attachMustangGlb(v: Vehicle): void {
       const order: [string, number][] = [
         ['WheelFR', 0], ['WheelFL', 1], ['WheelRR', 2], ['WheelRL', 3],
       ];
-      const steerPivots: THREE.Object3D[] = [];
+      const steerPivots: { obj: THREE.Object3D; wheelIdx: number }[] = [];
       const spinPivots: THREE.Object3D[] = [];
       const suspPivots: { obj: THREE.Object3D; baseY: number; wheelIdx: number }[] = [];
       for (const [name, wheelIdx] of order) {
@@ -308,7 +312,7 @@ export function attachMustangGlb(v: Vehicle): void {
         wheel.position.set(0, 0, 0);
         suspPivots.push({ obj: susp, baseY: susp.position.y, wheelIdx });
         spinPivots.push(spin);
-        if (wheelIdx <= 1) steerPivots.push(susp);
+        if (wheelIdx <= 1) steerPivots.push({ obj: susp, wheelIdx });
       }
       // headlights: real spotlights seated at the lenses (glTF space:
       // nose +X, up +Y, width on Z) — light only, no fake glow geometry
@@ -366,7 +370,7 @@ function attachVehicleGlb(v: Vehicle, cfg: GlbAttachCfg): void {
           o.receiveShadow = true;
         }
       });
-      const steerPivots: THREE.Object3D[] = [];
+      const steerPivots: { obj: THREE.Object3D; wheelIdx: number }[] = [];
       const spinPivots: THREE.Object3D[] = [];
       const suspPivots: { obj: THREE.Object3D; baseY: number; wheelIdx: number }[] = [];
       for (const spec of cfg.wheels) {
@@ -384,7 +388,7 @@ function attachVehicleGlb(v: Vehicle, cfg: GlbAttachCfg): void {
         wheel.position.set(0, 0, 0);
         suspPivots.push({ obj: susp, baseY: susp.position.y, wheelIdx: spec.wheelIdx });
         spinPivots.push(spin);
-        if (spec.steer) steerPivots.push(susp);
+        if (spec.steer) steerPivots.push({ obj: susp, wheelIdx: spec.wheelIdx });
       }
       const headLights: THREE.SpotLight[] = [];
       for (const h of cfg.headlights(model)) {
@@ -524,7 +528,11 @@ export function placeSeahawk(scene: THREE.Scene, groundY: (x: number, z: number)
 export function applyGlbVisuals(v: Vehicle): void {
   const g = v.glb;
   if (!g) return;
-  for (const p of g.steerPivots) p.rotation.y = v.steerVis;
+  for (const p of g.steerPivots) {
+    // Ackermann: each front wheel shows its OWN angle when CarPhysics
+    // supplies them; the shared center angle is the fallback
+    p.obj.rotation.y = v.steerVisWheels?.[p.wheelIdx] ?? v.steerVis;
+  }
   for (const p of g.spinPivots) p.rotation.z = -v.wheelSpinAngle;
   for (const s of g.suspPivots) {
     const len = v.suspension[s.wheelIdx] ?? 0.32;

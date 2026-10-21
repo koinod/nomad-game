@@ -113,7 +113,7 @@ const flat = () => 0;
 
 describe('rigid-body GT500', () => {
   it('settles on its suspension without falling through the world', async () => {
-    const cp = await CarPhysics.create({ onImpact: () => undefined }, flat, []);
+    const cp = await CarPhysics.create(flat);
     const v = fakeVehicle('gt500');
     cp.spawnCar(v, [], 0);
     expect(cp.boundDefId).toBe('gt500');
@@ -130,7 +130,7 @@ describe('rigid-body GT500', () => {
   }, 30000);
 
   it('full throttle runs in the period class, near the estimate', async () => {
-    const cp = await CarPhysics.create({ onImpact: () => undefined }, flat, []);
+    const cp = await CarPhysics.create(flat);
     const v = fakeVehicle('gt500');
     cp.spawnCar(v, [], 0);
     const dt = 1 / 60;
@@ -152,7 +152,7 @@ describe('rigid-body GT500', () => {
   }, 60000);
 
   it('the live body rebinds: Mustang body out, GT500 body in', async () => {
-    const cp = await CarPhysics.create({ onImpact: () => undefined }, flat, []);
+    const cp = await CarPhysics.create(flat);
     const m = fakeVehicle('mustang');
     cp.spawnCar(m, [], 0);
     expect(cp.boundDefId).toBe('mustang');
@@ -197,7 +197,7 @@ describe('GT500 suspension tune (Item 3)', () => {
   });
 
   it('settles composed: near-equal corners, laden stance', async () => {
-    const cp = await CarPhysics.create({ onImpact: () => undefined }, flat, []);
+    const cp = await CarPhysics.create(flat);
     const v = fakeVehicle('gt500');
     cp.spawnCar(v, [], 0);
     for (let i = 0; i < 240; i++) {
@@ -220,7 +220,7 @@ describe('GT500 suspension tune (Item 3)', () => {
     // must guarantee is a deep, damped compression with a clean
     // recovery and no oscillation — and the rendered wheel inside
     // its arch at every instant (asserted separately at 3 m too).
-    const cp = await CarPhysics.create({ onImpact: () => undefined }, flat, []);
+    const cp = await CarPhysics.create(flat);
     const v = fakeVehicle('gt500');
     cp.spawnCar(v, [], 0);
     for (let i = 0; i < 120; i++) cp.step(1 / 60, { throttle: 0, steer: 0, handbrake: true, hasFuel: true }, v, flat);
@@ -245,7 +245,7 @@ describe('GT500 suspension tune (Item 3)', () => {
   }, 30000);
 
   it('a 3 m drop bottoms the physics — but the RENDERED wheel never leaves the arch', async () => {
-    const cp = await CarPhysics.create({ onImpact: () => undefined }, flat, []);
+    const cp = await CarPhysics.create(flat);
     const v = fakeVehicle('gt500');
     cp.spawnCar(v, [], 0);
     for (let i = 0; i < 120; i++) cp.step(1 / 60, { throttle: 0, steer: 0, handbrake: true, hasFuel: true }, v, flat);
@@ -268,7 +268,7 @@ describe('GT500 suspension tune (Item 3)', () => {
   }, 30000);
 
   it('cornering squat: load transfers — outside compresses, body rolls with it (Item 4)', async () => {
-    const cp = await CarPhysics.create({ onImpact: () => undefined }, flat, []);
+    const cp = await CarPhysics.create(flat);
     const v = fakeVehicle('gt500');
     cp.spawnCar(v, [], 0);
     const dt = 1 / 60;
