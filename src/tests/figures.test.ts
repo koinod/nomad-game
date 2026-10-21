@@ -441,6 +441,7 @@ function syntheticAuthoredTemplate(withSac = false): THREE.Group {
 const AUTHORED2: { kind: HuskKind; file: string; skullY: number; hipY: number; legX: number; extra: string[] }[] = [
   { kind: 'crawler', file: 'husk_crawler_authored.glb', skullY: 1.62, hipY: 0.864, legX: 0.0851, extra: [] },
   { kind: 'spitter', file: 'husk_spitter_authored.glb', skullY: 1.76, hipY: 0.888, legX: 0.0875, extra: ['sac'] },
+  { kind: 'screamer', file: 'husk_screamer_authored.glb', skullY: 2.0, hipY: 1.008, legX: 0.0993, extra: [] },
 ];
 
 describe('authored husk GLBs (wave 2)', () => {
@@ -515,5 +516,17 @@ describe('authored husk GLBs (wave 2)', () => {
     expect((sp as any).sacMesh).toBe(rig.sac); // the telegraph pulses THIS mesh
     expect(rig.pose.torsoX).toBe(0.14);
     expect(rig.torso.rotation.x).toBe(0.14);
+  });
+
+  it('screamer swap applies the kit builder\u2019s bespoke stance (no slump)', () => {
+    const sc = new Husk('auth2_sc', 'screamer', 0, 0, 'test', groundY);
+    expect(sc.useAuthoredFigure(syntheticAuthoredTemplate())).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rig = (sc as any).rig as FigureRig;
+    expect(rig.torso.rotation.x).toBe(0.06);
+    expect(rig.pose.torsoX).toBe(0.06);
+    expect(rig.head.rotation.x).toBe(-0.25); // thrown back — the wind-up deepens it
+    expect(rig.armL.rotation.x).toBe(-0.42);
+    expect(rig.armR.rotation.x).toBe(-0.34);
   });
 });

@@ -69,6 +69,8 @@ def verify(kind, spec):
               f"{leg} hip pivot at (±{spec['legx']}, {spec['hip']}): {t}")
     def mesh_of(name):
         idx = by_name[name][0]
+        if 'mesh' not in nodes[idx]:
+            raise KeyError(f"node '{name}' carries no mesh")
         return g['meshes'][nodes[idx]['mesh']]
     check('torsoMesh' in by_name, "mesh node 'torsoMesh' (bodyMat seam) exists")
     check('eyes' in by_name, "mesh node 'eyes' exists")
@@ -100,5 +102,9 @@ if __name__ == '__main__':
     kinds = list(KINDS) if which == 'all' else [which]
     bad = []
     for k in kinds:
-        if verify(k, KINDS[k]): bad.append(k)
+        try:
+            if verify(k, KINDS[k]): bad.append(k)
+        except Exception as e:   # a malformed artifact is a FAIL, not a crash
+            print(f"[{k}] RESULT: FAIL ({e})")
+            bad.append(k)
     sys.exit(1 if bad else 0)
