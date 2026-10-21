@@ -5,10 +5,8 @@
 // silhouette: a tire is a torus, a circuit board is a green slab with
 // chips, gun_parts are a tray of springs and pins.
 //
-// GATE STATE: built + structurally tested, NOT yet wired into
-// Interact's pickup meshes — visuals integrate on the main agent's
-// render verdict (proof renders first). The wiring is one line in
-// Interact.buildPickupMesh: prefer buildItemModel() ?? buildGroundMesh().
+// WIRED (stage 7): Interact.buildPickupMesh prefers buildItemModel()
+// and falls back to weaponMeshes' buildGroundMesh for unmodeled ids.
 
 import * as THREE from 'three';
 

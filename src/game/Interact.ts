@@ -8,10 +8,12 @@ import { DESIGNED_RECRUITS, SURVIVOR_LOOKS, NPC_LOOKS, type SurvivorLook } from 
 import { buildHumanFigure } from './figureKit';
 import { CLAIMABLE } from '../data/base';
 import { buildGroundMesh } from './weaponMeshes';
+import { buildItemModel } from './itemModels';
 import { buildFurnitureMesh, applyDisturbed, applyRestored, FURNITURE_LABEL, type FurnitureKind } from './furnitureMeshes';
 import { sfx } from '../systems/audio';
 import { AlarmRegistry, type AlarmDef } from './alarm';
 import { CAMPFIRE_SPOTS, biomeAt } from './World';
+import { ENCLAVE_CACHES } from '../data/worldWiring';
 
 export interface LootEntry {
   id: string;
@@ -40,6 +42,11 @@ export interface ContainerDef {
   /** Explicit placement height (upstairs furniture in two-story houses);
    *  when set, the container ignores terrain/floor inference. */
   y?: number;
+  /** Stage 7 (W6): quest target fired once when the container is first
+   *  opened (the Enclave caches' `cache:<id>` interacts). */
+  questTarget?: string;
+  /** Stage 7 (W6): a line toasted the first time the container opens. */
+  flavor?: string;
 }
 
 export interface InteractHooks {
@@ -91,7 +98,9 @@ function personMesh(
 
 /** Distinct physical mesh per item — see weaponMeshes.ts. */
 function buildPickupMesh(itemId: string, qty: number): THREE.Group {
-  const inner = buildGroundMesh(itemId, qty);
+  // stage 7: Lane 6's itemModels take the seam (43 modeled items render
+  // their real silhouettes); everything else keeps weaponMeshes' mesh.
+  const inner = buildItemModel(itemId, qty) ?? buildGroundMesh(itemId, qty);
   // lay flat on the ground plane, slight lift so it doesn't z-fight
   inner.position.y = 0.06;
   const g = new THREE.Group();
@@ -245,6 +254,13 @@ export class InteractSystem {
               if (ev.effect.factionRep) st.addRep(ev.effect.factionRep.faction, ev.effect.factionRep.delta);
               st.setFlag(`alarm_tripped:${c.alarmPoiId}`);
             }
+          }
+          // W6 (stage 7): quest containers report their interact once,
+          // on first open (the isLooted early-return above keeps it
+          // one-shot; locked containers never respawn either).
+          if (c.questTarget) {
+            st.questEvent('interact', c.questTarget, 1);
+            if (c.flavor) st.addToast(c.flavor);
           }
           // loot preview: roll once, stash it, show the panel — take what you want.
           // §4.5: the container's biome weights each entry's class, so the
@@ -855,5 +871,28 @@ export function buildContainerDefs(pois: Record<string, [number, number]>): Cont
     C('n_bush_2', 'forest_cache', -8, 14, BUSH_LOOT, 'berrybush'),
     C('n_bush_3', 'jonah_camp', -16, -8, BUSH_LOOT, 'berrybush'),
     C('n_bush_4', 'dune_cache', -10, 8, BUSH_LOOT, 'berrybush'),
+    // W6 (stage 7): the Enclave's three dead drops (worldWiring
+    // ENCLAVE_CACHES) — lockpick-gated and one-shot (locked containers
+    // never respawn), each carrying its signature item + generic tech,
+    // each firing its `cache:<id>` interact so q_enclave_burst — already
+    // startable since stage 4's radio burst — can complete end-to-end.
+    ...ENCLAVE_CACHES.map((cache): ContainerDef => {
+      const p = pois[cache.poiId!] ?? [0, 0];
+      return {
+        id: cache.id,
+        x: p[0] + cache.dx,
+        z: p[1] + cache.dz,
+        label: 'Search dead drop',
+        locked: true,
+        questTarget: `cache:${cache.id}`,
+        flavor: cache.flavor,
+        loot: [
+          { id: cache.signatureItem, min: 1, max: 1, chance: 1 },
+          { id: 'wire', min: 2, max: 4, chance: 0.9 },
+          { id: 'circuit_board', min: 1, max: 1, chance: 0.4 },
+          { id: 'scrap', min: 2, max: 4, chance: 0.8 },
+        ],
+      };
+    }),
   ];
 }
