@@ -160,6 +160,13 @@ export default function TouchControls() {
   const [isTouch] = useState(
     () => typeof window !== 'undefined' && 'ontouchstart' in window,
   );
+  // the store's vehicle entry exists only while seated at the wheel —
+  // it gates the driving cluster (handbrake) below
+  const vehicle = useGameStore((s) => s.vehicle);
+  useEffect(() => {
+    // never leave the handbrake held after stepping out mid-press
+    if (!vehicle) input.ascend = false;
+  }, [vehicle]);
   const joyBaseRef = useRef<HTMLDivElement | null>(null);
   const joyId = useRef<number | null>(null);
   const [knob, setKnob] = useState({ x: 0, y: 0 });
@@ -309,6 +316,19 @@ export default function TouchControls() {
       </div>
 
       
+
+      {/* driving cluster: handbrake (Space on desktop) — input.ascend is
+          the handbrake while driving; hold to lock the rear wheels */}
+      {vehicle && (
+        <div className="absolute bottom-64 right-6">
+          <ControlButton
+            label="BRK"
+            ariaLabel="Hold for handbrake"
+            onPress={() => { input.ascend = true; }}
+            onRelease={() => { input.ascend = false; }}
+          />
+        </div>
+      )}
 
       {/* combat cluster: right side, PUBG-style big FIRE */}
       <div className="absolute bottom-28 right-6 flex items-end gap-3">
