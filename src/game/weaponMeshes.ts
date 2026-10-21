@@ -168,10 +168,6 @@ export function buildGroundMesh(itemId: string, qty = 1): THREE.Group {
     case 'sledgehammer':
     case 'shotgun':
     case 'hunting_rifle':
-    case 'crowbar':
-    case 'fire_axe':
-    case 'spear':
-    case 'riot_baton':
     case 'flare_gun':
     case 'revolver':
     case 'crossbow':
@@ -250,6 +246,8 @@ export function buildGroundMesh(itemId: string, qty = 1): THREE.Group {
     case 'flashbang': {
       const body = add(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.18, 10), MAT.steel()));
       body.rotation.x = Math.PI / 2; body.position.z = 0.12;
+      const cap = add(new THREE.Mesh(new THREE.CylinderGeometry(0.053, 0.053, 0.03, 10), MAT.darkSteel()));
+      cap.rotation.x = Math.PI / 2; cap.position.z = 0.03;
       break;
     }
     case 'crowbar': {
@@ -667,6 +665,36 @@ export function buildHandMesh(itemId: string, finish?: string, mods: readonly st
       stock.position.set(0, -0.02, -0.28); stock.rotation.x = 0.14;
       const stirrup = add(new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.012, 6, 12, Math.PI), MAT.steel()));
       stirrup.position.set(0, 0.0, 0.5); stirrup.rotation.x = Math.PI / 2;
+      break;
+    }
+    // ---- wave-4 melee the hand switch never got (their ground art was
+    // shadowed by the reuse list too — both paths showed the generic box)
+    case 'crowbar': {
+      const bar = add(new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.045, 0.55), MAT.steel()));
+      bar.position.z = 0.22;
+      const claw = add(new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.13, 0.055), MAT.steel()));
+      claw.position.set(0, 0.045, 0.5);
+      break;
+    }
+    case 'fire_axe': {
+      const handle = add(new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.032, 0.78, 8), MAT.wood()));
+      handle.rotation.x = Math.PI / 2; handle.position.z = 0.3;
+      const head = add(new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.15, 0.28), new THREE.MeshStandardMaterial({ color: 0xb03a2e, roughness: 0.6, metalness: 0.3 })));
+      head.position.set(0, 0.01, 0.62);
+      break;
+    }
+    case 'spear': {
+      const shaft = add(new THREE.Mesh(new THREE.CylinderGeometry(0.023, 0.023, 1.5, 8), MAT.wood()));
+      shaft.rotation.x = Math.PI / 2; shaft.position.z = 0.55;
+      const tip = add(new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.26, 8), MAT.steel()));
+      tip.rotation.x = Math.PI / 2; tip.position.z = 1.42;
+      break;
+    }
+    case 'riot_baton': {
+      const body = add(new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.52, 10), MAT.black()));
+      body.rotation.x = Math.PI / 2; body.position.z = 0.2;
+      const grip = add(new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.15, 8), MAT.black()));
+      grip.rotation.z = Math.PI / 2; grip.position.set(0.09, -0.02, 0.0);
       break;
     }
     // ---- throwables in hand: what the throw arc starts from ----
