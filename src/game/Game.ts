@@ -25,6 +25,7 @@ import type { InvItem, TrailerSave } from '../store/types'; // TrailerSave: lega
 import { floorYAt, floorYAtRef, resolveCollisions, type Collider, type FloorRect } from './Colliders';
 import { survivingVehicleSave } from './saveMigration';
 import { sfx, ambience } from '../systems/audio';
+import { useCraftQueue } from '../systems/crafting';
 import { ENDING_LINES } from '../narrative/dialogue';
 import {
   totalWeightKg, carryLimitKg, encumbranceTier,
@@ -69,6 +70,7 @@ export class Game {
   private carPhysics: CarPhysics | null = null;
   private weather = new WeatherSystem({ seed: 987654321 });
   private lastClockMin = -1;
+  private lastPlayerHp = -1;
   private ramT = 0;
   private buildKey = '';
   driving: Vehicle | null = null;
@@ -667,6 +669,10 @@ export class Game {
       }
     }
 
+    // timed crafts (Lane 7) run on the game clock: advance the queue —
+    // completions grant their result + XP inside the engine's tick
+    useCraftQueue.getState().tick();
+
     // crafting-station proximity: stand within 4.5m of a station to use it
     let foundStation: import('../data/items').StationId | null = null;
     const px = player.pos.x;
@@ -821,6 +827,21 @@ export class Game {
         h.killReported = true;
         this.onHuskKilled(h);
       }
+    }
+
+    // combat damage interrupts timed crafts (Lane 7 hook): hp dropped
+    // this frame while a husk is actively hunting/attacking — the queue
+    // banks every running job's progress, resumable from the Craft tab
+    {
+      const hpNow = useGameStore.getState().hp;
+      if (
+        this.lastPlayerHp >= 0 &&
+        hpNow < this.lastPlayerHp &&
+        husks.husks.some((h) => h.state === 'hunt' || h.state === 'attack')
+      ) {
+        useCraftQueue.getState().interruptAll();
+      }
+      this.lastPlayerHp = hpNow;
     }
 
     // combat feedback particles + tracers ride every frame
