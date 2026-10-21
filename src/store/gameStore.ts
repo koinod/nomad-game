@@ -8,6 +8,7 @@ import { dispatchDurationMin, poiName, resolveDispatch } from '../data/dispatch'
 import { TRAITS as TRAIT_DEFS } from '../data/survivors';
 import { QUESTS } from '../data/quests';
 import { FACTIONS, STARTING_REP, LEGACY_REP_ALIAS } from '../data/factions';
+import { ENCLAVE_RADIO_BURST } from '../data/worldWiring';
 import { DEFAULT_APPEARANCE, DIFFICULTIES } from './types';
 import type {
   Appearance, DifficultyId, Equipped, FleetEntry, InvItem, PhoneTab, QuestProgress, QuestStepType,
@@ -1203,6 +1204,16 @@ export const useGameStore = create<GameState>()((set, get) => {
       if (flag === 'beacon_dark') patch.beaconChoice = 'dark';
       set(patch);
       get().checkQuestStarts();
+      // Lane 9 (W7, store level): the moment the relay first comes online,
+      // the dead frequency answers once. The burst lands in the journal
+      // (the Log surface) and sets enclave_burst_heard, which starts
+      // q_enclave_burst via the checkQuestStarts inside the nested setFlag.
+      // setFlag early-returns on already-set flags, so this fires once.
+      if (flag === ENCLAVE_RADIO_BURST.requiresFlag) {
+        get().addJournal(ENCLAVE_RADIO_BURST.speaker, [...ENCLAVE_RADIO_BURST.lines]);
+        get().addToast('A voice on a dead frequency — check the Log.');
+        get().setFlag(ENCLAVE_RADIO_BURST.flag);
+      }
     },
 
     addRep: (faction, amount) => {
