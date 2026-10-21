@@ -172,13 +172,14 @@ HALF_W = 0.99
 ROOF_Z = 2.68
 FLOOR_Z = 0.47
 FAX, RAX = 2.32, -2.00          # front / rear axle x (WB 4.32)
-WHEEL_R, WHEEL_W = 0.42, 0.30
+WHEEL_R, WHEEL_W = 0.44, 0.32
 TRACK_Y = 0.86                  # wheel center |y|
 
 # ================================================================ CHASSIS (body shell)
 profile = [
-    (3.48, 0.47), (3.50, 1.12), (2.80, 1.34), (2.58, 1.40),   # nose + hood + cowl
-    (2.02, 2.48), (1.90, 2.68),                                # windshield -> roof
+    (3.44, 0.47), (3.48, 0.72), (3.44, 1.02),                  # bumper zone + raked grille face
+    (2.95, 1.22), (2.58, 1.40),                                # long sloping hood -> cowl
+    (2.00, 2.50), (1.88, 2.68),                                # windshield -> roof
     (-3.36, 2.68), (-3.48, 2.52),                              # roof -> tail corner
     (-3.48, 0.47),                                             # tail face -> bottom
 ]
@@ -187,17 +188,21 @@ chassis = prism("Chassis", profile, HALF_W, SLATE, parent=ROOTV)
 # wheel-arch cuts (4x) + sliding-door aperture (port +Y)
 for ax in (FAX, RAX):
     for sy in (1, -1):
-        c = cyl("archcut", (ax, sy * HALF_W, WHEEL_R), 0.56, 0.30,
+        c = cyl("archcut", (ax, sy * HALF_W, WHEEL_R), 0.52, 0.30,
                 rot=(math.radians(90), 0, 0))
         bool_cut(chassis, c)
-door_cut = box("doorcut", (0.30, HALF_W, 1.38), (1.30, 0.30, 1.62))
+# NOTE: the cutter must span the FULL body width — the prism is a closed
+# volume to the boolean, so a shallow cutter leaves a membrane at its back
+# face sealing the doorway. The far-side opening is covered by the starboard
+# cladding plate (outside) and the interior liner wall (inside).
+door_cut = box("doorcut", (0.30, 0, 1.38), (1.30, 2.40, 1.62))
 bool_cut(chassis, door_cut)
 # dark inner arch tubs
 for ax in (FAX, RAX):
     for sy in (1, -1):
-        arc_band("ArchTub", (ax, sy * (HALF_W - 0.06), WHEEL_R), 0.50, 0.565, 0.10, BLACK, ROOTV)
+        arc_band("ArchTub", (ax, sy * (HALF_W - 0.06), WHEEL_R), 0.485, 0.525, 0.10, BLACK, ROOTV)
         # fender flare: rectangular-section arc band over the top of the arch
-        fl = arc_band("FenderFlare", (ax, sy * (HALF_W + 0.01), WHEEL_R), 0.525, 0.605, 0.09, BLACK, ROOTV)
+        fl = arc_band("FenderFlare", (ax, sy * (HALF_W + 0.01), WHEEL_R), 0.50, 0.58, 0.09, BLACK, ROOTV)
 # underbody chassis + tanks
 box("Underbody", (0.1, 0, 0.33), (5.9, 1.55, 0.26), BLACK, parent=ROOTV)
 cyl("FuelTank", (0.9, -0.55, 0.30), 0.24, 1.5, GUNM, rot=(0, math.radians(90), 0), parent=ROOTV)
@@ -230,28 +235,28 @@ for sy in (1, -1):
     box("RoofTrim", (-0.72, sy * (HALF_W + 0.004), 2.665), (5.30, 0.012, 0.05), BLACK, parent=ROOTV)
 
 # ---- glass: windshield (raked), cab side windows, rear quarter windows
-ws_ang = math.atan2(2.48 - 1.40, 2.58 - 2.02)  # windshield slope from vertical
-box("Windshield", (2.315, 0, 1.955), (0.02, 1.72, 1.18), GLASS,
-    rot=(0, -math.atan2(0.56, 1.08), 0), parent=ROOTV)
+box("Windshield", (2.30, 0, 1.96), (0.02, 1.72, 1.16), GLASS,
+    rot=(0, -math.atan2(0.58, 1.10), 0), parent=ROOTV)
 for sy in (1, -1):
     y = sy * (HALF_W + 0.010)
-    box("CabWindow", (1.86, y, 1.94), (0.58, 0.012, 0.52), GLASS, parent=ROOTV)
-    box("RearQuarterWindow", (-2.95, y, 2.24), (0.72, 0.012, 0.40), GLASS, parent=ROOTV)
+    box("CabWindow", (1.82, y, 1.95), (0.64, 0.012, 0.52), GLASS, parent=ROOTV)
+    box("RearQuarterWindow", (-2.80, y, 2.30), (0.85, 0.012, 0.42), GLASS, parent=ROOTV)
     box("MirrorArm", (2.52, sy * (HALF_W + 0.10), 2.02), (0.05, 0.20, 0.05), BLACK, parent=ROOTV)
     box("Mirror", (2.52, sy * (HALF_W + 0.22), 1.98), (0.06, 0.10, 0.30), BLACK, parent=ROOTV)
 
-# ---- front face: grille, badge blank, headlights, amber markers
-box("Grille", (3.505, 0, 1.02), (0.05, 1.30, 0.34), BLACK, parent=ROOTV)
+# ---- front face: grille on the raked face, headlights swept up the hood corners
+box("Grille", (3.475, 0, 0.88), (0.05, 1.30, 0.30), BLACK, parent=ROOTV)
 for i in range(3):
-    box("GrilleSlat", (3.535, 0, 0.94 + i * 0.09), (0.02, 1.22, 0.035), GUNM, parent=ROOTV)
-cyl("BadgeBlank", (3.545, 0, 1.04), 0.085, 0.03, GUNM, rot=(0, math.radians(90), 0), parent=ROOTV)
+    box("GrilleSlat", (3.505, 0, 0.80 + i * 0.09), (0.02, 1.22, 0.035), GUNM, parent=ROOTV)
+cyl("BadgeBlank", (3.515, 0, 0.90), 0.085, 0.03, GUNM, rot=(0, math.radians(90), 0), parent=ROOTV)
 for sy in (1, -1):
-    box("Headlight", (3.47, sy * 0.70, 1.20), (0.10, 0.42, 0.13), HEADL, parent=ROOTV)
+    box("Headlight", (3.38, sy * 0.70, 1.13), (0.16, 0.44, 0.10), HEADL,
+        rot=(0, -0.42, 0), parent=ROOTV)
     for k in range(3):
-        box("GrilleAmber", (3.538, sy * (0.28 + k * 0.13), 1.06), (0.015, 0.07, 0.05), AMBER, parent=ROOTV)
+        box("GrilleAmber", (3.508, sy * (0.28 + k * 0.13), 0.92), (0.015, 0.07, 0.05), AMBER, parent=ROOTV)
 
 # ================================================================ FRONT BUMPER (winch push bar)
-FB = empty("FrontBumper", (3.52, 0, 0.62), parent=ROOTV)
+FB = empty("FrontBumper", (3.50, 0, 0.60), parent=ROOTV)
 box("BumperBar", (0.10, 0, 0.02), (0.22, 1.86, 0.30), BLACK, bevel=0.03, parent=FB)
 box("WinchBox", (0.16, 0, 0.06), (0.24, 0.52, 0.22), GUNM, parent=FB)
 box("WinchFairlead", (0.29, 0, 0.06), (0.03, 0.30, 0.09), STEEL, parent=FB)
@@ -276,7 +281,7 @@ box("HitchReceiver", (TAIL - 0.20, 0, 0.52), (0.10, 0.14, 0.14), GUNM, parent=RO
 SD = empty("SlidingSideDoor", (0.30, HALF_W + 0.02, 1.38), parent=ROOTV)
 box("DoorPanel", (0, 0, 0), (1.26, 0.045, 1.58), OLIVE, bevel=0.02, parent=SD)
 box("DoorBand", (0, 0.012, 0.73), (1.26, 0.05, 0.26), BAND, parent=SD)
-box("DoorWindow", (0.05, 0.014, 0.42), (0.92, 0.05, 0.52), GLASS, parent=SD)
+box("DoorWindow", (0.02, 0.014, 0.44), (1.00, 0.05, 0.56), GLASS, parent=SD)
 box("DoorHandle", (0.52, 0.045, 0.08), (0.16, 0.03, 0.045), BLACK, parent=SD)
 box("DoorRail", (0.05, HALF_W - 0.01, 2.31), (2.10, 0.03, 0.05), BLACK, parent=ROOTV)  # slide rail above the aperture
 SS = empty("FoldingSideStep", (0.30, HALF_W + 0.16, 0.40), parent=ROOTV)
@@ -311,22 +316,22 @@ def build_wheel(name, loc):
     tire.parent = piv
     # sidewall rings (torus axis must align with the wheel axle = local Y)
     for sy in (1, -1):
-        bpy.ops.mesh.primitive_torus_add(major_radius=0.335, minor_radius=0.095,
+        bpy.ops.mesh.primitive_torus_add(major_radius=0.35, minor_radius=0.10,
             major_segments=22, minor_segments=10, location=(0, sy * (WHEEL_W / 2 - 0.055), 0),
             rotation=(math.radians(90), 0, 0))
         sw = bpy.context.object; sw.name = name + "_Sidewall"; sw.data.materials.append(TIREM)
         sw.parent = piv
     # rim + beadlock ring + bolts + hub
-    cyl("Rim", (0, 0, 0), 0.235, WHEEL_W + 0.012, RIM, rot=(math.radians(90), 0, 0), verts=18, parent=piv)
+    cyl("Rim", (0, 0, 0), 0.25, WHEEL_W + 0.012, RIM, rot=(math.radians(90), 0, 0), verts=18, parent=piv)
     for sy in (1, -1):
-        bpy.ops.mesh.primitive_torus_add(major_radius=0.205, minor_radius=0.022,
+        bpy.ops.mesh.primitive_torus_add(major_radius=0.22, minor_radius=0.022,
             major_segments=18, minor_segments=6, location=(0, sy * (WHEEL_W / 2 + 0.008), 0),
             rotation=(math.radians(90), 0, 0))
         ring = bpy.context.object; ring.name = name + "_Beadlock"; ring.data.materials.append(GUNM)
         ring.parent = piv
         for k in range(8):
             a = 2 * math.pi * k / 8
-            cyl("BeadBolt", (0.205 * math.cos(a), sy * (WHEEL_W / 2 + 0.012), 0.205 * math.sin(a)),
+            cyl("BeadBolt", (0.22 * math.cos(a), sy * (WHEEL_W / 2 + 0.012), 0.22 * math.sin(a)),
                 0.014, 0.025, STEEL, rot=(math.radians(90), 0, 0), verts=6, parent=piv)
     cyl("Hub", (0, 0, 0), 0.085, WHEEL_W + 0.05, GUNM, rot=(math.radians(90), 0, 0), verts=12, parent=piv)
     return piv
@@ -397,7 +402,7 @@ box("AwningCase", (0, 0, 0), (3.10, 0.09, 0.13), BLACK, bevel=0.03, parent=AW)
 
 # ================================================================ INTERIOR — CAB
 box("CabFloor", (2.05, 0, 0.60), (1.30, 1.80, 0.06), INTF, parent=ROOTV)
-box("Dash", (2.52, 0, 1.42), (0.30, 1.70, 0.34), BLACK, parent=ROOTV)
+box("Dash", (2.40, 0, 1.38), (0.22, 1.66, 0.28), BLACK, parent=ROOTV)
 box("DashScreen", (2.40, 0.10, 1.52), (0.03, 0.34, 0.20), SCRN, rot=(0, math.radians(-18), 0), parent=ROOTV)
 bpy.ops.mesh.primitive_torus_add(major_radius=0.19, minor_radius=0.022, major_segments=18,
     minor_segments=8, location=(2.32, 0.48, 1.42), rotation=(0, math.radians(72), 0))
