@@ -33,6 +33,8 @@ import { isSpecialKind } from './Combat';
 import { computeVisibility } from './visibility';
 import { meterLevel, noiseClassRadius } from './noise';
 import { ENDING_LINES } from '../narrative/dialogue';
+import { CLAIM_SITES, claimSite } from '../data/base';
+import { TurretSystem } from './Turrets';
 import {
   totalWeightKg, carryLimitKg, encumbranceTier,
 } from '../store/inventoryUtils';
@@ -61,6 +63,7 @@ export class Game {
   private husks: HuskManager | null = null;
   private animals: AnimalManager | null = null;
   private interact: InteractSystem | null = null;
+  private turrets: TurretSystem | null = null;
   // thrown weapons in flight + molotov fire zones
   private throwables: {
     mesh: THREE.Mesh;
@@ -313,6 +316,24 @@ export class Game {
         setCamp: (id) => { this.lastCampId = id; },
         hostilesNear: (x, z, r) => this.husks?.aliveWithin(x, z, r) ?? 0,
         lampRoomY: this.world.lampRoomY,
+        // stage 7: a relocated home's stranded stockpile becomes a real
+        // container at the old site — haul it back or lose it.
+        onStrandedStockpile: (fromSiteId, items) => {
+          if (!this.interact || items.length === 0) return;
+          const anchor = this.world!.poiPositions[fromSiteId]
+            ?? (fromSiteId === 'military_base' ? this.world!.poiPositions['airbase'] : undefined);
+          if (!anchor) return;
+          const id = `stranded:${fromSiteId}:${Math.floor(this.elapsed)}`;
+          if (this.interact.containerDef(id)) return;
+          this.interact.registerContainer({
+            id,
+            x: anchor[0] + 5,
+            z: anchor[1] - 5,
+            label: 'Search stranded stockpile',
+            loot: items.map((it) => ({ id: it.itemId, min: it.qty, max: it.qty, chance: 1 })),
+          });
+        },
+        deployTurret: (siteId) => this.turrets?.deployAt(siteId),
       },
       this.world.poiPositions,
       [
@@ -321,6 +342,8 @@ export class Game {
       ],
       savedLootedAt,
     );
+    this.turrets = new TurretSystem(this.scene, (x, z) => this.groundY(x, z));
+    this.turrets.syncFromClaims();
 
     // shadow flags for world + husk + interactable meshes (idempotent)
     this.world.applyShadowFlags();
@@ -803,9 +826,33 @@ export class Game {
           upgrades: [...v.upgrades],
           tiresFlat: v.tiresFlat,
           hitchedTrailer: null,
+          // stage 7 (§7.8): parked inside the home claim's ring — the
+          // Base tab's garage view reads stored cars from this stamp.
+          atHome: (() => {
+            const home = s.claims.home;
+            if (!home) return false;
+            const anchor = s.poiPositions[home.siteId]
+              ?? (home.siteId === 'military_base' ? s.poiPositions['airbase'] : undefined);
+            const site = claimSite(home.siteId);
+            if (!anchor || !site) return false;
+            return Math.hypot(v.group.position.x - anchor[0], v.group.position.z - anchor[1]) <= site.prefabRadiusM;
+          })(),
         })),
       );
       s.setTrailerFleet([]); // VEHICLE RESET: no trailers exist
+      // stage 7 (§7.2): live husk counts at every claim site for the
+      // phone checklist — the world owns husks, the store owns checks.
+      {
+        const counts: Record<string, number> = {};
+        for (const site of CLAIM_SITES) {
+          if (site.klass === 'never') continue;
+          const anchor = s.poiPositions[site.poiId]
+            ?? (site.poiId === 'military_base' ? s.poiPositions['airbase'] : undefined);
+          if (!anchor) continue;
+          counts[site.poiId] = this.husks?.aliveWithin(anchor[0], anchor[1], 40) ?? 0;
+        }
+        s.setClaimHostiles(counts);
+      }
     }
 
     // encumbrance gates sprint + slows movement
@@ -930,6 +977,10 @@ export class Game {
       night,
     );
     this.animals?.update(dt, player.pos, (x, z) => heightAt(x, z));
+
+    // deployed base turrets (stage 7): acquire + fire through the
+    // husks' own damage seam; power/ammo enforced inside the system
+    this.turrets?.update(dt, husks);
 
     // husk death bookkeeping (kill counted once when the tip-over starts)
     for (const h of husks.husks) {

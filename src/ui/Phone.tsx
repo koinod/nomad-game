@@ -6,10 +6,10 @@ import { FACTIONS, repTier } from '../data/factions';
 import { MAP_MARKERS } from '../data/territory';
 import { SKILLS, TREES, PERKS, xpToNext } from '../data/skills';
 import { traitName, moraleBand, type SurvivorJob } from '../data/survivors';
-import { FACILITIES, baseHeat, heatBand, buildMinutes, tieredFacility } from '../data/base';
+import { FACILITIES, baseHeat, heatBand, buildMinutes, tieredFacility, CLAIM_SITES } from '../data/base';
 import {
-  baseSummary, buildMenu, computeHeat, facilityStatus, jobBoard,
-  relocationQuote, stockpileView,
+  baseSummary, buildMenu, claimChecklist, computeHeat, facilityStatus, garageView, jobBoard,
+  relocationQuote, stockpileView, facilityTier,
 } from '../systems/baseClaims';
 import BasePanel from './BasePanel';
 import { poiName } from '../data/dispatch';
@@ -493,9 +493,10 @@ function WorldMap() {
  * migrated read-only with the loader's own claimsFromLegacyBase, so a
  * base claimed this session shows before the next save/load). The legacy
  * section (BaseSection) remains the no-base fallback.
- * Deferred to the wiring train: the §7.2 claims prop (its 'area clear'
- * check needs live husk counts only world claim posts know) and the
- * §7.8 garage prop (needs Lane 13's stamped fleet fuel absolutes).
+ * Stage 7 landed the deferred props: §7.2 claims (the 'area clear'
+ * check reads Game's published claimHostiles counts; onClaim runs the
+ * store's claimClaimSite) and §7.8 garage (over Lane 13's stamped
+ * fleet fuel absolutes + the atHome stamp).
  * onBuild routes shared facility ids through the shipped legacy build
  * queue; tier-only facilities (workbench, machine shop…) have no phone
  * order path yet — the claims build queue is a later step.
@@ -516,10 +517,56 @@ function BaseTab() {
   const cancelBuild = useGameStore((s) => s.cancelBuild);
   const buildFacility = useGameStore((s) => s.buildFacility);
   const addToast = useGameStore((s) => s.addToast);
+  const rep = useGameStore((s) => s.rep);
+  const claimHostiles = useGameStore((s) => s.claimHostiles);
+  const claimClaimSite = useGameStore((s) => s.claimClaimSite);
+  const fleet = useGameStore((s) => s.fleet);
 
   const home = claims.home ?? (base ? claimsFromLegacyBase(base).home : null);
   if (!home) return <BaseSection />;
   const effectiveClaims = claims.home ? claims : { home, outposts: claims.outposts };
+  // §7.2 (stage 7): every claimable site with live checks — the area
+  // clear count is Game's published husk census at the site.
+  const walletMap = new Map<string, number>();
+  for (const it of inventory) walletMap.set(it.itemId, (walletMap.get(it.itemId) ?? 0) + it.qty);
+  for (const st of home.stockpile) walletMap.set(st.itemId, (walletMap.get(st.itemId) ?? 0) + st.qty);
+  const wallet = [...walletMap.entries()].map(([itemId, qty]) => ({ itemId, qty }));
+  const claimsProp = CLAIM_SITES.filter((site) => site.klass !== 'never').map((site) => ({
+    site,
+    checks: claimChecklist(site, effectiveClaims, {
+      recruits: survivors.length,
+      rep: { ...rep },
+      husksWithin40m: claimHostiles[site.poiId] ?? 0,
+      wallet,
+      byForce: site.warPath === true && (claimHostiles[site.poiId] ?? 0) === 0,
+    }),
+  }));
+  const onClaim = (siteId: string) => {
+    sfx.play('ui');
+    claimClaimSite(siteId, {
+      husksWithin40m: claimHostiles[siteId] ?? 0,
+      byForce: CLAIM_SITES.find((x) => x.poiId === siteId)?.warPath === true
+        && (claimHostiles[siteId] ?? 0) === 0,
+    });
+  };
+  // §7.8 (stage 7): the garage over the fleet publisher's stamps.
+  const garage = facilityTier(home, 'garage') >= 1
+    ? garageView(
+        home,
+        fleet.map((f) => ({
+          id: f.instanceId ?? f.defId,
+          kind: f.name,
+          condition: f.condPct,
+          fuelL: f.fuelLiters ?? Math.round((f.fuelPct / 100) * (f.tankLiters ?? 0)),
+          fuelCap: f.tankLiters ?? 0,
+          upgrades: f.upgrades,
+          trailerId: f.hitchedTrailer,
+          storageKg: f.storageUsedKg,
+          storageCapKg: f.storageCapKg,
+        })),
+        fleet.filter((f) => f.atHome).map((f) => f.instanceId ?? f.defId),
+      )
+    : undefined;
   const localKills = baseExt.localKillsNearBase ?? 0;
   const heat = computeHeat(home, survivors, daysElapsed, localKills);
   const crew = {
@@ -552,6 +599,9 @@ function BaseTab() {
         survivors={survivors}
         board={jobBoard(home, survivors, heat)}
         relocation={relocationQuote(effectiveClaims)}
+        claims={claimsProp}
+        garage={garage && garage.bays > 0 ? garage : undefined}
+        onClaim={onClaim}
         onBuild={onBuild}
       />
       {baseQueue.length > 0 && (

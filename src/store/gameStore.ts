@@ -3,14 +3,16 @@ import { ITEMS, FIELD_RECIPES, STATION_RECIPES, STATION_LABEL } from '../data/it
 import { PERKS as PERKS_ALL } from '../data/skills';
 import { FINISHES, MODS as MODS_ALL, magSizeOf } from '../data/mods';
 import { UPGRADES as UPGRADE_DEFS } from '../data/upgrades';
-import { FACILITIES as FACILITY_DEFS, baseHeat, buildMinutes } from '../data/base';
+import { FACILITIES as FACILITY_DEFS, baseHeat, buildMinutes, claimSite } from '../data/base';
 import { dispatchDurationMin, poiName, resolveDispatch } from '../data/dispatch';
 import { TRAITS as TRAIT_DEFS } from '../data/survivors';
 import { QUESTS } from '../data/quests';
 import { FACTIONS, STARTING_REP, LEGACY_REP_ALIAS } from '../data/factions';
 import { ENCLAVE_RADIO_BURST } from '../data/worldWiring';
 import { applyUpkeep, dailyMoraleTick, FOOD_ITEMS, WATER_ITEMS } from '../systems/morale';
-import { comfortScore } from '../systems/baseClaims';
+import {
+  comfortScore, claimChecklist, claimReady, applyClaim, applyRelocation, powerBudget,
+} from '../systems/baseClaims';
 import { DEFAULT_APPEARANCE, DIFFICULTIES } from './types';
 import type {
   Appearance, DifficultyId, Equipped, FleetEntry, InvItem, PhoneTab, QuestProgress, QuestStepType,
@@ -139,6 +141,27 @@ interface GameState {
   claimBase: (poiId: string) => void;
   buildFacility: (facilityId: string) => void;
   baseTick: () => void;
+  /** Stage 7: the tiered claim flow — Lane 10's §7.2 checklist gates,
+   *  applyClaim/applyRelocation land it. Supersedes claimBase for
+   *  CLAIM_SITES; the legacy lighthouse claim stays for old saves.
+   *  Returns the relocation fallout so the world can strand the old
+   *  home's stockpile as a lootable stash. */
+  claimClaimSite: (siteId: string, ctx: { husksWithin40m: number; byForce?: boolean }) =>
+    { ok: boolean; relocatedFrom?: string; stranded?: { itemId: string; qty: number }[] };
+  /** Live husk counts within 40m of each claim site, published by Game
+   *  (~1Hz) so the phone Base tab can run the §7.2 checklist. Runtime
+   *  only — never saved. */
+  claimHostiles: Record<string, number>;
+  setClaimHostiles: (counts: Record<string, number>) => void;
+  /** Stage 7 (item 6): emplace a crafted turret at a held claim —
+   *  consumes one `turret` item, appends the prefab to the base
+   *  instance (persisted). Power is enforced live by the turret system
+   *  against powerBudget; placement ahead of the grid is allowed and
+   *  the turret simply stays offline. */
+  deployTurret: (siteId: string) => boolean;
+  /** Remove up to qty of an item from a held base's stockpile; returns
+   *  how many were actually taken (turret magazines reload this way). */
+  takeFromStockpile: (siteId: string, itemId: string, qty: number) => number;
 
   // wave 3: team dispatch (P5 v1), phone journal, scout intel, build queue
   dispatches: Dispatch[];
@@ -646,6 +669,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         dispatches: [], journal: [], scouted: {}, baseQueue: [],
         craftQueue: [], storyChoices: {}, baseExt: {},
         claims: { home: null, outposts: [] },
+        claimHostiles: {},
         moraleRuntime: { idleDays: {}, breakingDays: {} },
         beaconChoice: null,
         dayStats: { kills: 0, crafts: 0, pickups: 0 },
@@ -1482,6 +1506,147 @@ export const useGameStore = create<GameState>()((set, get) => {
       s.addSkillXp('leadership', 10);
       sfx.play('quest', { volume: 0.6 });
     },
+
+    claimClaimSite: (siteId, ctx) => {
+      const s = get();
+      const site = claimSite(siteId);
+      if (!site || site.klass === 'never') {
+        s.addToast('That ground can\u2019t be claimed.');
+        return { ok: false };
+      }
+      if (s.claims.home?.siteId === siteId || s.claims.outposts.some((o) => o.siteId === siteId)) {
+        s.addToast(`You already hold ${site.name}.`);
+        return { ok: false };
+      }
+      // the checklist's wallet: player pack + home stockpile, merged
+      const walletMap = new Map<string, number>();
+      for (const it of s.inventory) walletMap.set(it.itemId, (walletMap.get(it.itemId) ?? 0) + it.qty);
+      if (s.claims.home) {
+        for (const st of s.claims.home.stockpile) walletMap.set(st.itemId, (walletMap.get(st.itemId) ?? 0) + st.qty);
+      }
+      const wallet = [...walletMap.entries()].map(([itemId, qty]) => ({ itemId, qty }));
+      const checks = claimChecklist(site, s.claims, {
+        recruits: s.survivors.length,
+        rep: { ...s.rep },
+        husksWithin40m: ctx.husksWithin40m,
+        wallet,
+        byForce: ctx.byForce,
+      });
+      if (!claimReady(checks)) {
+        const failing = checks.filter((c) => !c.ok && c.id !== 'access' && !c.id.startsWith('path_'));
+        const access = checks.find((c) => c.id === 'access');
+        const first = failing[0]?.detail ?? (access && !access.ok ? access.detail : undefined);
+        s.addToast(first ? `Not yet — ${first}` : 'Not ready to claim.');
+        return { ok: false };
+      }
+      // pay the site cost: pack first, then the home stockpile
+      let claims = s.claims;
+      for (const cost of site.cost) {
+        let left = cost.qty;
+        while (left > 0) {
+          const stack = [...get().inventory].reverse().find((i) => i.itemId === cost.itemId && i.qty > 0);
+          if (!stack) break;
+          const take = Math.min(stack.qty, left);
+          get().removeItem(stack.uid, take);
+          left -= take;
+        }
+        if (left > 0 && claims.home) {
+          const home = claims.home;
+          claims = {
+            ...claims,
+            home: {
+              ...home,
+              stockpile: home.stockpile
+                .map((st) => (st.itemId === cost.itemId ? { ...st, qty: st.qty - left } : st))
+                .filter((st) => st.qty > 0),
+            },
+          };
+        }
+      }
+      const isHomeClass = site.klass === 'home';
+      const relocating = isHomeClass && claims.home !== null && claims.home.siteId !== siteId;
+      if (relocating) {
+        const from = claims.home!.siteId;
+        const res = applyRelocation(claims, siteId);
+        set({ claims: res.state, base: { poiId: siteId, facilities: ['command_post'] } });
+        for (const r of res.quote.refund) get().addItem(r.itemId, r.qty, true);
+        s.setFlag('base_claimed');
+        s.addToast(`Home relocated to ${site.name}. Salvage refunded; the old stockpile stays behind as a stash.`);
+        s.addJournal(`Home relocated — ${site.name}`, [
+          `The flag moves from ${poiName(from)}. Salvage came back at seventy cents on the dollar; what was stockpiled at the old ground stays there, in a stash, until someone hauls it.`,
+        ]);
+        s.addSkillXp('leadership', 10);
+        sfx.play('quest', { volume: 0.6 });
+        return { ok: true, relocatedFrom: from, stranded: res.stranded.map((st) => ({ itemId: st.itemId, qty: st.qty })) };
+      }
+      set({ claims: applyClaim(claims, siteId) });
+      if (isHomeClass) {
+        set({ base: { poiId: siteId, facilities: ['command_post'] } });
+        s.setFlag('base_claimed');
+        s.addToast(`${site.name} claimed. Build it up from the sat phone → Base.`);
+        s.addJournal(`Base claimed — ${site.name}`, [
+          'The flag is planted and the Command Post is up. This is home now — build it before the island notices.',
+        ]);
+        s.addSkillXp('leadership', 10);
+      } else {
+        s.addToast(`${site.name} held as an outpost.`);
+        s.addJournal(`Outpost claimed — ${site.name}`, [
+          'A flag, a post, a promise to come back. The island keeps score of ground held.',
+        ]);
+      }
+      sfx.play('quest', { volume: 0.6 });
+      return { ok: true };
+    },
+
+    deployTurret: (siteId) => {
+      const s = get();
+      const isHome = s.claims.home?.siteId === siteId;
+      const base = isHome ? s.claims.home : s.claims.outposts.find((o) => o.siteId === siteId);
+      if (!base) {
+        s.addToast('Turrets deploy at a base you hold.');
+        return false;
+      }
+      const stack = [...s.inventory].reverse().find((i) => i.itemId === 'turret' && i.qty > 0);
+      if (!stack) {
+        s.addToast('No crafted turret in your pack. The Machine Shop builds them (blueprint: bp_turret).');
+        return false;
+      }
+      s.removeItem(stack.uid, 1);
+      const next = { ...base, prefabs: [...base.prefabs, { defId: 'turret' }] };
+      set({
+        claims: isHome
+          ? { ...s.claims, home: next }
+          : { ...s.claims, outposts: s.claims.outposts.map((o) => (o.siteId === siteId ? next : o)) },
+      });
+      const budget = powerBudget(next);
+      s.addToast(budget.ok
+        ? 'Turret emplaced and on the grid.'
+        : 'Turret emplaced — but the grid can\u2019t carry it yet. It stays dark until power does.');
+      sfx.play('quest', { volume: 0.5 });
+      return true;
+    },
+
+    takeFromStockpile: (siteId, itemId, qty) => {
+      const s = get();
+      const isHome = s.claims.home?.siteId === siteId;
+      const base = isHome ? s.claims.home : s.claims.outposts.find((o) => o.siteId === siteId);
+      if (!base || qty <= 0) return 0;
+      const entry = base.stockpile.find((st) => st.itemId === itemId);
+      if (!entry) return 0;
+      const taken = Math.min(entry.qty, qty);
+      const next = {
+        ...base,
+        stockpile: base.stockpile
+          .map((st) => (st.itemId === itemId ? { ...st, qty: st.qty - taken } : st))
+          .filter((st) => st.qty > 0),
+      };
+      set({
+        claims: isHome
+          ? { ...s.claims, home: next }
+          : { ...s.claims, outposts: s.claims.outposts.map((o) => (o.siteId === siteId ? next : o)) },
+      });
+      return taken;
+    },
     buildFacility: (facilityId) => {
       const s = get();
       const b = s.base;
@@ -1621,6 +1786,8 @@ export const useGameStore = create<GameState>()((set, get) => {
       set({ baseExt: { ...get().baseExt, ...patch } });
     },
     claims: { home: null, outposts: [] },
+    claimHostiles: {},
+    setClaimHostiles: (counts) => set({ claimHostiles: counts }),
     moraleRuntime: { idleDays: {}, breakingDays: {} },
     beaconChoice: null,
     setClaims: (claims) => set({ claims }),

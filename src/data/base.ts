@@ -352,6 +352,11 @@ export const PREFAB_DEFS: PrefabDef[] = [
   { id: 'campfire_bedroll', name: 'Campfire + Bedroll Set', cost: [{ itemId: 'wood', qty: 2 }, { itemId: 'cloth', qty: 2 }], buildHours: 1 / 6, hp: 40, defense: 0, comfort: 2, effectText: 'Sleep/save point, Well Rested source. Comfort +2 (beds + a lit fire).' },
   { id: 'mess_table', name: 'Mess Table', cost: [{ itemId: 'wood', qty: 2 }], buildHours: 1 / 6, hp: 40, defense: 0, comfort: 1, effectText: 'Comfort +1. A kept base is a defended base.' },
   { id: 'storage_crate', name: 'Storage Crate', cost: [{ itemId: 'wood', qty: 4 }], buildHours: 1 / 6, hp: 80, defense: 0, effectText: 'Physical overflow storage. Loot lives in the world, not a magic menu.' },
+  // stage 7: the crafted turret (Lane 7's TURRET_DEF) deploys AS a
+  // prefab — its cost here mirrors the craft cost so relocation salvage
+  // and ring planning price it identically. It is never built from raw
+  // materials on site; the crafted item is the delivery.
+  { id: 'turret', name: 'Turret', cost: [{ itemId: 'gun_parts', qty: 6 }, { itemId: 'circuit_board', qty: 2 }, { itemId: 'engine_part', qty: 1 }], buildHours: 10, hp: 400, defense: 4, effectText: 'Automated 9mm turret. Draws 0.8 kW; feeds from the base stockpile.' },
 ];
 
 export function prefabDef(id: string): PrefabDef | undefined {

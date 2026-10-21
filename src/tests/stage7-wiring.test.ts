@@ -13,6 +13,11 @@ import { TRADERS } from '../data/traders';
 import { buildContainerDefs } from '../game/Interact';
 import { POI_DEFS } from '../game/World';
 import { MAP_MARKERS, territoryAt } from '../data/territory';
+import { STARTING_REP } from '../data/factions';
+import { prefabDef } from '../data/base';
+import { powerBudget, TURRET_POWER_KW, type BaseInstance } from '../systems/baseClaims';
+import { TURRET_DEF, TURRET_GHOST_SPEC } from '../systems/crafting';
+import type { SurvivorDef } from '../data/survivors';
 
 describe('stage 7 item 10 — legacy armor', () => {
   it('armored_vest / riot_helmet are armor with body slots and their values intact', () => {
@@ -129,6 +134,154 @@ describe('stage 7 item 3 — W5 road graph', () => {
     }
     const tollStretch = ROAD_GRAPH.edges.find((e) => e.from === 'relay_station' && e.to === 'dune_cache');
     expect(tollStretch?.note).toContain('toll crews');
+  });
+});
+
+describe('stage 7 item 8 — claimClaimSite (tiered claims go live)', () => {
+  const surv = (id: string): SurvivorDef => ({
+    id, name: id, age: 30, background: 'tester',
+    skills: { combat: 1, mechanics: 1, medicine: 1, stealth: 1, driver: 1, scavenging: 1, leadership: 1 },
+    traits: [], morale: 50, hp: 100, status: 'healthy', job: 'Builder',
+  });
+  beforeEach(() => {
+    useGameStore.setState({
+      inventory: [], claims: { home: null, outposts: [] }, base: null,
+      survivors: [], rep: { ...STARTING_REP }, flags: {}, toasts: [],
+    });
+  });
+
+  it('shore_camp claims free: home set, legacy mirror + flag land', () => {
+    const s = useGameStore.getState();
+    const res = s.claimClaimSite('shore_camp', { husksWithin40m: 0 });
+    expect(res.ok).toBe(true);
+    const st = useGameStore.getState();
+    expect(st.claims.home?.siteId).toBe('shore_camp');
+    expect(st.claims.home?.facilities[0].defId).toBe('command_post');
+    expect(st.base?.poiId).toBe('shore_camp');
+    expect(st.flags['base_claimed']).toBe(true);
+  });
+
+  it('hostiles at the post block the claim', () => {
+    const res = useGameStore.getState().claimClaimSite('shore_camp', { husksWithin40m: 2 });
+    expect(res.ok).toBe(false);
+    expect(useGameStore.getState().claims.home).toBeNull();
+  });
+
+  it('jonah_camp charges 15 scrap from the pack', () => {
+    useGameStore.setState({ inventory: [{ uid: 's1', itemId: 'scrap', qty: 20 }] });
+    const res = useGameStore.getState().claimClaimSite('jonah_camp', { husksWithin40m: 0 });
+    expect(res.ok).toBe(true);
+    expect(useGameStore.getState().countItem('scrap')).toBe(5);
+  });
+
+  it('an unpayable cost blocks the claim', () => {
+    const res = useGameStore.getState().claimClaimSite('jonah_camp', { husksWithin40m: 0 });
+    expect(res.ok).toBe(false);
+  });
+
+  it('town needs a door: rep path or the war path (plus crew + cost)', () => {
+    useGameStore.setState({
+      inventory: [{ uid: 's1', itemId: 'scrap', qty: 40 }],
+      survivors: [surv('a'), surv('b'), surv('c')],
+      // NB: the Union's startRep IS the path floor (25) — Path A starts
+      // open by canon design; drop rep to test the closed-door case.
+      rep: { ...STARTING_REP, union: 0 },
+    });
+    const s = useGameStore.getState();
+    expect(s.claimClaimSite('town', { husksWithin40m: 0 }).ok).toBe(false); // neither door
+    expect(s.claimClaimSite('town', { husksWithin40m: 0, byForce: true }).ok).toBe(true); // war path
+    expect(useGameStore.getState().claims.home?.siteId).toBe('town');
+  });
+
+  it('outposts need a home; relay_station then claims as an outpost', () => {
+    const s = useGameStore.getState();
+    expect(s.claimClaimSite('relay_station', { husksWithin40m: 0 }).ok).toBe(false);
+    s.claimClaimSite('shore_camp', { husksWithin40m: 0 });
+    useGameStore.setState({
+      inventory: [
+        { uid: 's1', itemId: 'scrap', qty: 20 },
+        { uid: 'w1', itemId: 'wire', qty: 10 },
+      ],
+    });
+    const res = useGameStore.getState().claimClaimSite('relay_station', { husksWithin40m: 0 });
+    expect(res.ok).toBe(true);
+    expect(useGameStore.getState().claims.outposts.map((o) => o.siteId)).toEqual(['relay_station']);
+    // duplicate claim refused
+    expect(useGameStore.getState().claimClaimSite('relay_station', { husksWithin40m: 0 }).ok).toBe(false);
+  });
+
+  it('relocation: cost can draw on the old stockpile; the rest strands', () => {
+    const s = useGameStore.getState();
+    s.claimClaimSite('shore_camp', { husksWithin40m: 0 });
+    useGameStore.setState((st) => ({
+      claims: {
+        ...st.claims,
+        home: { ...st.claims.home!, stockpile: [{ itemId: 'scrap', qty: 15 }, { itemId: 'water_bottle', qty: 2 }] },
+      },
+    }));
+    const res = useGameStore.getState().claimClaimSite('jonah_camp', { husksWithin40m: 0 });
+    expect(res.ok).toBe(true);
+    expect(res.relocatedFrom).toBe('shore_camp');
+    expect(res.stranded).toEqual([{ itemId: 'water_bottle', qty: 2 }]);
+    const st = useGameStore.getState();
+    expect(st.claims.home?.siteId).toBe('jonah_camp');
+    expect(st.base?.poiId).toBe('jonah_camp');
+  });
+});
+
+describe('stage 7 item 6 — turrets: budget, deploy, stockpile feed', () => {
+  it('the budget constant matches Lane 7\u2019s ghost spec', () => {
+    expect(TURRET_POWER_KW).toBe(TURRET_GHOST_SPEC.powerKw);
+    expect(TURRET_GHOST_SPEC.ammoItemId).toBe('ammo_9mm');
+    expect(prefabDef('turret')?.cost).toEqual(TURRET_DEF.cost.map((c) => ({ itemId: c.itemId, qty: c.qty })));
+  });
+
+  it('powerBudget charges 0.8 kW per deployed turret prefab', () => {
+    const base: BaseInstance = {
+      siteId: 'shore_camp', role: 'home',
+      facilities: [{ defId: 'command_post', tier: 1, staffId: null, paused: false }],
+      prefabs: [{ defId: 'turret' }, { defId: 'turret' }], stockpile: [],
+    };
+    const b = powerBudget(base);
+    expect(b.usedKw).toBeCloseTo(1.6, 6);
+    expect(b.ok).toBe(false); // no generator: emplaced but dark
+  });
+
+  beforeEach(() => {
+    useGameStore.setState({
+      inventory: [{ uid: 't1', itemId: 'turret', qty: 1 }],
+      claims: {
+        home: {
+          siteId: 'shore_camp', role: 'home',
+          facilities: [{ defId: 'command_post', tier: 1, staffId: null, paused: false }],
+          prefabs: [], stockpile: [{ itemId: 'ammo_9mm', qty: 250 }],
+        },
+        outposts: [],
+      },
+      toasts: [],
+    });
+  });
+
+  it('deployTurret consumes the crafted item and persists the prefab', () => {
+    const s = useGameStore.getState();
+    expect(s.deployTurret('shore_camp')).toBe(true);
+    const st = useGameStore.getState();
+    expect(st.countItem('turret')).toBe(0);
+    expect(st.claims.home?.prefabs).toEqual([{ defId: 'turret' }]);
+    // a second deploy with no item left refuses
+    expect(st.deployTurret('shore_camp')).toBe(false);
+  });
+
+  it('deployTurret refuses ground you do not hold', () => {
+    expect(useGameStore.getState().deployTurret('town')).toBe(false);
+  });
+
+  it('takeFromStockpile draws down and reports partial takes', () => {
+    const s = useGameStore.getState();
+    expect(s.takeFromStockpile('shore_camp', 'ammo_9mm', 100)).toBe(100);
+    expect(s.takeFromStockpile('shore_camp', 'ammo_9mm', 200)).toBe(150);
+    expect(s.takeFromStockpile('shore_camp', 'ammo_9mm', 10)).toBe(0);
+    expect(useGameStore.getState().claims.home?.stockpile).toEqual([]);
   });
 });
 

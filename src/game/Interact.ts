@@ -6,7 +6,7 @@ import { useGameStore } from '../store/gameStore';
 import { ITEMS, HUSK_LOOT, HUSK_KIND_LOOT, LOG_LOOT, BUSH_LOOT, rollLoot, weightedChance } from '../data/items';
 import { DESIGNED_RECRUITS, SURVIVOR_LOOKS, NPC_LOOKS, type SurvivorLook } from '../data/survivors';
 import { buildHumanFigure } from './figureKit';
-import { CLAIMABLE } from '../data/base';
+import { CLAIMABLE, CLAIM_SITES } from '../data/base';
 import { buildGroundMesh } from './weaponMeshes';
 import { buildItemModel } from './itemModels';
 import { buildFurnitureMesh, applyDisturbed, applyRestored, FURNITURE_LABEL, type FurnitureKind } from './furnitureMeshes';
@@ -61,6 +61,12 @@ export interface InteractHooks {
   setLastSafe: (x: number, z: number) => void;
   setCamp?: (poiId: string) => void; // which campfire opened the sleep dialog
   hostilesNear?: (x: number, z: number, r: number) => number; // base-claim gate
+  /** Stage 7: a relocation stranded the old home's stockpile — Game
+   *  leaves it in the world as a lootable stash at the old site. */
+  onStrandedStockpile?: (fromSiteId: string, items: { itemId: string; qty: number }[]) => void;
+  /** Stage 7 (item 6): turret deployment at a claim — Game owns the
+   *  ghost/confirm flow and the placed-turret system. */
+  deployTurret?: (siteId: string) => void;
   /** World Y of the lighthouse lamp room floor — the beacon lives there now. */
   lampRoomY?: number;
   /** Extra alarm definitions (§4.4) beyond the spec's flagged set. */
@@ -140,6 +146,11 @@ export class InteractSystem {
   private respawnedIds = new Set<string>();
   private freshLabels = new Map<string, string>();
   private respawnSweep = 0;
+  // shared crate dressing + the constructor's saved respawn clocks —
+  // fields so registerContainer can serve runtime registrations too
+  private crateGeo = new THREE.BoxGeometry(0.9, 0.9, 0.9);
+  private crateMat = new THREE.MeshStandardMaterial({ color: 0x6e5a3e, roughness: 1 });
+  private savedLootedAt?: Record<string, number>;
 
   private absMinutes(): number {
     const st = useGameStore.getState();
@@ -185,6 +196,97 @@ export class InteractSystem {
     it?.use();
   }
 
+  /** Register one container: mesh, labels, respawn clock, and its
+   *  interactable. The constructor registers the world's defs through
+   *  here; Game also calls it for containers born at runtime (stage 7:
+   *  a relocated base's stranded stockpile becomes a world stash). */
+  registerContainer(c: ContainerDef): void {
+    const y = c.y ?? this.hooks.groundY(c.x, c.z);
+    const pos = new THREE.Vector3(c.x, y, c.z);
+    let mesh: THREE.Object3D;
+    if (c.meshKind) {
+      // furniture: distinct mesh, sits on the interior floor
+      mesh = buildFurnitureMesh(c.meshKind);
+      mesh.position.set(c.x, y, c.z);
+      mesh.rotation.y = c.rotY ?? 0;
+    } else {
+      const cm = new THREE.Mesh(this.crateGeo, this.crateMat);
+      cm.position.set(c.x, y + 0.45, c.z);
+      cm.rotation.y = this.hooks.rng() * Math.PI;
+      mesh = cm;
+    }
+    mesh.visible = !this.hooks.isLooted(c.id);
+    this.hooks.scene.add(mesh);
+    this.crateMeshes.set(c.id, mesh);
+    this.containersById.set(c.id, c);
+    this.emptyLabels.set(c.id, c.label ? c.label.replace('Search', 'Empty') : 'Empty container');
+    this.freshLabels.set(c.id, c.label ?? 'Search container');
+    // a container a previous session emptied resumes its respawn clock
+    // from the saved timestamp; with none saved it starts now — the
+    // island forgets slowly, and this is when you showed up
+    if (this.hooks.isLooted(c.id) && respawnEligible(c)) {
+      const saved = this.savedLootedAt?.[c.id];
+      this.lootedAtMin.set(c.id, typeof saved === 'number' && Number.isFinite(saved) ? saved : this.absMinutes());
+    }
+    if (c.meshKind) this.furnitureIds.add(c.id);
+    this.interactables.push({
+      id: c.id,
+      kind: 'container',
+      pos,
+      label: this.hooks.isLooted(c.id) ? 'Empty container' : (c.label ?? 'Search container'),
+      use: () => {
+        // fresh state: the constructor's `s` snapshot goes stale after any set()
+        const st = useGameStore.getState();
+        // a restocked container bypasses the save's looted flag and
+        // re-rolls fresh — the respawn clock already vouched for it
+        const restocked = this.respawnedIds.has(c.id);
+        if (restocked) this.respawnedIds.delete(c.id);
+        if (this.hooks.isLooted(c.id) && !restocked) {
+          st.addToast('Nothing left here.');
+          return;
+        }
+        // §4.4 tripwire: opening the POI's major container crosses it.
+        // A lockpick doesn't help you here — only the disarm box does.
+        // Interact applies the toast/rep/flag; the 60m noise burst and
+        // the scout pair are Game's to fire (registry event queue).
+        if (c.alarmPoiId && c.major) {
+          const ev = this.alarms.trip(c.alarmPoiId, 'container_trip');
+          if (ev) {
+            st.addToast(ev.effect.toast);
+            sfx.play('beacon', { volume: 0.8 });
+            if (ev.effect.factionRep) st.addRep(ev.effect.factionRep.faction, ev.effect.factionRep.delta);
+            st.setFlag(`alarm_tripped:${c.alarmPoiId}`);
+          }
+        }
+        // W6 (stage 7): quest containers report their interact once,
+        // on first open (the isLooted early-return above keeps it
+        // one-shot; locked containers never respawn either).
+        if (c.questTarget) {
+          st.questEvent('interact', c.questTarget, 1);
+          if (c.flavor) st.addToast(c.flavor);
+        }
+        // loot preview: roll once, stash it, show the panel — take what you want.
+        // §4.5: the container's biome weights each entry's class, so the
+        // same crate table plays differently in the forest vs in town.
+        if (restocked || !st.lootStash[c.id]) {
+          const items = rollLoot(c.loot, this.hooks.rng, {
+            resourceMult: this.hooks.resourceMult,
+            biome: biomeAt(c.x, c.z),
+          });
+          if (items.length === 0) {
+            st.addToast('Nothing useful inside.');
+            this.setContainerEmptied(c.id);
+            return;
+          }
+          st.stageContainerLoot(c.id, items);
+        }
+        st.openStagedLoot(c.id);
+        if (document.pointerLockElement) document.exitPointerLock();
+        sfx.play('ui', { volume: 0.5 });
+      },
+    });
+  }
+
   constructor(hooks: InteractHooks, pois: Record<string, [number, number]>, containers: ContainerDef[], savedLootedAt?: Record<string, number>) {
     this.hooks = hooks;
     const s = useGameStore.getState();
@@ -195,94 +297,8 @@ export class InteractSystem {
     if (hooks.alarmDefs) this.alarms.registerAll(hooks.alarmDefs);
 
     // ---- containers ----
-    const crateMat = new THREE.MeshStandardMaterial({ color: 0x6e5a3e, roughness: 1 });
-    const crateGeo = new THREE.BoxGeometry(0.9, 0.9, 0.9);
-    for (const c of containers) {
-      const y = c.y ?? hooks.groundY(c.x, c.z);
-      const pos = new THREE.Vector3(c.x, y, c.z);
-      let mesh: THREE.Object3D;
-      if (c.meshKind) {
-        // furniture: distinct mesh, sits on the interior floor
-        mesh = buildFurnitureMesh(c.meshKind);
-        mesh.position.set(c.x, y, c.z);
-        mesh.rotation.y = c.rotY ?? 0;
-      } else {
-        const cm = new THREE.Mesh(crateGeo, crateMat);
-        cm.position.set(c.x, y + 0.45, c.z);
-        cm.rotation.y = hooks.rng() * Math.PI;
-        mesh = cm;
-      }
-      mesh.visible = !hooks.isLooted(c.id);
-      hooks.scene.add(mesh);
-      this.crateMeshes.set(c.id, mesh);
-      this.containersById.set(c.id, c);
-      this.emptyLabels.set(c.id, c.label ? c.label.replace('Search', 'Empty') : 'Empty container');
-      this.freshLabels.set(c.id, c.label ?? 'Search container');
-      // a container a previous session emptied resumes its respawn clock
-      // from the saved timestamp; with none saved it starts now — the
-      // island forgets slowly, and this is when you showed up
-      if (hooks.isLooted(c.id) && respawnEligible(c)) {
-        const saved = savedLootedAt?.[c.id];
-        this.lootedAtMin.set(c.id, typeof saved === 'number' && Number.isFinite(saved) ? saved : this.absMinutes());
-      }
-      if (c.meshKind) this.furnitureIds.add(c.id);
-      this.interactables.push({
-        id: c.id,
-        kind: 'container',
-        pos,
-        label: hooks.isLooted(c.id) ? 'Empty container' : (c.label ?? 'Search container'),
-        use: () => {
-          // fresh state: the constructor's `s` snapshot goes stale after any set()
-          const st = useGameStore.getState();
-          // a restocked container bypasses the save's looted flag and
-          // re-rolls fresh — the respawn clock already vouched for it
-          const restocked = this.respawnedIds.has(c.id);
-          if (restocked) this.respawnedIds.delete(c.id);
-          if (hooks.isLooted(c.id) && !restocked) {
-            st.addToast('Nothing left here.');
-            return;
-          }
-          // §4.4 tripwire: opening the POI's major container crosses it.
-          // A lockpick doesn't help you here — only the disarm box does.
-          // Interact applies the toast/rep/flag; the 60m noise burst and
-          // the scout pair are Game's to fire (registry event queue).
-          if (c.alarmPoiId && c.major) {
-            const ev = this.alarms.trip(c.alarmPoiId, 'container_trip');
-            if (ev) {
-              st.addToast(ev.effect.toast);
-              sfx.play('beacon', { volume: 0.8 });
-              if (ev.effect.factionRep) st.addRep(ev.effect.factionRep.faction, ev.effect.factionRep.delta);
-              st.setFlag(`alarm_tripped:${c.alarmPoiId}`);
-            }
-          }
-          // W6 (stage 7): quest containers report their interact once,
-          // on first open (the isLooted early-return above keeps it
-          // one-shot; locked containers never respawn either).
-          if (c.questTarget) {
-            st.questEvent('interact', c.questTarget, 1);
-            if (c.flavor) st.addToast(c.flavor);
-          }
-          // loot preview: roll once, stash it, show the panel — take what you want.
-          // §4.5: the container's biome weights each entry's class, so the
-          // same crate table plays differently in the forest vs in town.
-          if (restocked || !st.lootStash[c.id]) {
-            const items = rollLoot(c.loot, hooks.rng, {
-              resourceMult: hooks.resourceMult,
-              biome: biomeAt(c.x, c.z),
-            });
-            if (items.length === 0) {
-              st.addToast('Nothing useful inside.');
-              this.setContainerEmptied(c.id);
-              return;
-            }
-            st.stageContainerLoot(c.id, items);
-          }
-          st.openStagedLoot(c.id);
-          if (document.pointerLockElement) document.exitPointerLock();
-          sfx.play('ui', { volume: 0.5 });
-        },
-      });
-    }
+    this.savedLootedAt = savedLootedAt;
+    for (const c of containers) this.registerContainer(c);
 
     // ---- alarm boxes (§4.4): one per alarmed POI, by its first wired
     // container. The 30s disarm timer is a hold interaction Game routes
@@ -485,6 +501,60 @@ export class InteractSystem {
           }
           s.claimBase(c.poiId);
         },
+      });
+    }
+
+    // ---- tiered claim posts (stage 7): Lane 10's CLAIM_SITES run the
+    // §7.2 checklist through the store's claimClaimSite. The legacy post
+    // above (lighthouse) keeps its claimBase flow for old saves. ----
+    for (const site of CLAIM_SITES) {
+      if (site.klass === 'never') continue;
+      const anchor = pois[site.poiId] ?? (site.poiId === 'military_base' ? at('airbase') : undefined);
+      if (!anchor) continue;
+      const x = anchor[0] - 4;
+      const z = anchor[1] + 6;
+      const y = hooks.groundY(x, z);
+      const post = new THREE.Group();
+      const pole = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.06, 0.08, 2.6, 8),
+        new THREE.MeshStandardMaterial({ color: 0x6a5136, roughness: 0.9 }),
+      );
+      pole.position.y = 1.3;
+      post.add(pole);
+      const banner = new THREE.Mesh(
+        new THREE.BoxGeometry(0.9, 0.55, 0.05),
+        new THREE.MeshStandardMaterial({ color: 0x7ab0c9, roughness: 0.7, emissive: 0x0e2a38 }),
+      );
+      banner.position.set(0.45, 2.2, 0);
+      post.add(banner);
+      post.position.set(x, y, z);
+      hooks.scene.add(post);
+      this.interactables.push({
+        id: `claimsite:${site.poiId}`,
+        kind: 'switch',
+        pos: post.position.clone(),
+        label: site.klass === 'home' ? `Claim ${site.name} as home` : `Claim ${site.name}`,
+        use: () => {
+          const st = useGameStore.getState();
+          const hostiles = hooks.hostilesNear?.(anchor[0], anchor[1], 40) ?? 0;
+          const res = st.claimClaimSite(site.poiId, {
+            husksWithin40m: hostiles,
+            byForce: site.warPath === true && hostiles === 0,
+          });
+          if (res.ok && res.relocatedFrom && res.stranded && res.stranded.length > 0) {
+            hooks.onStrandedStockpile?.(res.relocatedFrom, res.stranded);
+          }
+        },
+      });
+      // turret hardpoint (item 6): Game owns the ghost/confirm flow
+      const tx = anchor[0] + 4;
+      const tz = anchor[1] + 6;
+      this.interactables.push({
+        id: `turret:${site.poiId}`,
+        kind: 'switch',
+        pos: new THREE.Vector3(tx, hooks.groundY(tx, tz), tz),
+        label: `Deploy turret — ${site.name}`,
+        use: () => { hooks.deployTurret?.(site.poiId); },
       });
     }
 

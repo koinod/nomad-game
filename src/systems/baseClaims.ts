@@ -338,6 +338,11 @@ export interface PowerBudget {
   ok: boolean;
 }
 
+/** A deployed turret's grid draw — mirrors TURRET_DEF.stats.power /
+ *  TURRET_GHOST_SPEC.powerKw (systems/crafting.ts); a stage-7 test pins
+ *  the two equal so the budget and the ghost can never drift apart. */
+export const TURRET_POWER_KW = 0.8;
+
 export function powerBudget(base: BaseInstance): PowerBudget {
   let capacityKw = 0;
   let usedKw = 0;
@@ -346,6 +351,10 @@ export function powerBudget(base: BaseInstance): PowerBudget {
     if (!td) continue;
     capacityKw += td.generatorKw ?? 0;
     usedKw += td.powerKw;
+  }
+  // deployed turrets draw against the same budget (stage 7)
+  for (const p of base.prefabs) {
+    if (p.defId === 'turret') usedKw += TURRET_POWER_KW;
   }
   return { capacityKw, usedKw, ok: usedKw <= capacityKw };
 }

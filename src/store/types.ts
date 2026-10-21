@@ -31,6 +31,9 @@ export interface FleetEntry {
   fuelLiters?: number; // absolute fuel aboard, liters
   tankLiters?: number; // tank capacity, liters
   burnClass?: number; // fuel burn class (Lane 13's consumption model)
+  /** Stage 7 (§7.8): the engine stamps this when the vehicle sits
+   *  inside the home claim's prefab ring — the garage view's `stored`. */
+  atHome?: boolean;
 }
 
 /** One trailer row for the phone's Vehicles app. */
