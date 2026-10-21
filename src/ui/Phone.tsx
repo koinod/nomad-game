@@ -227,6 +227,20 @@ function LoadoutTab() {
             {sel.qty > 1 && <span className="ml-2 text-[#8a94a3]">×{sel.qty}</span>}
           </div>
           <p className="mb-2 text-xs leading-relaxed text-[#8a94a3]">{selDef.desc}</p>
+          {(selDef.category === 'weapon-ranged' || selDef.category === 'weapon-melee' || sel.condition !== undefined) && (
+            <div className="mb-2 flex items-center gap-2">
+              <span className="text-[11px] text-[#8a94a3]">Condition</span>
+              <div className="h-1.5 flex-1 overflow-hidden rounded bg-[#232b36]">
+                <div
+                  className={`h-full ${(sel.condition ?? 100) < 30 ? 'bg-[#d9534f]' : (sel.condition ?? 100) < 60 ? 'bg-[#e8b34b]' : 'bg-[#7fb069]'}`}
+                  style={{ width: `${Math.round(sel.condition ?? 100)}%` }}
+                />
+              </div>
+              <span className={`font-mono text-[11px] ${(sel.condition ?? 100) < 30 ? 'text-[#d9534f]' : 'text-[#d7dde5]'}`}>
+                {Math.round(sel.condition ?? 100)}%{sel.jammed ? ' · JAM' : ''}
+              </span>
+            </div>
+          )}
           <div className="flex flex-wrap gap-2">
             {equippedSlot
               ? act('Unequip', () => {
@@ -437,6 +451,18 @@ function WorldMap() {
 
 /* ---------------- COMMAND tab ---------------- */
 
+/**
+ * MERGE SLOT — Lane 10 BasePanel (src/ui/BasePanel.tsx on lane/base,
+ * default export). At merge, mount it in place of this section:
+ *   import BasePanel from './BasePanel';
+ *   <BasePanel {...props} />
+ * BasePanel is PROPS-DRIVEN (BasePanelProps in its header): summary /
+ * facilities / buildMenu / stockpile / survivors / board / garage view
+ * models come from Lane 10's systems/baseClaims.ts functions over the
+ * store's `claims` + `moraleRuntime` state (Lane 5 contract) — the
+ * wiring builds those props at this call site. The legacy section below
+ * (single `base` + flat facilities) is the pre-merge fallback.
+ */
 function BaseSection() {
   const base = useGameStore((s) => s.base);
   const buildFacility = useGameStore((s) => s.buildFacility);
@@ -660,7 +686,7 @@ function LogTab() {
         <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Battery</h3>
         <div className="mb-1 h-2 w-full overflow-hidden rounded bg-[#232b36]">
           <div
-            className="h-full rounded bg-[#5aa469]"
+            className={`h-full rounded ${battery > 25 ? 'bg-[#5aa469]' : 'bg-[#d9534f]'}`}
             style={{ width: `${Math.round(battery)}%` }}
           />
         </div>
@@ -983,6 +1009,14 @@ function CharacterTab() {
           </div>
         )}
       </section>
+      {/* MERGE SLOT — Lane 8 SkillsPanel (src/ui/SkillsPanel.tsx on
+          lane/skills, default export, store-driven, no props). At merge:
+          import SkillsPanel from './SkillsPanel'; and render
+          <SkillsPanel /> here — the full §6.2 surface (tier chains,
+          capstone exclusivity, engine lock reasons). The compact
+          SkillsTab above stays as the summary strip per Lane 8's plan.
+          Its LightIndicator named export is Lane 11's HUD piece, fed by
+          the store's `visibility` flag (Lane 5 contract). */}
       <SkillsTab />
     </div>
   );
@@ -1036,6 +1070,13 @@ function TeamTab() {
   return (
     <div className="nomad-scroll flex h-full flex-col gap-4 overflow-y-auto">
       <CrewSection />
+      {/* MERGE SLOT — Lane 13 DispatchPanel (src/ui/DispatchPanel.tsx on
+          lane/dispatch, default export, self-contained, no props). At
+          merge: import DispatchPanel from './DispatchPanel'; render
+          <DispatchPanel /> here and DELETE DispatchSection below —
+          including its "Dispatch is offline" copy. The panel plans by
+          vehicle instance id; FleetEntry.instanceId + the instance-keyed
+          startDispatch overload land with the same merge step. */}
       <DispatchSection />
     </div>
   );
@@ -1077,6 +1118,16 @@ function FinishRow({ weaponUid, current }: { weaponUid: string; current?: string
   );
 }
 
+/**
+ * MERGE SLOT — Lane 7 CraftPanel (src/ui/CraftPanel.tsx on lane/crafting).
+ * At merge, replace this tab's body with the panel:
+ *   import { CraftPanel } from './CraftPanel';
+ *   function CraftTab() { return <CraftPanel />; }
+ * CraftPanel is self-contained (timed queue via systems/crafting +
+ * craftQueue persistence through gameStore's craftQueueBridge) and is a
+ * drop-in per its file header. The hand-rolled instant-craft body below
+ * is the pre-merge fallback — delete it at the swap.
+ */
 function CraftTab() {
   const inventory = useGameStore((s) => s.inventory);
   const equipped = useGameStore((s) => s.equipped);
@@ -1473,7 +1524,7 @@ function HomeScreen() {
     <div className="flex h-full flex-col p-4">
       <div className="mb-1 text-lg font-semibold text-[#d7dde5]">Day {daysElapsed + 1}</div>
       <div className="mb-4 text-xs text-[#8a94a3]">
-        {vehicle ? `In the ${vehicle.name} · fuel ${vehicle.fuelPct}%` : 'On foot · Outer Banks relay in range'}
+        {vehicle ? `In the ${vehicle.name} · fuel ${Math.round(vehicle.fuelPct * 100)}%` : 'On foot · Outer Banks relay in range'}
       </div>
       <div className="grid grid-cols-4 gap-3">
         {APPS.map((a) => (

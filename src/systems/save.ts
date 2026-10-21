@@ -44,12 +44,15 @@ export type RawSaveRecord = Omit<Partial<SaveSnapshot>, 'version'> & {
  * Parallel-cycle note (Lane 5 field contract): the v3 snapshot grows by
  * OPTIONAL fields only — craftQueue (Lane 7's CraftJob[], segment-based:
  * startedAtMin/bankedMin/durationMin/status — see types.ts) /
- * storyChoices / baseExt (Lane 7/9/10 state), joining wave 3's
- * dispatches/journal/scouted/baseQueue and wave
- * 4's appearance. IndexedDB stores records as-is, so current-version
- * saves pass through untouched below and the new fields ride along; the
- * STORE defaults any that are absent on load (see gameStore.loadFromSlot).
- * No version bump, and nothing here fills them in — same rule as wave 3.
+ * storyChoices / baseExt (Lane 7/9/10 state), plus the second batch:
+ * claims + moraleRuntime (Lane 10) and beaconChoice (Lane 9). Joining
+ * wave 3's dispatches/journal/scouted/baseQueue and wave 4's appearance.
+ * IndexedDB stores records as-is, so current-version saves pass through
+ * untouched below and the new fields ride along; the STORE defaults any
+ * that are absent on load (see gameStore.loadFromSlot — including the
+ * legacy base → claims migration and the legacy rep fold, which live
+ * there, not here). No version bump, and nothing here fills them in —
+ * same rule as wave 3.
  */
 export function migrate(record: RawSaveRecord): SaveSnapshot {
   const s: Record<string, unknown> = { ...record };

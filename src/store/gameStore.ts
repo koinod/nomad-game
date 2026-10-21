@@ -842,7 +842,9 @@ export const useGameStore = create<GameState>()((set, get) => {
         if (st.crafts > 0) lines.push(`Crafted ${st.crafts} thing${st.crafts === 1 ? '' : 's'} worth having.`);
         const entry: JournalEntry = {
           id: `j${Date.now().toString(36)}${(uidCounter++).toString(36)}`,
-          atMin: (s.daysElapsed + 1) * 1440,
+          // end of the day being recorded (23:59), not the next midnight —
+          // the Log renders entries by their own day's clock
+          atMin: s.daysElapsed * 1440 + 1439,
           title: `Day ${s.daysElapsed + 1} — the record`,
           lines,
         };
