@@ -85,8 +85,13 @@ function VehiclePanel() {
   );
 }
 
+const WX_ICON: Record<string, string> = {
+  clear: '', cloudy: '☁', rain: '☂', storm: '⛈', fog: '≡',
+};
+
 function Clock() {
   const timeMinutes = useGameStore((s) => s.timeMinutes);
+  const weatherNow = useGameStore((s) => s.weatherNow);
   const hh = String(Math.floor(timeMinutes / 60)).padStart(2, '0');
   const mm = String(Math.floor(timeMinutes % 60)).padStart(2, '0');
   const night = timeMinutes >= 1080 || timeMinutes < 360;
@@ -98,6 +103,11 @@ function Clock() {
       <span className="font-mono text-sm text-[#d7dde5]">
         {hh}:{mm}
       </span>
+      {WX_ICON[weatherNow.state] && (
+        <span className="text-sm text-[#9fc4d8]" title={`${weatherNow.state} — road wetness ${weatherNow.wetPct * 5}%`}>
+          {WX_ICON[weatherNow.state]}
+        </span>
+      )}
     </div>
   );
 }

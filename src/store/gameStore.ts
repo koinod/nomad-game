@@ -90,6 +90,9 @@ interface GameState {
 
   // crafting stations: which workstation the player is standing at (if any)
   nearStation: import('../data/items').StationId | null;
+  /** Live weather (Environment wave): state + road wetness (0..20). */
+  weatherNow: { state: string; wetPct: number };
+  setWeatherNow: (w: { state: string; wetPct: number }) => void;
   setNearStation: (s: import('../data/items').StationId | null) => void;
 
   // noise: loudest recent noise radius at the player (0–100, decays). HUD meter.
@@ -445,6 +448,8 @@ export const useGameStore = create<GameState>()((set, get) => {
     meleeTarget: false,
     hitmark: null,
     nearStation: null,
+    weatherNow: { state: 'clear', wetPct: 0 },
+    setWeatherNow: (weatherNow) => set({ weatherNow }),
 
     poiPositions: {},
 

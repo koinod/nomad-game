@@ -19,6 +19,7 @@ import { InteractSystem, buildContainerDefs } from './Interact';
 import { AnimalManager } from './Animals';
 import { VehicleManager, applyUpgradeVisuals, attachMustangGlb, applyGlbVisuals, itemsWeightKg, type Vehicle } from './Vehicles';
 import { CarPhysics } from './CarPhysics';
+import { WeatherSystem } from './Weather';
 import { canInstallUpgrade, storageCapKg, collisionLossFactor, ramDamageFactor } from '../data/upgrades';
 import type { InvItem, TrailerSave } from '../store/types'; // TrailerSave: legacy snapshot field, always [] now
 import { floorYAt, floorYAtRef, resolveCollisions, type Collider, type FloorRect } from './Colliders';
@@ -66,6 +67,8 @@ export class Game {
   private searching: { id: string; label: string; t: number; dur: number; x: number; z: number; hp: number } | null = null;
   vehicles!: VehicleManager;
   private carPhysics: CarPhysics | null = null;
+  private weather = new WeatherSystem({ seed: 987654321 });
+  private lastClockMin = -1;
   private ramT = 0;
   private buildKey = '';
   driving: Vehicle | null = null;
@@ -610,7 +613,25 @@ export class Game {
     this.skyT -= dt;
     if (this.skyT <= 0 && this.world) {
       this.skyT = 0.25;
-      const sky = this.world.updateSky(s.timeMinutes);
+      // weather ticks on game-clock time, then bends the sky + grip
+      const nowMin = s.daysElapsed * 1440 + s.timeMinutes;
+      if (this.lastClockMin >= 0) {
+        this.weather.update(Math.max(0, nowMin - this.lastClockMin) * 60, s.timeMinutes / 60);
+      }
+      this.lastClockMin = nowMin;
+      const wx = this.weather.snapshot();
+      const sky = this.world.updateSky(s.timeMinutes, {
+        cloudCover: wx.cloudCover,
+        fog: wx.fog,
+        precipitation: wx.precipitation,
+        windX: Math.cos(wx.windDirRad) * wx.windSpeed * 14,
+        windZ: Math.sin(wx.windDirRad) * wx.windSpeed * 14,
+      });
+      this.carPhysics?.setGripScale(this.weather.gripFactor());
+      const wetPct = Math.round(wx.wetness * 20);
+      if (s.weatherNow.state !== wx.state || s.weatherNow.wetPct !== wetPct) {
+        s.setWeatherNow({ state: wx.state, wetPct });
+      }
       if (sky.isNight !== this.lastNight) {
         this.lastNight = sky.isNight;
         ambience.setNight(sky.isNight);
