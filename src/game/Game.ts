@@ -20,6 +20,8 @@ import { AnimalManager } from './Animals';
 import { VehicleManager, applyUpgradeVisuals, attachMustangGlb, attachGt500Glb, placeSeahawk, applyGlbVisuals, itemsWeightKg, type Vehicle } from './Vehicles';
 import { CarPhysics } from './CarPhysics';
 import { WeatherSystem } from './Weather';
+import { CloudLayer, updateWindUniforms } from './Clouds';
+import { PostFX } from './PostFX';
 import { canInstallUpgrade, storageCapKg, collisionLossFactor, ramDamageFactor } from '../data/upgrades';
 import type { InvItem, TrailerSave } from '../store/types'; // TrailerSave: legacy snapshot field, always [] now
 import { floorYAt, floorYAtRef, resolveCollisions, type Collider, type FloorRect } from './Colliders';
@@ -75,6 +77,11 @@ export class Game {
   vehicles!: VehicleManager;
   private carPhysics: CarPhysics | null = null;
   private weather = new WeatherSystem({ seed: 987654321 });
+  // Lane 12 ambience: post chain + cloud deck, built in init, torn
+  // down in dispose; sunElev caches the 4Hz sky pass for per-frame use.
+  private postfx: PostFX | null = null;
+  private clouds: CloudLayer | null = null;
+  private sunElev = 0.5;
   private lastClockMin = -1;
   private lastPlayerHp = -1;
   private ramT = 0;
@@ -158,6 +165,13 @@ export class Game {
     this.world = new World(this.scene, opts.seed);
     this.world.build();
     this.world.setupEnvironment(this.renderer);
+
+    // Lane 12: the post chain (boot tier classified by GameView's
+    // primePostFxBoot, read synchronously by the PostFX constructor)
+    // and the weather-driven cloud deck.
+    this.postfx = new PostFX(this.renderer, this.scene, this.camera);
+    this.clouds = new CloudLayer();
+    this.scene.add(this.clouds.group);
     this.fx = new Fx(this.scene);
     this.projectiles = new ProjectileManager(this.scene);
 
@@ -326,7 +340,7 @@ export class Game {
     this.lastNight = this.isNight();
     ambience.start();
     ambience.setNight(this.lastNight);
-    this.world.updateSky(s0.timeMinutes);
+    this.sunElev = this.world.updateSky(s0.timeMinutes).sunElevation;
     this.initialized = true;
   }
 
@@ -376,6 +390,10 @@ export class Game {
     ambience.stop();
     this.husks?.dispose();
     this.animals?.dispose();
+    this.postfx?.dispose();
+    this.postfx = null;
+    this.clouds?.dispose();
+    this.clouds = null;
     this.world?.dispose();
     this.renderer?.dispose();
     this.renderer = null;
@@ -645,6 +663,7 @@ export class Game {
         windX: Math.cos(wx.windDirRad) * wx.windSpeed * 14,
         windZ: Math.sin(wx.windDirRad) * wx.windSpeed * 14,
       });
+      this.sunElev = sky.sunElevation;
       this.carPhysics?.setGripScale(this.weather.gripFactor());
       const wetPct = Math.round(wx.wetness * 20);
       if (s.weatherNow.state !== wx.state || s.weatherNow.wetPct !== wetPct) {
@@ -658,7 +677,32 @@ export class Game {
     this.world?.update(dt, this.elapsed, s.pos[0], s.pos[2]);
     this.interact?.update(dt, this.elapsed);
 
-    this.renderer?.render(this.scene!, this.camera!);
+    // Lane 12 ambience, per frame: the cloud deck rides the live weather
+    // snapshot + cached sun; wind uniforms feed World's sway-patched
+    // foliage; light shafts face the camera; the grade follows the sun.
+    if (this.world && this.camera) {
+      const wxNow = this.weather.snapshot();
+      this.clouds?.update(dt, s.pos[0], s.pos[2], wxNow, this.sunElev);
+      updateWindUniforms(wxNow, this.elapsed);
+      this.world.lightShafts?.update(this.camera.position, this.sunElev, wxNow);
+      this.postfx?.setGradeInputs(this.sunElev, wxNow.precipitation);
+    }
+
+    // Render through the PostFX chain when built (the 'off' tier is a
+    // plain renderer.render inside the chain; the governor evaluates
+    // per render). DoF focus = camera↔player in third person; null in
+    // first person stands DoF down entirely.
+    if (this.postfx && this.scene && this.camera) {
+      const p = this.player;
+      this.postfx.setFocusDistance(
+        p && !p.firstPerson && !this.cutscene
+          ? this.camera.position.distanceTo(p.pos)
+          : null,
+      );
+      this.postfx.render(dt);
+    } else {
+      this.renderer?.render(this.scene!, this.camera!);
+    }
     resetEdgeTriggers();
   }
 

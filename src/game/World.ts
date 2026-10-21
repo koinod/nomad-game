@@ -10,6 +10,8 @@ import type { KitBuilding, KitResult } from './kit';
 import type { BiomeId } from './Game';
 import type { StationId } from '../data/items';
 import type { Collider } from './Colliders';
+import { LightShafts, tightenFog } from './PostFX';
+import { applyWindSway } from './Clouds';
 
 export const WORLD = {
   xMin: -700, xMax: 700,
@@ -285,6 +287,9 @@ export class World {
   // physical crafting stations: { station, x, z } + their colliders
   stations: { station: StationId; x: number; z: number }[] = [];
   stationColliders: Collider[] = [];
+  /** Lane 12: light shafts hung at forest anchors (built in
+   *  buildScatter); Game drives update() per frame with camera + sun. */
+  lightShafts: LightShafts | null = null;
 
   private sun!: THREE.DirectionalLight;
   private skyAdj: SkyAdjust = weatherSkyAdjust(undefined);
@@ -635,6 +640,10 @@ export class World {
     const snagMat = new THREE.MeshStandardMaterial({ color: 0x6a655c, roughness: 1 });
     const pineMat = new THREE.MeshStandardMaterial({ color: 0x2c5230, roughness: 1 });
     const leafMat = new THREE.MeshStandardMaterial({ color: 0x3a6a34, roughness: 1 });
+    // Lane 12: canopies sway on the shared wind uniforms (Clouds.ts) —
+    // crowns/cones only, trunks hold. Grass is patched in buildGrass.
+    applyWindSway(pineMat, { strength: 0.3, height: 2.6 });
+    applyWindSway(leafMat, { strength: 0.35, height: 1.6 });
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const e = new THREE.Euler();
@@ -691,6 +700,15 @@ export class World {
       im.castShadow = true;
       this.scene.add(im);
     }
+
+    // Lane 12: light-shaft anchors — every 15th tree spot, capped at 26,
+    // bases on the ground. Game drives the shafts per frame.
+    const shaftAnchors = treeSpots
+      .filter((_, i) => i % 15 === 0)
+      .slice(0, 26)
+      .map((t) => ({ x: t.x, y: this.groundY(t.x, t.z), z: t.z }));
+    this.lightShafts = new LightShafts(shaftAnchors);
+    this.scene.add(this.lightShafts.group);
 
     // Rocks: scattered, more on beach/dune.
     const rockGeo = new THREE.IcosahedronGeometry(0.8, 0);
@@ -794,6 +812,8 @@ export class World {
     const geo = new THREE.ConeGeometry(0.16, 0.9, 4);
     geo.translate(0, 0.45, 0);
     const mat = new THREE.MeshStandardMaterial({ roughness: 1 });
+    // Lane 12: grass tufts sway on the same shared wind as the canopies.
+    applyWindSway(mat, { strength: 0.18, height: 0.9 });
     const grass = new THREE.InstancedMesh(geo, mat, spots.length);
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
@@ -1059,8 +1079,13 @@ export class World {
     this.wxWindX = wx?.windX ?? 0;
     this.wxWindZ = wx?.windZ ?? 0;
     const fog = this.scene.fog as THREE.Fog;
-    fog.near = this.skyAdj.fogNear;
-    fog.far = this.skyAdj.fogFar;
+    // Lane 12 fog tightening: on a clear sky the tuned range (95→620)
+    // keeps the far shore a silhouette instead of melting into fog
+    // colour; weather collapse is never loosened (tightenFog mins).
+    const fogF = wx ? clamp(wx.fog + wx.precipitation * 0.45, 0, 1) : 0;
+    const tightened = tightenFog(this.skyAdj.fogNear, this.skyAdj.fogFar, fogF);
+    fog.near = tightened.fogNear;
+    fog.far = tightened.fogFar;
     const t01 = timeMinutes / 1440;
     const ang = (t01 - 0.25) * Math.PI * 2; // sunrise 06:00 at horizon
     const elev = Math.sin(ang);
@@ -1138,6 +1163,8 @@ export class World {
   }
 
   dispose(): void {
+    this.lightShafts?.dispose();
+    this.lightShafts = null;
     if (this.envTex) this.envTex.dispose();
     if (this.pmrem) this.pmrem.dispose();
     this.scene.traverse((o) => {
