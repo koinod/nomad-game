@@ -144,11 +144,61 @@ export interface WindSwayOptions {
   height?: number;
 }
 
+/** Spatial frequency of the sway field (rad/m): one full gust wave
+ *  every ~24 m, so a gust visibly sweeps across a stand of trees
+ *  instead of every tree pulsing in place. */
+export const SWAY_WAVE_NUMBER = 0.26;
+
+/**
+ * The sway field (Item 2, 2026-10-21 — rewritten). Displacement is a
+ * pure function of WORLD position and time:
+ *
+ *   phase = (worldPos · windDir) * k − t * (0.9 + 1.1 * strength)
+ *   wave  = 0.75 * sin(phase) + 0.25 * sin(0.53 * phase + 1.7)
+ *   amp   = heightFrac² * maxAmp * (0.25 + 0.75 * windStrength)
+ *   D     = windDir * wave * amp          (|D| <= maxAmp, always)
+ *
+ * Same world position ⇒ same displacement, ALWAYS — that is the whole
+ * point. The shader this replaces phased every vertex by gl_VertexID,
+ * so duplicated seam vertices (same position, different IDs) were
+ * displaced differently and the low-poly crowns tore open along their
+ * seams ("trees split"), while each vertex oscillating on its own
+ * phase at up to ~2.9 rad/s read as shaking. A traveling wave over
+ * world space cannot tear (it is continuous everywhere) and its
+ * period is 3–7 s: trees sway, they do not vibrate.
+ *
+ * This TS mirror is the testable truth; the GLSL in applyWindSway
+ * implements the identical formula. heightFrac is the vertex's
+ * object-space height fraction (clamped 0..1) — object Y is safe to
+ * key on because seam duplicates share their full object position.
+ */
+export function swayDisplacementAt(
+  worldX: number,
+  worldZ: number,
+  heightFrac: number,
+  time: number,
+  windStrength: number,
+  dirX: number,
+  dirZ: number,
+  maxAmp: number,
+): { x: number; z: number } {
+  const h = Math.min(1, Math.max(0, heightFrac));
+  const ws = Math.min(1, Math.max(0, windStrength));
+  const phase = (worldX * dirX + worldZ * dirZ) * SWAY_WAVE_NUMBER - time * (0.9 + 1.1 * ws);
+  const wave = 0.75 * Math.sin(phase) + 0.25 * Math.sin(phase * 0.53 + 1.7);
+  const amp = h * h * maxAmp * (0.25 + 0.75 * ws);
+  return { x: dirX * wave * amp, z: dirZ * wave * amp };
+}
+
 /**
  * Patch a standard material so its vertices sway with the shared wind
- * uniforms. Sway grows with the square of height (trunks hold, tips
- * move) and oscillates on the gust pattern. This is a HOOK for World
- * to call on its foliage materials — Clouds never reaches into World.
+ * uniforms, displaced by the world-position field above. The shader
+ * computes the vertex's world position (instance-aware), evaluates
+ * the field there, and rotates the displacement back into object
+ * space (transpose of the model*instance 3x3, normalized by the
+ * squared scale — exact for the uniform-scale instances World
+ * scatters). This is a HOOK for World to call on its foliage
+ * materials — Clouds never reaches into World.
  */
 export function applyWindSway(
   material: THREE.MeshStandardMaterial,
@@ -176,17 +226,33 @@ export function applyWindSway(
         '#include <begin_vertex>',
         `#include <begin_vertex>
          {
+           // world position of the undisplaced vertex (instance-aware)
+           vec4 swayWorld4 = vec4(position, 1.0);
+           #ifdef USE_INSTANCING
+             swayWorld4 = instanceMatrix * swayWorld4;
+           #endif
+           swayWorld4 = modelMatrix * swayWorld4;
+           // the field — identical formula to swayDisplacementAt
            float swayH = clamp(position.y / uSwayHeight, 0.0, 1.0);
-           float swayPhase = uWindTime * (1.15 + uWindStrength * 1.7)
-             + float(gl_VertexID % 97) * 0.37;
-           float swayWave = sin(swayPhase) + 0.5 * sin(swayPhase * 2.33 + 1.3);
-           float swayAmp = swayH * swayH * uSwayStrength * (0.3 + uWindStrength);
-           transformed.xz += uWindDir * (swayWave * swayAmp);
+           float swayPhase = dot(swayWorld4.xz, uWindDir) * ${SWAY_WAVE_NUMBER.toFixed(3)}
+             - uWindTime * (0.9 + uWindStrength * 1.1);
+           float swayWave = sin(swayPhase) * 0.75 + sin(swayPhase * 0.53 + 1.7) * 0.25;
+           float swayAmp = swayH * swayH * uSwayStrength * (0.25 + 0.75 * uWindStrength);
+           vec2 swayDispW = uWindDir * (swayWave * swayAmp);
+           // world displacement -> object space (transpose = inverse
+           // rotation; divide by squared scale — exact for uniform
+           // scale, which is what every sway instance uses)
+           mat3 swayRot = mat3(modelMatrix);
+           #ifdef USE_INSTANCING
+             swayRot = swayRot * mat3(instanceMatrix);
+           #endif
+           float swayScale2 = max(dot(swayRot[0], swayRot[0]), 0.0001);
+           transformed += transpose(swayRot) * vec3(swayDispW.x, 0.0, swayDispW.y) / swayScale2;
          }`,
       );
   };
   // Patched and unpatched standard materials must not share a program.
-  material.customProgramCacheKey = () => 'nomad-wind-sway';
+  material.customProgramCacheKey = () => 'nomad-wind-sway-v2';
   material.needsUpdate = true;
 }
 
