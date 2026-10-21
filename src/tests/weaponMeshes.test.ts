@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { ITEMS } from '../data/items';
-import { buildGroundMesh, buildHandMesh } from '../game/weaponMeshes';
+import { buildGroundMesh, buildHandMesh, gripFor, WEAPON_GRIPS } from '../game/weaponMeshes';
 
 function meshCount(g: THREE.Group): number {
   let n = 0;
@@ -132,5 +132,51 @@ describe('throwable meshes (the ground art the reuse list used to shadow)', () =
     for (const id of ['frag', 'molotov', 'flashbang', 'smoke', 'boombox']) {
       expect(meshCount(buildHandMesh(id)), id).toBeGreaterThanOrEqual(2);
     }
+  });
+});
+
+// Item 7 (2026-10-21 playtest: weapons "held by either one or two
+// hands") — grip definitions the figure IK poses to.
+describe('WEAPON_GRIPS (Item 7)', () => {
+  it('every ranged weapon in ITEMS has an explicit grip definition', () => {
+    for (const def of Object.values(ITEMS)) {
+      if (def.category === 'weapon-ranged') {
+        expect(WEAPON_GRIPS[def.id], def.id).toBeDefined();
+      }
+    }
+  });
+
+  it('long guns are two-handed, support hand genuinely forward on the forend', () => {
+    for (const id of ['carbine', 'dmr', 'hunting_rifle', 'shotgun', 'crossbow', 'smg']) {
+      const g = gripFor(id);
+      expect(g.hands, id).toBe(2);
+      expect(g.support, id).toBeDefined();
+      expect(g.support![2], id).toBeGreaterThan(0.15); // forward of the grip, on the forend/pump
+    }
+  });
+
+  it('sidearms carry their defined holds', () => {
+    // pistol + revolver: two-handed, support stacked at the grip
+    for (const id of ['pistol', 'revolver']) {
+      const g = gripFor(id);
+      expect(g.hands, id).toBe(2);
+      expect(Math.abs(g.support![2]), id).toBeLessThan(0.05);
+    }
+    // flare gun: one hand is its defined hold
+    expect(gripFor('flare_gun').hands).toBe(1);
+    expect(gripFor('flare_gun').support).toBeUndefined();
+  });
+
+  it('melee falls back to a one-handed grip at the origin', () => {
+    const g = gripFor('machete');
+    expect(g.hands).toBe(1);
+    expect(g.primary).toEqual([0, 0, 0]);
+  });
+
+  it('mods never move grips — the table is keyed by the base weapon only', () => {
+    const before = gripFor('carbine');
+    buildHandMesh('carbine', undefined, ['foregrip', 'reflex_sight']);
+    expect(gripFor('carbine')).toBe(before); // same definition object
+    expect(gripFor('carbine')).toBe(WEAPON_GRIPS['carbine']);
   });
 });

@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { input, consumeLook } from './input';
 import { tryMelee, tryRanged, meleeStatsFor, equippedMeleeId, equippedRangedDef } from './Combat';
-import { buildHandMesh, activeHandItemId } from './weaponMeshes';
+import { buildHandMesh, activeHandItemId, gripFor } from './weaponMeshes';
 import { noiseClassRadius } from './noise';
 import { getGame } from './instance';
 import type { AnimalManager, AnimalKill } from './Animals';
@@ -24,7 +24,7 @@ function frameDecay(perFrameAt60: number, dt: number): number {
   return Math.exp(Math.log(perFrameAt60) * 60 * Math.max(dt, 0));
 }
 import { useGameStore } from '../store/gameStore';
-import { buildHumanFigure } from './figureKit';
+import { buildHumanFigure, solveArmIK } from './figureKit';
 import { XP_EVENTS, type XpEventId } from '../systems/skills';
 import { ITEMS } from '../data/items';
 
@@ -192,6 +192,10 @@ export class Player {
   private handAnchor!: THREE.Group; // right-hand weapon mount
   private aimPoint = new THREE.Vector3(); // Item 6: smoothed crosshair convergence point (world)
   private aimPointInit = false;
+  private elbowL: THREE.Group | null = null; // Item 7: figureKit elbow pivots
+  private elbowR: THREE.Group | null = null;
+  private armSeg: { upper: number; fore: number } | null = null; // Item 7: IK segment lengths
+  private handMesh: THREE.Group | null = null; // current in-hand mesh (support-grip lookups)
   private handItemId: string | null = null;
   private handKey = ''; // itemId + finish — the hand mesh's build signature
   private smoothCamMinY = 0; // smoothed ground clearance — kills the hard-clamp snap
@@ -327,8 +331,20 @@ export class Player {
     this.legR = fig.legR;
     this.armL = fig.armL;
     this.armR = fig.armR;
-    // the weapon mount rides the (possibly brand-new) right arm
-    if (this.handAnchor) this.armR.add(this.handAnchor);
+    this.elbowL = fig.elbowL ?? null;
+    this.elbowR = fig.elbowR ?? null;
+    this.armSeg = fig.armSeg ?? null;
+    // the weapon mount rides the right FOREARM at the hand (Item 7):
+    // on the shoulder pivot it would stay behind when the elbow bends
+    if (this.handAnchor) {
+      if (this.elbowR && this.armSeg) {
+        this.elbowR.add(this.handAnchor);
+        this.handAnchor.position.set(0, -this.armSeg.fore, 0.08);
+      } else {
+        this.armR.add(this.handAnchor);
+        this.handAnchor.position.set(0, -0.7, 0.08);
+      }
+    }
   }
 
   /** Swap the whole figure for a fresh build (appearance/gear changed). */
@@ -469,11 +485,13 @@ export class Player {
     for (const anchor of [this.handAnchor, this.vmAnchor]) {
       while (anchor.children.length > 0) anchor.remove(anchor.children[0]);
     }
+    this.handMesh = null;
     if (want) {
       const mesh = buildHandMesh(want, activeInst?.finish, activeInst?.mods);
       // slight grip tilt so weapons read naturally in hand
       mesh.rotation.x = 0.15;
       this.handAnchor.add(mesh);
+      this.handMesh = mesh;
       // view-model variant points down the lens
       const vm = buildHandMesh(want, activeInst?.finish, activeInst?.mods);
       vm.rotation.y = Math.PI; // hand meshes point +Z; the lens looks -Z
@@ -770,35 +788,71 @@ export class Player {
       const rangedNow = useGameStore.getState().equipped.ranged != null;
       const posing = rangedNow && this.attackT <= 0 && this.blockBlend < 0.5 && this.recoilT <= 0;
       if (posing && (!sprinting || this.aimLevel > 0)) {
-        // the arm shares the aim pitch: steep up/down aims bend the
-        // arm, not just the wrist — the old fixed -1.52/-1.2 left the
-        // gun level while shots followed the camera pitch (Item 6)
-        const aimX = clamp((this.aimLevel > 0 ? -1.52 : -1.2) - this.camPitch * 0.7, -2.7, -0.3);
-        this.armR.rotation.x = lerp(this.armR.rotation.x, aimX, expDamp(10, dt));
-        this.armL.rotation.x = lerp(this.armL.rotation.x, -1.1, expDamp(8, dt));
-        this.armL.rotation.y = lerp(this.armL.rotation.y, 0.5, expDamp(8, dt));
-        // Item 6: the in-hand gun POINTS at the crosshair — the hand
-        // anchor aims at the camera ray's convergence point (nearest
-        // husk / ground / range), smoothed so target swaps don't snap
-        // the barrel. The view model needs no equivalent: it is
-        // camera-parented, so its barrel already rides the lens.
-        if (this.drawT <= 0) {
-          const dist = this.convDistFor(ctx.camera, ctx.husks, ctx.groundY, equippedRangedDef()?.range ?? 45);
-          const camDir = new THREE.Vector3();
-          ctx.camera.getWorldDirection(camDir);
-          const target = ctx.camera.position.clone().addScaledVector(camDir, dist);
-          if (!this.aimPointInit) {
-            this.aimPoint.copy(target);
-            this.aimPointInit = true;
-          }
-          this.aimPoint.lerp(target, expDamp(18, dt));
+        // Item 6: the crosshair's world point this frame (nearest husk
+        // / ground / range along the camera ray), smoothed so target
+        // swaps don't snap the barrel or the hands.
+        const dist = this.convDistFor(ctx.camera, ctx.husks, ctx.groundY, equippedRangedDef()?.range ?? 45);
+        const camDir = new THREE.Vector3();
+        ctx.camera.getWorldDirection(camDir);
+        const convTarget = ctx.camera.position.clone().addScaledVector(camDir, dist);
+        if (!this.aimPointInit) {
+          this.aimPoint.copy(convTarget);
+          this.aimPointInit = true;
+        }
+        this.aimPoint.lerp(convTarget, expDamp(18, dt));
+        const sNow = useGameStore.getState();
+        const rInst = sNow.equipped.ranged ? sNow.inventory.find((i) => i.uid === sNow.equipped.ranged) : undefined;
+        const grip = rInst ? gripFor(rInst.itemId) : null;
+        if (this.drawT <= 0 && this.elbowR && this.elbowL && this.armSeg && grip) {
+          // ---- Item 7: two-bone IK hold. Right hand on the aim line
+          // at a bent-arm hold; barrel converged by the anchor; left
+          // hand SOLVED onto the weapon's support grip (Item 7's grip
+          // table) — it used to be a fixed lerp that left it dangling
+          // wherever the pose happened to put it.
+          const fwdW = new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+          const drop = new THREE.Vector3(0, -0.55, 0);
+          const shoulderR = new THREE.Vector3();
+          this.armR.getWorldPosition(shoulderR);
+          const aimDirW = this.aimPoint.clone().sub(shoulderR).normalize();
+          const reach = (this.armSeg.upper + this.armSeg.fore) * 0.78;
+          const handTargetR = shoulderR.clone().addScaledVector(aimDirW, reach);
+          const poleR = shoulderR.clone().addScaledVector(fwdW, -0.8).add(drop);
+          solveArmIK(this.armR as THREE.Group, this.elbowR, this.armSeg, handTargetR, poleR);
+          // the gun points at the crosshair (Item 6) — the anchor
+          // rides the forearm now, so this follows the solved hand
           this.handAnchor.lookAt(this.aimPoint);
+          if (grip.hands === 2 && grip.support && this.handMesh) {
+            this.handMesh.updateWorldMatrix(true, false);
+            const supportW = this.handMesh.localToWorld(new THREE.Vector3(...grip.support));
+            const shoulderL = new THREE.Vector3();
+            this.armL.getWorldPosition(shoulderL);
+            const poleL = shoulderL.clone().addScaledVector(fwdW, -0.8).add(drop);
+            solveArmIK(this.armL as THREE.Group, this.elbowL, this.armSeg, supportW, poleL);
+          } else {
+            // one-handed hold: the left arm stays free — hand it back
+            // to locomotion, unwinding any cross-body angle
+            this.armL.rotation.y = lerp(this.armL.rotation.y, 0, expDamp(8, dt));
+            this.elbowL.rotation.x = lerp(this.elbowL.rotation.x, -0.12, expDamp(8, dt));
+          }
+        } else {
+          // draw-in / no-elbow fallback: the authored pose. The arm
+          // shares the aim pitch — steep aims bend the arm, not just
+          // the wrist (the old fixed pose left the gun level while
+          // shots followed the camera pitch, Item 6).
+          const aimX = clamp((this.aimLevel > 0 ? -1.52 : -1.2) - this.camPitch * 0.7, -2.7, -0.3);
+          this.armR.rotation.x = lerp(this.armR.rotation.x, aimX, expDamp(10, dt));
+          this.armL.rotation.x = lerp(this.armL.rotation.x, -1.1, expDamp(8, dt));
+          this.armL.rotation.y = lerp(this.armL.rotation.y, 0.5, expDamp(8, dt));
+          if (this.drawT <= 0) this.handAnchor.lookAt(this.aimPoint);
         }
       } else {
         this.armL.rotation.y = lerp(this.armL.rotation.y, 0, expDamp(8, dt));
         // restore the anchor's carry orientation (build-time tilt)
         this.handAnchor.rotation.set(Math.PI / 2, 0, 0);
         this.aimPointInit = false;
+        // elbows relax to a natural slight bend when nothing is held up
+        if (this.elbowL) this.elbowL.rotation.x = lerp(this.elbowL.rotation.x, -0.12, expDamp(8, dt));
+        if (this.elbowR) this.elbowR.rotation.x = lerp(this.elbowR.rotation.x, -0.12, expDamp(8, dt));
       }
     }
 
@@ -1324,6 +1378,8 @@ export class Player {
     this.armR.rotation.x = 0;
     this.armL.rotation.z = 0;
     this.armR.rotation.z = 0;
+    if (this.elbowL) this.elbowL.rotation.set(0, 0, 0);
+    if (this.elbowR) this.elbowR.rotation.set(0, 0, 0);
   }
 
   /** Vehicles drive from the chase camera: force the mode from outside. */

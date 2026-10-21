@@ -14,7 +14,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
-  buildHumanFigure, buildHuskFigure, bindFigureGLB,
+  buildHumanFigure, buildHuskFigure, bindFigureGLB, solveArmIK,
   type FigureRig, type HuskFigureKind,
 } from '../game/figureKit';
 import { Husk, HuskManager, type HuskCtx, type HuskKind, type SpawnZone } from '../game/Husks';
@@ -390,5 +390,93 @@ describe('authored shambler GLB (wave 1)', () => {
     // other kinds refuse — their interim meshes stand
     const st = new Husk('auth_st', 'stalker', 0, 0, 'test', groundY);
     expect(st.useAuthoredShambler(tmpl)).toBe(false);
+  });
+});
+
+// Item 7 (2026-10-21 playtest: weapons "held by either one or two
+// hands") — the procedural rig grew elbows, and the two-bone solve
+// must put the hand where it's told.
+describe('arm IK (Item 7)', () => {
+  function rigAtOrigin() {
+    const rig = buildHumanFigure({ height: 1.8, palette: PAL });
+    const scene = new THREE.Scene();
+    scene.add(rig.group);
+    rig.group.updateMatrixWorld(true);
+    return rig;
+  }
+  function handWorld(rig: FigureRig): THREE.Vector3 {
+    // hand center = elbow origin + forearm direction * armSeg.fore
+    return rig.elbowR!.localToWorld(new THREE.Vector3(0, -rig.armSeg!.fore, 0));
+  }
+
+  it('procedural rigs expose elbows + segment lengths; total reach is the old arm length', () => {
+    const rig = rigAtOrigin();
+    expect(rig.elbowL).toBeTruthy();
+    expect(rig.elbowR).toBeTruthy();
+    expect(rig.armSeg!.upper + rig.armSeg!.fore).toBeCloseTo(1.8 * 0.36 + 0.02, 5);
+  });
+
+  it('places the right hand on a reachable target', () => {
+    const rig = rigAtOrigin();
+    const target = new THREE.Vector3(0.3, 1.3, 0.45); // up and in front of the chest
+    const shoulder = new THREE.Vector3();
+    rig.armR.getWorldPosition(shoulder);
+    const pole = shoulder.clone().add(new THREE.Vector3(0, -0.55, -0.8)); // back + down
+    solveArmIK(rig.armR, rig.elbowR, rig.armSeg!, target, pole);
+    rig.group.updateMatrixWorld(true);
+    expect(handWorld(rig).distanceTo(target)).toBeLessThan(0.01);
+  });
+
+  it('the elbow bends toward the pole (back-down), never wings up', () => {
+    const rig = rigAtOrigin();
+    const target = new THREE.Vector3(0.1, 1.45, 0.5);
+    const shoulder = new THREE.Vector3();
+    rig.armR.getWorldPosition(shoulder);
+    const pole = shoulder.clone().add(new THREE.Vector3(0, -0.55, -0.8));
+    solveArmIK(rig.armR, rig.elbowR, rig.armSeg!, target, pole);
+    rig.group.updateMatrixWorld(true);
+    const elbowW = new THREE.Vector3();
+    rig.elbowR!.getWorldPosition(elbowW);
+    // the elbow's offset from the shoulder->target LINE must point
+    // along the pole's perpendicular component (back-down) — the
+    // elbow hangs off the aim line on the pole side, never above it
+    const dirST = target.clone().sub(shoulder).normalize();
+    const a = dirST.dot(elbowW.clone().sub(shoulder));
+    const linePoint = shoulder.clone().addScaledVector(dirST, a);
+    const offset = elbowW.clone().sub(linePoint);
+    let bend = pole.clone().sub(shoulder);
+    bend.addScaledVector(dirST, -bend.dot(dirST)).normalize();
+    expect(offset.length()).toBeGreaterThan(0.1); // genuinely bent, not straight
+    expect(offset.normalize().dot(bend)).toBeGreaterThan(0.9); // on the pole side
+    expect(elbowW.y).toBeLessThan(linePoint.y); // and it hangs BELOW the aim line
+  });
+
+  it('unreachable targets clamp to full extension toward the target', () => {
+    const rig = rigAtOrigin();
+    const shoulder = new THREE.Vector3();
+    rig.armR.getWorldPosition(shoulder);
+    const target = shoulder.clone().add(new THREE.Vector3(0, 0.2, 5)); // 5 m away: impossible
+    const pole = shoulder.clone().add(new THREE.Vector3(0, -0.55, -0.8));
+    solveArmIK(rig.armR, rig.elbowR, rig.armSeg!, target, pole);
+    rig.group.updateMatrixWorld(true);
+    const hand = handWorld(rig);
+    const reach = rig.armSeg!.upper + rig.armSeg!.fore;
+    expect(hand.distanceTo(shoulder)).toBeCloseTo(reach * 0.999, 2);
+    // and it points the right way: hand is far in front (+z)
+    expect(hand.z).toBeGreaterThan(0.5);
+  });
+
+  it('an elbow-less rig still aims its shoulder at the target (GLB fallback)', () => {
+    const rig = rigAtOrigin();
+    const target = new THREE.Vector3(0, 1.0, 0.55);
+    const pole = new THREE.Vector3(0, 0.5, -1);
+    solveArmIK(rig.armL, undefined, rig.armSeg!, target, pole);
+    rig.group.updateMatrixWorld(true);
+    const elbowStandIn = new THREE.Vector3();
+    rig.armL.getWorldPosition(elbowStandIn);
+    const dir = rig.armL.localToWorld(new THREE.Vector3(0, -1, 0)).sub(elbowStandIn).normalize();
+    const toT = target.clone().sub(elbowStandIn).normalize();
+    // single-piece arm aims its length at the target's direction
+    expect(dir.angleTo(toT)).toBeLessThan(0.35);
   });
 });

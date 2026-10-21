@@ -48,6 +48,15 @@ export interface FigureRig {
   jaw: THREE.Object3D | null; // hinge at the jaw line; rotation.x opens it
   armL: THREE.Group; // pivots at the shoulders — geometry hangs DOWN -Y
   armR: THREE.Group;
+  /** Item 7: elbow pivots (children of the shoulder pivots) on the
+   *  procedural rig — forearm + hand hang from these. Optional:
+   *  authored-GLB rigs are single-piece and leave them undefined;
+   *  solveArmIK then degrades to shoulder-aim only. */
+  elbowL?: THREE.Group;
+  elbowR?: THREE.Group;
+  /** Item 7: arm segment lengths (m) for the two-bone solve —
+   *  `fore` runs elbow -> hand CENTER (includes the hand offset). */
+  armSeg?: { upper: number; fore: number };
   legL: THREE.Group; // pivots at the hips — geometry hangs DOWN -Y
   legR: THREE.Group;
   sac: THREE.Mesh | null; // kind feature slot (spitter throat sac)
@@ -223,20 +232,36 @@ export function buildHumanFigure(spec: HumanSpec & { headCenterY?: number }): Fi
   torso.add(pelvis);
 
   // ---- arms (children of the torso, pivots at the shoulders) ----
+  // Item 7: two segments — upper arm + forearm on an elbow pivot —
+  // so hands can be SOLVED onto weapon grips (solveArmIK below).
+  // The two lofts sum to the old single-piece taper (shoulder
+  // r=0.04H -> elbow r=0.033H -> wrist r=0.027H), so the silhouette
+  // at rest (elbow rotation 0) is the one the kit always had.
   const armLen = H * 0.36 * (1 + gaunt * 0.22);
+  const upperLen = armLen * 0.52;
+  const foreLen = armLen - upperLen;
   const mkArm = (side: number) => {
     const pivot = new THREE.Group();
     pivot.position.set(side * (chestW * 0.52 + 0.035), shoulderY, 0);
-    const arm = limb(armLen, H * 0.04 * limbNarrow * bw, H * 0.033, H * 0.027, jacketMat);
-    pivot.add(arm);
+    const upper = limb(upperLen, H * 0.04 * limbNarrow * bw, H * 0.035, H * 0.033, jacketMat);
+    pivot.add(upper);
+    const elbow = new THREE.Group();
+    elbow.position.y = -upperLen;
+    pivot.add(elbow);
+    const fore = limb(foreLen, H * 0.033, H * 0.029, H * 0.027, jacketMat);
+    elbow.add(fore);
     const hand = ball(0.052 * (H / 1.8), skinMat, 0.85, 1.15, 0.9);
-    hand.position.y = -armLen - 0.02;
-    pivot.add(hand);
+    hand.position.y = -foreLen - 0.02;
+    elbow.add(hand);
     torso.add(pivot);
-    return pivot;
+    return { pivot, elbow };
   };
-  const armL = mkArm(-1);
-  const armR = mkArm(1);
+  const armLParts = mkArm(-1);
+  const armRParts = mkArm(1);
+  const armL = armLParts.pivot;
+  const armR = armRParts.pivot;
+  const elbowL = armLParts.elbow;
+  const elbowR = armRParts.elbow;
 
   // ---- head (child of the torso, pivot at the neck base) ----
   const head = new THREE.Group();
@@ -366,9 +391,84 @@ export function buildHumanFigure(spec: HumanSpec & { headCenterY?: number }): Fi
 
   return {
     group, torso, head, jaw, armL, armR, legL, legR,
+    elbowL, elbowR, armSeg: { upper: upperLen, fore: foreLen + 0.02 },
     sac: null, eyeMat, bodyMat: jacketMat, mats, height: H,
     pose: { torsoX: 0, armLX: 0, armRX: 0, legLX: 0, legRX: 0 },
   };
+}
+
+// ------------------------------------------------------------- arm IK ---
+
+/**
+ * Item 7 — two-bone arm solve ("IK-lite"): place the HAND on a world
+ * target with a natural elbow. Exact law-of-cosines geometry, no
+ * iteration: the elbow sits on the circle of radius h around the
+ * shoulder->target axis at distance a from the shoulder, on the pole
+ * side; the shoulder quaternion aims the upper arm at the elbow; the
+ * elbow flexes by the exact angle that lands the forearm on target.
+ * Unreachable targets clamp to full extension TOWARD the target.
+ * `poleWorld` is a world POINT the elbow leans toward (for a held
+ * weapon: behind and below the shoulder — elbows hang back-down,
+ * never wing up). Rigs without an elbow (authored GLBs) get the
+ * shoulder aim only. Assumes the caller updates world matrices
+ * (render loop does; tests call updateMatrixWorld).
+ */
+export function solveArmIK(
+  arm: THREE.Group,
+  elbow: THREE.Group | undefined,
+  seg: { upper: number; fore: number },
+  targetWorld: THREE.Vector3,
+  poleWorld: THREE.Vector3,
+): void {
+  const S = new THREE.Vector3();
+  arm.getWorldPosition(S);
+  const toT = targetWorld.clone().sub(S);
+  let d = toT.length();
+  if (d < 1e-6) return; // target on the shoulder: nothing sane to solve
+  const dirST = toT.divideScalar(d);
+  const maxReach = (seg.upper + seg.fore) * 0.999;
+  const minReach = Math.abs(seg.upper - seg.fore) * 1.05 + 0.01;
+  d = Math.min(Math.max(d, minReach), maxReach);
+  const T = S.clone().addScaledVector(dirST, d);
+  // elbow circle: center at distance a along S->T, radius h
+  const a = (seg.upper * seg.upper - seg.fore * seg.fore + d * d) / (2 * d);
+  const h = Math.sqrt(Math.max(0, seg.upper * seg.upper - a * a));
+  let bend = poleWorld.clone().sub(S);
+  bend.addScaledVector(dirST, -bend.dot(dirST));
+  if (bend.lengthSq() < 1e-8) {
+    // pole on the aim line: pick any perpendicular (elbow drops down)
+    bend.set(dirST.y, -dirST.x, 0);
+    if (bend.lengthSq() < 1e-8) bend.set(1, 0, 0);
+  }
+  bend.normalize();
+  const E = S.clone().addScaledVector(dirST, a).addScaledVector(bend, h);
+  // shoulder world orientation: local -Y (the hang direction) -> f,
+  // local +Z toward the bend side, right-handed basis
+  const f = E.clone().sub(S).divideScalar(seg.upper);
+  const yW = f.clone().negate();
+  let zW = bend.clone().addScaledVector(f, -bend.dot(f));
+  if (zW.lengthSq() < 1e-8) zW.set(0, 0, 1);
+  zW.normalize();
+  const xW = new THREE.Vector3().crossVectors(yW, zW).normalize();
+  const zW2 = new THREE.Vector3().crossVectors(xW, yW);
+  const qWorld = new THREE.Quaternion().setFromRotationMatrix(
+    new THREE.Matrix4().makeBasis(xW, yW, zW2),
+  );
+  const parent = arm.parent;
+  if (parent) {
+    const pq = new THREE.Quaternion();
+    parent.getWorldQuaternion(pq);
+    arm.quaternion.copy(pq.invert().multiply(qWorld));
+  } else {
+    arm.quaternion.copy(qWorld);
+  }
+  if (elbow) {
+    // flex the forearm onto E->T, expressed in the shoulder's frame:
+    // forearm rest dir is -Y; R_x(t) maps it to (0, -cos t, -sin t)
+    const dirET = T.sub(E).normalize();
+    const local = dirET.applyQuaternion(qWorld.clone().invert());
+    elbow.rotation.set(Math.atan2(-local.z, -local.y), 0, 0);
+  }
 }
 
 // ------------------------------------------------------ husk variants ---

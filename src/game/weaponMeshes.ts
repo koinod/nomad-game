@@ -4,6 +4,7 @@
 
 import * as THREE from 'three';
 import { FINISHES, finishDef } from '../data/mods';
+import { ITEMS } from '../data/items';
 
 /**
  * Wave 4: refinish a built weapon mesh in place. Metal surfaces
@@ -474,6 +475,49 @@ function applyModMeshes(
       tip.position.set(0, a.under.y - 0.012, a.under.z + 0.06);
     }
   }
+}
+
+/**
+ * Item 7 — per-weapon grip definitions, in HAND-MESH space (the space
+ * buildHandMesh builds in: origin at the primary grip, +Z toward the
+ * muzzle). `primary` is where the right hand holds; `support` is
+ * where the left hand goes on two-handed weapons (the forend/pump —
+ * genuinely forward on the weapon). Sidearms define their own hold:
+ * pistol + revolver are two-handed with the support hand stacked on
+ * the grip; the flare gun is light enough for one. Grips are defined
+ * on the BASE weapon only — mods attach to the mesh and never move
+ * them (a foregrip mod renders at its own anchor; the hands stay
+ * where the base weapon puts them).
+ */
+export interface WeaponGrip {
+  hands: 1 | 2;
+  primary: [number, number, number];
+  support?: [number, number, number];
+}
+
+export const WEAPON_GRIPS: Record<string, WeaponGrip> = {
+  // long guns: support hand on the forend, well forward of the grip
+  carbine: { hands: 2, primary: [0, 0, 0], support: [0, -0.02, 0.3] },
+  dmr: { hands: 2, primary: [0, 0, 0], support: [0, -0.02, 0.34] },
+  hunting_rifle: { hands: 2, primary: [0, 0, 0], support: [0, -0.02, 0.36] },
+  shotgun: { hands: 2, primary: [0, 0, 0], support: [0, -0.02, 0.34] }, // on the pump
+  crossbow: { hands: 2, primary: [0, 0, 0], support: [0, -0.02, 0.3] },
+  smg: { hands: 2, primary: [0, 0, 0], support: [0, -0.03, 0.22] },
+  // sidearms: their defined holds
+  pistol: { hands: 2, primary: [0, 0, 0], support: [0, -0.01, 0.02] }, // support wraps the grip hand
+  revolver: { hands: 2, primary: [0, 0, 0], support: [0, -0.01, 0.02] },
+  flare_gun: { hands: 1, primary: [0, 0, 0] },
+};
+
+/** Grip definition for any carryable: explicit table first, then a
+ *  category fallback so a future weapon still gets sane hands. */
+export function gripFor(itemId: string): WeaponGrip {
+  const g = WEAPON_GRIPS[itemId];
+  if (g) return g;
+  if (ITEMS[itemId]?.category === 'weapon-ranged') {
+    return { hands: 2, primary: [0, 0, 0], support: [0, -0.02, 0.28] };
+  }
+  return { hands: 1, primary: [0, 0, 0] }; // melee / thrown / tools: one hand on the grip
 }
 
 /** Hand-held mesh — origin at the grip, points forward (+Z in hand space).
