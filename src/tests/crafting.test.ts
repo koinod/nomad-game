@@ -174,10 +174,11 @@ describe('checkCraft gates', () => {
     expect(check.blueprintOk).toBe(true);
     expect(check.facilityOk).toBe(true);
     expect(check.skillOk).toBe(true);
-    // …but the turret item itself is Lane 6 data: until it lands, the craft
-    // stays honestly locked on resultKnown.
-    expect(check.resultKnown).toBe(false);
-    expect(check.ok).toBe(false);
+    // The turret item is Lane 6 data; it landed in merge stage 1, so the
+    // result is known and the full gate stack passes. (On Lane 7's branch
+    // this asserted resultKnown=false — that premise expired at the merge.)
+    expect(check.resultKnown).toBe(true);
+    expect(check.ok).toBe(true);
 
     const bare = checkCraft(TURRET_RECIPE, ctxWith({ nearStation: 'industrial', nearStationTier: 3 }));
     expect(bare.blueprintOk).toBe(false);
