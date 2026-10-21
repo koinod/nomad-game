@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useGameStore } from '../store/gameStore';
 import { getGame, setGame } from '../game/instance';
 import { Game } from '../game/Game';
+import { primePostFxBoot } from '../game/PostFX';
 import { ambience } from '../systems/audio';
 import { ENDING_LINES } from '../narrative/dialogue';
 import HUD from './HUD';
@@ -31,6 +32,12 @@ function CutsceneOverlay() {
 export default function GameView() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const paused = useGameStore((s) => s.paused);
+
+  // Lane 12: classify this device for the PostFX quality ladder during
+  // render — idempotent, and guaranteed to land before the mount
+  // effect below boots the Game, whose init reads the classified tier
+  // synchronously (getPostFxBootQuality) when building the post chain.
+  primePostFxBoot();
 
   // Mount the engine once. The async init is guarded against StrictMode's
   // double-mount: a disposed-before-ready boot disposes its own Game and
