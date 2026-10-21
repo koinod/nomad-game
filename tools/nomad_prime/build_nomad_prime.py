@@ -104,12 +104,13 @@ def diamond_plate_material():
     # one softening pass so lugs have sloped shoulders
     hb = (h + np.roll(h, 1, 0) + np.roll(h, -1, 0) + np.roll(h, 1, 1) + np.roll(h, -1, 1)) / 5.0
     h = np.maximum(hb, h * 0.9)
-    # normal map from height (Sobel-ish)
-    gx = (np.roll(h, -1, 1) - np.roll(h, 1, 1)) * 2.2
-    gy = (np.roll(h, -1, 0) - np.roll(h, 1, 0)) * 2.2
+    # normal map from height (Sobel-ish) — stronger relief for the polish pass
+    gx = (np.roll(h, -1, 1) - np.roll(h, 1, 1)) * 3.4
+    gy = (np.roll(h, -1, 0) - np.roll(h, 1, 0)) * 3.4
     inv = 1.0 / np.sqrt(gx * gx + gy * gy + 1.0)
     nrm = np.dstack((-gx * inv, gy * inv, inv)) * 0.5 + 0.5
-    base = 0.46 + h * 0.30  # steel gray, lugs lighter
+    base = 0.40 + h * 0.46  # steel gray, lugs catch the light
+    rgh = 0.60 - h * 0.28   # raised lugs are polished smoother than the field
 
     def to_img(name, rgb_arr):
         img = bpy.data.images.new(name, S, S, alpha=False)
@@ -120,6 +121,7 @@ def diamond_plate_material():
 
     img_c = to_img("DiamondPlate_Color", np.dstack((base, base, base * 1.04)))
     img_n = to_img("DiamondPlate_Normal", nrm)
+    img_r = to_img("DiamondPlate_Rough", np.dstack((rgh, rgh, rgh)))
     m = bpy.data.materials.new("diamond_plate")
     m.use_nodes = True
     nt = m.node_tree
@@ -133,9 +135,13 @@ def diamond_plate_material():
     tn = nt.nodes.new("ShaderNodeTexImage"); tn.image = img_n
     tn.location = (-420, -60)
     nmap = nt.nodes.new("ShaderNodeNormalMap"); nmap.location = (-160, -60)
-    nmap.inputs["Strength"].default_value = 0.9
+    nmap.inputs["Strength"].default_value = 1.35
     nt.links.new(tn.outputs["Color"], nmap.inputs["Color"])
     nt.links.new(nmap.outputs["Normal"], bsdf.inputs["Normal"])
+    img_r.colorspace_settings.name = 'Non-Color'
+    tr = nt.nodes.new("ShaderNodeTexImage"); tr.image = img_r
+    tr.location = (-420, -320)
+    nt.links.new(tr.outputs["Color"], bsdf.inputs["Roughness"])
     return m
 
 DIAMOND = diamond_plate_material()
@@ -256,20 +262,42 @@ extrude_xz("AerodynamicHood", HOOD_PTS, 1.86, HOODM, parent=ROOTOB, bevel=0.025)
 # hood crown spine (subtle raised center, per reference)
 box("HoodCrown", (2.72, 0, 1.985), (2.20, 0.36, 0.035), HOODM, bevel=0.015,
     rot=(0, math.radians(-2.2), 0), parent=ROOTOB)
-# fenders over the steer wheels (body color, faceted bulge)
+# Aero fenders over the steer wheels: side-profile extrusions that sweep
+# from the bumper line up over the arch and taper into the cowl — the
+# reference's fenders are shaped bodywork, not bolted-on boxes (polish pass).
+FENDER_PTS = [
+    (3.46, 0.88), (3.44, 1.22), (3.20, 1.44), (2.62, 1.52),
+    (2.06, 1.44), (1.86, 1.18), (1.88, 0.90), (2.60, 0.84),
+]
 for sgn, sd in ((1, "L"), (-1, "R")):
-    box("Fender_" + sd, (2.60, sgn * 0.995, 1.30), (1.42, 0.56, 0.82), PAINT,
-        bevel=0.17, parent=ROOTOB)
-    # wheel-arch shadow lip
-    box("ArchLip_" + sd, (2.60, sgn * 1.20, 1.02), (1.30, 0.10, 0.30), DARKER, parent=ROOTOB)
+    fd = extrude_xz("Fender_" + sd, FENDER_PTS, 0.50, PAINT, parent=ROOTOB, bevel=0.02)
+    fd.location.y = sgn * 0.995
+# hood character lines: pressed creases along the top shoulders + a side
+# spear line, read as shadow grooves against the lighter hood paint
+for sgn, sd in ((1, "L"), (-1, "R")):
+    box("HoodCrease_" + sd, (2.56, sgn * 0.52, 2.030), (2.00, 0.030, 0.014),
+        PAINT, rot=(0, math.radians(4.6), 0), parent=ROOTOB)
+    box("HoodSpear_" + sd, (2.70, sgn * 0.938, 1.865), (1.95, 0.012, 0.028),
+        PAINT, parent=ROOTOB)
+    # cowl side vents: four louver slats per side (5700 XE signature)
+    for i in range(4):
+        box("HoodVent_%s_%d" % (sd, i), (1.76, sgn * 0.940, 1.44 + i * 0.085),
+            (0.30, 0.014, 0.045), DARKER, rot=(0, 0, 0), parent=ROOTOB)
 
 # ---- grille: surround + vertical louvers + badge
-box("GrilleSurround", (3.945, 0, 1.52), (0.10, 1.18, 1.12), CHROME, bevel=0.03, parent=ROOTOB)
-box("GrilleRecess",   (3.965, 0, 1.52), (0.06, 1.06, 1.02), DARKER, parent=ROOTOB)
+# Polish pass: the surround is a true FRAME (the old solid slab buried the
+# recessed bars outright); louvers sit ~50 mm behind its front face — a real
+# recessed reveal with shadow depth, darker steel against bright chrome.
+box("GrilleRail_L", (3.945,  0.545, 1.52), (0.10, 0.13, 1.12), CHROME, bevel=0.02, parent=ROOTOB)
+box("GrilleRail_R", (3.945, -0.545, 1.52), (0.10, 0.13, 1.12), CHROME, bevel=0.02, parent=ROOTOB)
+box("GrilleRail_T", (3.945, 0, 2.055), (0.10, 1.18, 0.11), CHROME, bevel=0.02, parent=ROOTOB)
+box("GrilleRail_B", (3.945, 0, 0.985), (0.10, 1.18, 0.11), CHROME, bevel=0.02, parent=ROOTOB)
+box("GrilleRecess",   (3.905, 0, 1.52), (0.04, 1.06, 1.02), DARKER, parent=ROOTOB)
 for i in range(11):
     y = -0.475 + i * 0.095
-    box("GrilleBar_%02d" % i, (3.985, y, 1.52), (0.035, 0.038, 0.98), CHROME, parent=ROOTOB)
-box("GrilleBadge", (4.005, 0, 1.52), (0.03, 0.13, 0.13), DARKM,
+    box("GrilleBar_%02d" % i, (3.945, y, 1.52), (0.035, 0.038, 0.98), STEEL, parent=ROOTOB)
+box("GrilleMidRail", (3.945, 0, 1.52), (0.030, 1.02, 0.055), STEEL, parent=ROOTOB)
+box("GrilleBadge", (3.968, 0, 1.52), (0.03, 0.13, 0.13), DARKM,
     rot=(math.radians(45), 0, 0), parent=ROOTOB)
 
 # ---- headlights: housing + twin projectors + DRL strip per side
@@ -338,12 +366,16 @@ for sgn, sd in ((1, "L"), (-1, "R")):
     marking("NOMAD PRIME", (-1.28, sgn * 1.262, 1.80), 0.30, sgn, "Lettering_" + sd, LETTER, ROOTOB)
     marking("HEAVY HAUL UNIT - 01", (-1.28, sgn * 1.262, 1.60), 0.115, sgn, "LetteringSub_" + sd, LETTER, ROOTOB)
 
-# ---- sun visor + 5 amber roof markers
-box("SunVisor", (1.16, 0, 3.06), (0.52, 2.16, 0.055), HOODM, bevel=0.02,
-    rot=(0, math.radians(-16), 0), parent=ROOTOB)
+# ---- sun visor: extruded aero wedge (polish pass — replaces the flat
+# tilted plate): deep overhang, tapered underside, markers on its front face
+VISOR_PTS = [
+    (1.52, 2.99), (1.56, 3.09), (1.10, 3.20),
+    (0.92, 3.24), (0.94, 3.10), (1.30, 3.04),
+]
+extrude_xz("SunVisor", VISOR_PTS, 2.20, HOODM, parent=ROOTOB, bevel=0.015)
 for i, y in enumerate((-0.84, -0.42, 0.0, 0.42, 0.84)):
-    box("RoofMarker_%d" % i, (1.395, y, 3.005), (0.045, 0.09, 0.045), AMBER,
-        rot=(0, math.radians(-16), 0), parent=ROOTOB)
+    box("RoofMarker_%d" % i, (1.565, y, 3.045), (0.040, 0.09, 0.048), AMBER,
+        rot=(0, math.radians(-14), 0), parent=ROOTOB)
 
 # ---- mirrors: aero arms + dual glass + round spot mirror (right, per ref)
 for sgn, sd in ((1, "L"), (-1, "R")):
@@ -386,25 +418,26 @@ for sgn, sd in ((1, "L"), (-1, "R")):
         rot=(math.radians(55), 0, 0), verts=14, parent=ROOTOB)
     # diamond-plate cab steps (two treads)
     st1 = box("StepLow_" + sd, (0.88, sgn * 1.13, 0.40), (0.72, 0.36, 0.055), DIAMOND, parent=ROOTOB)
-    scale_uvs(st1, 5)
+    scale_uvs(st1, 3)
     st2 = box("StepHigh_" + sd, (0.88, sgn * 1.06, 0.76), (0.72, 0.30, 0.055), DIAMOND, parent=ROOTOB)
-    scale_uvs(st2, 5)
+    scale_uvs(st2, 3)
     # grab handle beside the door
     cyl("GrabHandle_" + sd, (0.36, sgn * 1.24, 1.85), 0.018, 0.62, CHROME, verts=10, parent=ROOTOB)
     # chassis tool/battery box between tank and tandem
     tb = box("ToolBox_" + sd, (-1.62, sgn * 0.96, 0.74), (1.05, 0.52, 0.52), DARKM,
              bevel=0.02, parent=ROOTOB)
-    box("ToolBoxLid_" + sd, (-1.62, sgn * 0.96, 1.01), (1.05, 0.52, 0.03), DIAMOND, parent=ROOTOB)
+    tbl = box("ToolBoxLid_" + sd, (-1.62, sgn * 0.96, 1.01), (1.05, 0.52, 0.03), DIAMOND, parent=ROOTOB)
+    scale_uvs(tbl, 3)
 
 # ================================================================ REAR DECK
 # Diamond-plate catwalk flanking the fifth wheel + rear plate.
 for sgn, sd in ((1, "L"), (-1, "R")):
     cw = box("RearCatwalk_" + sd, (-3.20, sgn * 0.885, 1.07), (1.80, 0.73, 0.05), DIAMOND, parent=ROOTOB)
-    scale_uvs(cw, 7)
+    scale_uvs(cw, 3.5)
     cw2 = box("CatwalkFront_" + sd, (-2.42, sgn * 0.885, 1.07), (0.28, 0.73, 0.05), DIAMOND, parent=ROOTOB)
-    scale_uvs(cw2, 7)
+    scale_uvs(cw2, 3.5)
 rp = box("RearDeckPlate", (-3.88, 0, 1.07), (0.55, 2.50, 0.05), DIAMOND, parent=ROOTOB)
-scale_uvs(rp, 7)
+scale_uvs(rp, 3.5)
 # frame rails behind the sleeper (visible deck structure)
 box("DeckRail_L", (-3.15,  0.42, 1.00), (1.95, 0.16, 0.14), DARKM, parent=ROOTOB)
 box("DeckRail_R", (-3.15, -0.42, 1.00), (1.95, 0.16, 0.14), DARKM, parent=ROOTOB)
