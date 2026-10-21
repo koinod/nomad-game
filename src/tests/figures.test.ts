@@ -1,0 +1,228 @@
+// figures.test.ts — LANE 4: the figureKit rig + behavior parity.
+//
+// Two contracts are pinned here:
+//  1. STRUCTURE — every husk kind and the human figure build on the
+//     shared rig (named joint pivots, skull sitting on the kind's
+//     HitProfile head window), so animation/pose code can trust it.
+//  2. BEHAVIOR PARITY — the model swap must not move a single gameplay
+//     number: shriek wind-up + interrupt, brute charge + explosion
+//     counter, spitter telegraph, bloater burst, raycast hit windows.
+
+import * as THREE from 'three';
+import { describe, expect, it } from 'vitest';
+import {
+  buildHumanFigure, buildHuskFigure, bindFigureGLB,
+  type HuskFigureKind,
+} from '../game/figureKit';
+import { Husk, HuskManager, type HuskCtx, type HuskKind, type SpawnZone } from '../game/Husks';
+import { SHRIEK_WINDUP_SEC } from '../game/huskMath';
+import { mulberry32 } from '../game/rng';
+
+const PAL = { skin: 0x8a7a68, jacket: 0x5a4632, pants: 0x35322c, dark: 0x2c2c30 };
+
+// kind -> (height, profile headY) lifted from Husks' KIND_STATS: the
+// visible skull must sit where the hit resolution thinks the head is.
+const KIND_PROFILE: Record<HuskKind, { height: number; headY: number }> = {
+  shambler: { height: 1.8, headY: 1.71 },
+  stalker: { height: 1.95, headY: 1.85 },
+  armored: { height: 1.92, headY: 1.82 },
+  screamer: { height: 2.1, headY: 2.0 },
+  brute: { height: 2.4, headY: 2.26 },
+  crawler: { height: 0.95, headY: 0.6 },
+  bloater: { height: 1.85, headY: 1.76 },
+  spitter: { height: 1.85, headY: 1.76 },
+};
+
+function skullWorldY(kind: HuskKind): number {
+  const { height, headY } = KIND_PROFILE[kind];
+  const rig = buildHuskFigure(kind as HuskFigureKind, {
+    height, headCenterY: headY, palette: PAL, vrnd: mulberry32(7),
+  });
+  rig.group.updateWorldMatrix(true, true);
+  const skull = rig.head.getObjectByName('skull');
+  expect(skull, `${kind} skull`).toBeDefined();
+  const v = new THREE.Vector3();
+  skull!.getWorldPosition(v);
+  return v.y;
+}
+
+describe('figureKit rig structure', () => {
+  it('every husk kind exposes the full pivot set', () => {
+    for (const kind of Object.keys(KIND_PROFILE) as HuskKind[]) {
+      const { height, headY } = KIND_PROFILE[kind];
+      const rig = buildHuskFigure(kind as HuskFigureKind, {
+        height, headCenterY: headY, palette: PAL, vrnd: mulberry32(3),
+      });
+      expect(rig.torso, kind).toBeTruthy();
+      expect(rig.head, kind).toBeTruthy();
+      expect(rig.jaw, kind).toBeTruthy();
+      expect(rig.armL && rig.armR && rig.legL && rig.legR, kind).toBeTruthy();
+      expect(rig.eyeMat, kind).toBeTruthy();
+      expect(rig.bodyMat, kind).toBeTruthy();
+      expect(rig.mats.length, kind).toBeGreaterThan(3);
+      // only the spitter carries the sac feature
+      expect(rig.sac !== null, kind).toBe(kind === 'spitter');
+      // the figure is real geometry, not a token
+      let meshes = 0;
+      rig.group.traverse((c) => { if (c instanceof THREE.Mesh) meshes++; });
+      expect(meshes, kind).toBeGreaterThan(12);
+    }
+  });
+
+  it('upright kinds place the skull on the HitProfile head window', () => {
+    for (const kind of ['shambler', 'stalker', 'armored', 'screamer', 'brute', 'bloater', 'spitter'] as HuskKind[]) {
+      const y = skullWorldY(kind);
+      expect(Math.abs(y - KIND_PROFILE[kind].headY), `${kind}: skull ${y}`).toBeLessThan(0.06);
+    }
+  });
+
+  it('crawler rides low and thrusts its head forward', () => {
+    const y = skullWorldY('crawler');
+    expect(y).toBeGreaterThan(0.42);
+    expect(y).toBeLessThan(0.82);
+    const rig = buildHuskFigure('crawler', {
+      height: 0.95, headCenterY: 0.6, palette: PAL, vrnd: mulberry32(5),
+    });
+    rig.group.updateWorldMatrix(true, true);
+    const v = new THREE.Vector3();
+    rig.head.getObjectByName('skull')!.getWorldPosition(v);
+    expect(v.z).toBeGreaterThan(0.4); // head at the FRONT of the body
+  });
+
+  it('human figure: contract proportions + gear renders on the body', () => {
+    const base = buildHumanFigure({ palette: PAL });
+    expect(base.height).toBe(1.8);
+    expect(base.legL.position.y).toBeCloseTo(0.864, 3); // hip line .48H
+    const count = (r: typeof base) => {
+      let n = 0;
+      r.group.traverse((c) => { if (c instanceof THREE.Mesh) n++; });
+      return n;
+    };
+    const geared = buildHumanFigure({
+      palette: PAL, hairStyle: 'long', gear: { pack: 2, vest: true, helmet: true, riotVisor: true },
+    });
+    expect(count(geared)).toBeGreaterThan(count(base) + 4);
+    // build variants actually change the frame
+    const slim = buildHumanFigure({ palette: PAL, build: 'slim' });
+    const heavy = buildHumanFigure({ palette: PAL, build: 'heavy' });
+    slim.group.updateWorldMatrix(true, true);
+    heavy.group.updateWorldMatrix(true, true);
+    const sx = new THREE.Box3().setFromObject(slim.group);
+    const hx = new THREE.Box3().setFromObject(heavy.group);
+    expect(hx.max.x - hx.min.x).toBeGreaterThan(sx.max.x - sx.min.x);
+  });
+
+  it('bindFigureGLB binds named pivots and rejects a poseless GLB', () => {
+    const root = new THREE.Group();
+    for (const n of ['torso', 'head', 'jaw', 'armL', 'armR', 'legL', 'legR']) {
+      const g = new THREE.Group();
+      g.name = n;
+      root.add(g);
+    }
+    const tm = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial());
+    tm.name = 'torsoMesh';
+    root.add(tm);
+    const rig = bindFigureGLB(root, 1.8);
+    expect(rig.torso).toBeTruthy();
+    expect(rig.bodyMat).toBeTruthy();
+    const bare = new THREE.Group();
+    expect(() => bindFigureGLB(bare, 1.8)).toThrow(/missing required pivot/);
+  });
+});
+
+// ------------------------------------------------------- behavior parity ---
+
+const groundY = () => 0;
+function ctx(playerPos: THREE.Vector3): HuskCtx {
+  return {
+    playerPos, isNight: false, groundY, colliders: [],
+    onHuskKilled: () => undefined, daysElapsed: 0,
+  };
+}
+const rng = mulberry32(99);
+const DIR = new THREE.Vector3(1, 0, 0);
+
+describe('husk behavior parity after the figure swap', () => {
+  it('HitProfiles are unchanged by the rebuild', () => {
+    const mk = (kind: HuskKind) => new Husk(`p_${kind}`, kind, 0, 0, 'test', groundY);
+    expect(mk('shambler').profile).toEqual({ bodyY: 1.0, bodyHalfH: 1.1, bodyR: 0.55, headY: 1.71, headR: 0.38 });
+    expect(mk('brute').profile).toEqual({ bodyY: 1.25, bodyHalfH: 1.35, bodyR: 0.8, headY: 2.26, headR: 0.42 });
+    expect(mk('crawler').profile).toEqual({ bodyY: 0.5, bodyHalfH: 0.55, bodyR: 0.62, headY: 0.6, headR: 0.34 });
+    expect(mk('armored').armorClass).toBe(2);
+  });
+
+  it('screamer: wind-up completes into a shriek on schedule', () => {
+    const h = new Husk('sc1', 'screamer', 0, 0, 'test', groundY);
+    const c = ctx(new THREE.Vector3(0, 0, 10));
+    h.update(0.1, c, rng); // eyes on the player -> wind-up starts
+    expect(h.windupT).toBeGreaterThan(0);
+    let fired = false;
+    for (let t = 0; t < SHRIEK_WINDUP_SEC + 0.6; t += 0.1) {
+      h.update(0.1, c, rng);
+      if (h.shriekFired) { fired = true; break; }
+    }
+    expect(fired).toBe(true);
+  });
+
+  it('screamer: a headshot during the wind-up breaks the shriek', () => {
+    const h = new Husk('sc2', 'screamer', 0, 0, 'test', groundY);
+    const c = ctx(new THREE.Vector3(0, 0, 10));
+    h.update(0.1, c, rng);
+    expect(h.windupT).toBeGreaterThan(0);
+    h.damage(20, DIR, 2.2, false, { head: true });
+    expect(h.windupT).toBe(0);
+    expect(h.shriekCd).toBeGreaterThan(0);
+  });
+
+  it('brute: charges in its window and explosions are its counter', () => {
+    const h = new Husk('br1', 'brute', 0, 0, 'test', groundY);
+    const c = ctx(new THREE.Vector3(0, 0, 10));
+    h.update(0.1, c, rng); // sees the player at 10m: inside 5.5..15
+    expect(h.chargeT).toBeGreaterThan(0);
+    const hp0 = h.hp;
+    h.damage(50, DIR, 0, false, { explosive: true });
+    expect(hp0 - h.hp).toBe(80); // 50 x BRUTE_EXPLOSION_MULT (1.6)
+  });
+
+  it('spitter: telegraphs, then hands the manager a launch point', () => {
+    const h = new Husk('sp1', 'spitter', 0, 0, 'test', groundY);
+    const c = ctx(new THREE.Vector3(0, 0, 12)); // inside the 8..16 band
+    h.update(0.1, c, rng);
+    expect(h.telegraphT).toBeGreaterThan(0);
+    for (let t = 0; t < 1.2 && !h.spitLaunch; t += 0.1) h.update(0.1, c, rng);
+    expect(h.spitLaunch).not.toBeNull();
+    expect(h.spitLaunch!.x).toBeCloseTo(0, 1);
+    expect(h.spitLaunch!.z).toBeCloseTo(12, 1);
+  });
+
+  it('bloater: death arms the burst', () => {
+    const h = new Husk('bl1', 'bloater', 0, 0, 'test', groundY);
+    const hp0 = h.hp;
+    expect(hp0).toBe(70);
+    const killed = h.damage(999, DIR, 2.2, true);
+    expect(killed).toBe(true);
+    expect(h.burstPending).toBe(true);
+  });
+
+  it('raycast: body and head windows resolve through the profiles', () => {
+    const scene = new THREE.Scene();
+    const zone: SpawnZone = { id: 't', x: 0, z: 0, radius: 0.5, count: 1, kinds: ['shambler'] };
+    const mgr = new HuskManager(scene, [zone], 42);
+    mgr.spawnInitial(new Set(), () => 5, false, 0);
+    expect(mgr.husks.length).toBe(1);
+    const h = mgr.husks[0];
+    const base = h.group.position; // y = 5 (groundY)
+    const shoot = (aimY: number) => {
+      const origin = new THREE.Vector3(base.x, aimY, base.z - 12);
+      const target = new THREE.Vector3(base.x, aimY, base.z);
+      const dir = target.clone().sub(origin).normalize();
+      return mgr.raycastShot(origin, dir, 40);
+    };
+    const body = shoot(base.y + h.profile.bodyY);
+    expect(body?.husk).toBe(h);
+    expect(body?.head).toBe(false);
+    const head = shoot(base.y + h.profile.headY);
+    expect(head?.husk).toBe(h);
+    expect(head?.head).toBe(true);
+  });
+});

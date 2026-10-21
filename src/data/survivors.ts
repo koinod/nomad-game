@@ -144,21 +144,34 @@ export const DESIGNED_RECRUITS: Record<string, SurvivorDef> = {
 /**
  * Wave 4: how each designed recruit LOOKS in the world — skin, jacket,
  * pants, and frame — so the crew never reads as clones in different coats.
- * Interact's personMesh builds from this.
+ * LANE 4: hair color + style added; figureKit.buildHumanFigure renders
+ * the look (Interact's personMesh delegates to it — see lane report).
  */
 export interface SurvivorLook {
   skin: number;
   jacket: number;
   pants: number;
   build: 'slim' | 'standard' | 'heavy';
+  hair: number;
+  hairStyle: 'bald' | 'crop' | 'long' | 'hawk';
 }
 
 export const SURVIVOR_LOOKS: Record<string, SurvivorLook> = {
-  elena: { skin: 0xa8785a, jacket: 0xd8d8d0, pants: 0x3c4a56, build: 'slim' },
-  mateo: { skin: 0x8a5a3b, jacket: 0x7a4a2a, pants: 0x35322c, build: 'heavy' },
-  lina: { skin: 0xe0bfa0, jacket: 0x4a5a3a, pants: 0x2c3540, build: 'slim' },
-  dez: { skin: 0x54331f, jacket: 0xb8562e, pants: 0x2c3540, build: 'heavy' },
-  priya: { skin: 0x8a5a3b, jacket: 0x87551f, pants: 0x404040, build: 'standard' },
+  elena: { skin: 0xa8785a, jacket: 0xd8d8d0, pants: 0x3c4a56, build: 'slim', hair: 0x3a2718, hairStyle: 'long' },
+  mateo: { skin: 0x8a5a3b, jacket: 0x7a4a2a, pants: 0x35322c, build: 'heavy', hair: 0x17130f, hairStyle: 'crop' },
+  lina: { skin: 0xe0bfa0, jacket: 0x4a5a3a, pants: 0x2c3540, build: 'slim', hair: 0x8a6a34, hairStyle: 'long' },
+  dez: { skin: 0x54331f, jacket: 0xb8562e, pants: 0x2c3540, build: 'heavy', hair: 0x0f0d0b, hairStyle: 'bald' },
+  priya: { skin: 0x8a5a3b, jacket: 0x87551f, pants: 0x404040, build: 'standard', hair: 0x14100c, hairStyle: 'long' },
+};
+
+/**
+ * LANE 4: the named story NPCs get the same look treatment as recruits
+ * (they were jacket-color-only before). Consumed by Interact's NPC
+ * placement when personMesh delegates to figureKit.
+ */
+export const NPC_LOOKS: Record<string, SurvivorLook> = {
+  jonah: { skin: 0x8a5a3b, jacket: 0x4a4438, pants: 0x35322c, build: 'standard', hair: 0x6e6a63, hairStyle: 'crop' },
+  kowalski: { skin: 0xd8b596, jacket: 0xd8d8d0, pants: 0x2c3540, build: 'slim', hair: 0xb8b0a4, hairStyle: 'long' },
 };
 
 export function traitName(id: string): string {
