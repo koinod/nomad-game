@@ -46,20 +46,22 @@ describe('canon roster (FACTIONS_CANON §1/§2)', () => {
     for (const oldId of Object.keys(FACTION_FOLDS)) expect(factionById(oldId)).toBeUndefined();
   });
 
-  it('repTier ships the FACTIONS_CANON §7.2 ladder — pinned so a silent re-band fails loudly (SYSTEMS_SPEC §0.1 disputes it; Ian rules)', () => {
-    expect(repTier(-75)).toBe('Hostile');
+  it('repTier ships the sodgame ladder (SYSTEMS_SPEC §0.1) — Ian ruled 2026-10-21; pinned so a silent re-band fails loudly', () => {
+    expect(repTier(-100)).toBe('War');
+    expect(repTier(-75)).toBe('War');
+    expect(repTier(-74)).toBe('Hostile');
     expect(repTier(-50)).toBe('Hostile');
     expect(repTier(-49)).toBe('Wary');
     expect(repTier(-10)).toBe('Wary');
     expect(repTier(-9)).toBe('Neutral');
-    expect(repTier(9)).toBe('Neutral');
-    expect(repTier(10)).toBe('Friendly');
-    expect(repTier(49)).toBe('Friendly');
-    expect(repTier(50)).toBe('Allied');
+    expect(repTier(24)).toBe('Neutral');
+    expect(repTier(25)).toBe('Friendly');
+    expect(repTier(74)).toBe('Friendly');
+    expect(repTier(75)).toBe('Allied');
     expect(repTier(100)).toBe('Allied');
   });
 
-  it('ALLIED_DEEP_GATE is 75 — an internal gate, not a tier boundary', () => {
+  it('ALLIED_DEEP_GATE is 75 — the quartermaster gate, coinciding with the Allied boundary since the 2026-10-21 re-band', () => {
     expect(ALLIED_DEEP_GATE).toBe(75);
   });
 });

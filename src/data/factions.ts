@@ -7,16 +7,14 @@ import type { FactionDef } from '../store/types';
 // not name (The Pier / The Refuge / Hollow Market) are FOLDED, not deleted —
 // see FACTION_FOLDS: their people and places survive under new tags.
 //
-// ⚠ REP-BAND CONTRADICTION (flagged for a ruling, NOT resolved here):
-// FACTIONS_CANON §7.2 rules the shipped repTier() bands canonical (Hostile
-// ≤−50 / Wary ≤−10 / Neutral / Friendly <50 / Allied ≥50) and treats the
-// Remnant quartermaster's ≥75 as an Allied-DEEP internal gate, not a tier.
-// SYSTEMS_SPEC §0.1 rules the opposite: sodgame bands (Allied ≥75 / Friendly
-// ≥25 / Neutral −9…24 / Wary −49…−10 / Hostile −74…−50 / War ≤−75) win and
-// repTier() "must be re-banded". Until Ian rules, repTier() below is the
-// SHIPPED canon-§7.2 ladder, and every gate in this lane (traders, claims)
-// is written against raw rep numbers — never tier names — so a re-band
-// changes labels only, never behavior.
+// REP BANDS — RULED BY IAN 2026-10-21 ("one line difference between the two
+// bands"): the SYSTEMS_SPEC §0.1 sodgame ladder wins (War ≤−75 / Hostile
+// −74…−50 / Wary −49…−10 / Neutral −9…24 / Friendly ≥25 / Allied ≥75),
+// superseding FACTIONS_CANON §7.2's ladder. Its cutoffs match the raw gates
+// the game already enforces (medic/town at 25, quartermaster at 75), so the
+// labels tell the truth about the mechanics. Every gate (traders, claims)
+// still runs on raw rep numbers — never tier names — so this stays a
+// label-only surface.
 
 export type FactionEra = 'easymode' | 'rumor' | 'hardmode';
 
@@ -162,23 +160,23 @@ export const LEGACY_REP_ALIAS: Record<string, string> = Object.fromEntries(
 );
 
 // ─── Rep tiers ───────────────────────────────────────────────────────────────
-// SHIPPED ladder, ruled canonical by FACTIONS_CANON §7.2. See the ⚠ at the
-// top of this file: SYSTEMS_SPEC §0.1 disputes it; do not re-band without
-// Ian's ruling. Gates in this lane use raw numbers (e.g. ALLIED_DEEP_GATE),
-// never tier names, so the code is band-agnostic either way.
+// The sodgame ladder (SYSTEMS_SPEC §0.1), per Ian's 2026-10-21 ruling — see
+// the note at the top of this file. Gates use raw numbers (e.g.
+// ALLIED_DEEP_GATE), never tier names, so the code is band-agnostic.
 
-export type RepTier = 'Hostile' | 'Wary' | 'Neutral' | 'Friendly' | 'Allied';
+export type RepTier = 'War' | 'Hostile' | 'Wary' | 'Neutral' | 'Friendly' | 'Allied';
 
 export function repTier(rep: number): RepTier {
+  if (rep <= -75) return 'War';
   if (rep <= -50) return 'Hostile';
   if (rep <= -10) return 'Wary';
-  if (rep < 10) return 'Neutral';
-  if (rep < 50) return 'Friendly';
+  if (rep < 25) return 'Neutral';
+  if (rep < 75) return 'Friendly';
   return 'Allied';
 }
 
 /**
- * The Remnant quartermaster's gate: an Allied-DEEP internal threshold
- * (FACTIONS_CANON §7.2), deliberately NOT a tier boundary.
+ * The Remnant quartermaster's gate: rep 75 — since the 2026-10-21 re-band
+ * this coincides with the Allied tier boundary itself.
  */
 export const ALLIED_DEEP_GATE = 75;
