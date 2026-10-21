@@ -28,6 +28,7 @@ import { sfx, ambience } from '../systems/audio';
 import { useCraftQueue } from '../systems/crafting';
 import { XP_EVENTS } from '../systems/skills';
 import { isSpecialKind } from './Combat';
+import { computeVisibility } from './visibility';
 import { ENDING_LINES } from '../narrative/dialogue';
 import {
   totalWeightKg, carryLimitKg, encumbranceTier,
@@ -815,6 +816,32 @@ export class Game {
     // collision), never the geometry's. Guarded by tests/roofs.test.ts.
 
     const night = this.isNight();
+    // ---- Lane 8 visibility wiring (stage 3): sample the light at the
+    // player from the same sun math World.updateSky renders with
+    // (sunrise 06:00 at the horizon), dimmed by weather cloud cover;
+    // night is moonlight. Posture/motion come off the Player, perks
+    // and stealth level off the store. The computed exposure feeds
+    // the store's visibility flag (Lane 11's LightIndicator reads it)
+    // and the raw inputs ride the HuskCtx — Husks' perception runs
+    // computeVisibility itself so the gh_unseen capstone precedence
+    // lives in exactly one place.
+    const sunElev = Math.sin(((s.timeMinutes / 1440) - 0.25) * Math.PI * 2);
+    const cloudDim = 1 - this.weather.snapshot().cloudCover * 0.45;
+    const playerLight = sunElev > 0.02
+      ? Math.min(1, (0.35 + sunElev * 1.4) * cloudDim)
+      : 0.12;
+    const playerCrouched = player.isCrouched;
+    const playerMoving = player.isMoving;
+    const vis = computeVisibility(
+      {
+        lightLevel: playerLight,
+        isNight: night,
+        crouched: playerCrouched,
+        moving: playerMoving,
+      },
+      s.perks,
+    );
+    s.setVisibility(vis.exposure);
     husks.update(
       dt,
       {
@@ -826,6 +853,18 @@ export class Game {
         daysElapsed: s.daysElapsed,
         // a bloater burst reads on screen as a heavy dust/flesh impact
         onBurstFx: (x, y, z) => this.fx?.impactDust(new THREE.Vector3(x, y, z)),
+        // Lane 8 visibility inputs for the perception model (L8-1)
+        playerLight,
+        playerCrouched,
+        playerMoving,
+        playerPerks: s.perks,
+        playerStealthLevel: s.skills?.stealth?.level ?? 0,
+        // Lane 8 XP hook #10: a hunting husk lost the trail — Lane 4's
+        // side fires this exactly once per hunt->investigate transition
+        onHuskLost: () => {
+          const ev = XP_EVENTS.husk_lost;
+          useGameStore.getState().addSkillXp(ev.skill, ev.xp);
+        },
       },
       player.pos,
       night,
