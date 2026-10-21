@@ -155,6 +155,24 @@ export const ITEMS: Record<string, ItemDef> = {
     id: 'gun_parts', name: 'Gun parts', category: 'material', weight: 0.5, slots: 1, stack: 8,
     desc: 'Springs, pins, a trigger group. Weapon maintenance and mods.',
   },
+  // ammo components (SYSTEMS_SPEC §4.2): the T2 reload ladder — brass and
+  // lead loot in the world, gunpowder cooks up at the Chemistry Station
+  gunpowder: {
+    id: 'gunpowder', name: 'Gunpowder', category: 'material', weight: 0.3, slots: 1, stack: 10,
+    desc: 'Black powder, kept dry. The loud half of every reload.',
+  },
+  brass: {
+    id: 'brass', name: 'Brass casings', category: 'material', weight: 0.2, slots: 1, stack: 20,
+    desc: 'Spent casings, picked up and cleaned. Reloaders\u2019 currency.',
+  },
+  lead: {
+    id: 'lead', name: 'Lead stock', category: 'material', weight: 0.5, slots: 1, stack: 10,
+    desc: 'Soft lead ingots and wheel weights. Cast it, load it.',
+  },
+  circuit_board: {
+    id: 'circuit_board', name: 'Circuit board', category: 'material', weight: 0.2, slots: 1, stack: 6,
+    desc: 'Salvaged PCB, traces intact. Turrets and T3 electronics eat these.',
+  },
   valuables: {
     id: 'valuables', name: 'Valuables', category: 'material', weight: 0.3, slots: 1, stack: 10,
     desc: 'Jewelry, cash, and pre-Static shine. Traders still want it.',
@@ -318,6 +336,23 @@ export const ITEMS: Record<string, ItemDef> = {
     id: 'riot_helmet', name: 'Riot helmet', category: 'material', weight: 1.1, slots: 1, stack: 1,
     desc: 'Hard shell, cracked visor. Mitigates 15% of damage while carried.', armor: 0.15,
   },
+  // armor completion (SYSTEMS_SPEC §2.5): torso T3 + the legs slot. These
+  // ride the interim while-carried rule like the vest/helmet until Lane 5
+  // lands the 'armor' category + Equipped slots (FIELD REQUEST filed).
+  plate_carrier: {
+    id: 'plate_carrier', name: 'Plate carrier', category: 'material', weight: 3.4, slots: 2, stack: 1,
+    desc: 'Ceramic plates in a real carrier. Mitigates 40% of damage while carried.', armor: 0.40,
+  },
+  shin_guards: {
+    id: 'shin_guards', name: 'Shin guards', category: 'material', weight: 0.7, slots: 1, stack: 1,
+    desc: 'Molded guards, straps still good. Mitigates 10% of damage while carried.', armor: 0.10,
+  },
+  // the only blueprint in the game (SYSTEMS_SPEC §4.3): rides category
+  // 'key' until Lane 5 adds 'blueprint' to ItemCategory (FIELD REQUEST).
+  bp_turret: {
+    id: 'bp_turret', name: 'Blueprint — Automated Turret', category: 'key', weight: 0.1, slots: 1, stack: 1,
+    desc: 'Sodgame-era schematics, grease-pencil annotations. Unlocks the turret craft: gun parts, boards, an engine part, and a bench that can read.',
+  },
 };
 
 // Husk corpse loot, keyed by spawn zone — Skyrim-style: what they were is
@@ -369,6 +404,12 @@ export const HUSK_LOOT: Record<string, HuskLootEntry[]> = {
     { id: 'bandage', min: 1, max: 1, chance: 0.4 },
     { id: 'ammo_9mm', min: 4, max: 9, chance: 0.3 },
     { id: 'finish_matte', min: 1, max: 1, chance: 0.12 },
+    // the armored guard pack is the island's military salvage stream:
+    // reload components, real armor, and (rarely) the turret blueprint
+    { id: 'brass', min: 4, max: 8, chance: 0.4 },
+    { id: 'lead', min: 1, max: 2, chance: 0.3 },
+    { id: 'plate_carrier', min: 1, max: 1, chance: 0.08 },
+    { id: 'bp_turret', min: 1, max: 1, chance: 0.05 },
   ],
   forest: [
     { id: 'cloth', min: 1, max: 2, chance: 0.6 },
@@ -393,6 +434,7 @@ export const HUSK_LOOT: Record<string, HuskLootEntry[]> = {
     { id: 'flare', min: 1, max: 1, chance: 0.2 },
     { id: 'cloth', min: 1, max: 1, chance: 0.15 },
     { id: 'chemicals', min: 1, max: 1, chance: 0.2 },
+    { id: 'circuit_board', min: 1, max: 1, chance: 0.25 },
   ],
   dunes: [
     { id: 'water_bottle', min: 1, max: 2, chance: 0.35 },
@@ -452,6 +494,12 @@ export const FIELD_RECIPES: Record<string, FieldRecipe> = {
     components: [{ itemId: 'raw_meat', qty: 1 }],
     resultId: 'cooked_meat', resultQty: 1,
   },
+  r_rock_lure: {
+    // SYSTEMS_SPEC §4.2: rocks are free — pick up a handful anywhere
+    id: 'r_rock_lure', name: 'Gather throwing rocks',
+    components: [],
+    resultId: 'rock', resultQty: 5,
+  },
 };
 
 // Workstation recipes — need the matching station and must be close to it.
@@ -476,6 +524,18 @@ export const STATION_RECIPES: Record<string, FieldRecipe> = {
     id: 'r_reload_shells', name: 'Reload shells', station: 'workbench',
     components: [{ itemId: 'scrap', qty: 2 }],
     resultId: 'shells', resultQty: 4,
+  },
+  r_reload_9mm_t2: {
+    // SYSTEMS_SPEC §4.2: real components beat scrap-and-hope — same bench,
+    // double the yield. The crafting-depth ladder in one recipe.
+    id: 'r_reload_9mm_t2', name: 'Reload 9mm (components)', station: 'workbench',
+    components: [{ itemId: 'gunpowder', qty: 1 }, { itemId: 'brass', qty: 1 }, { itemId: 'lead', qty: 1 }],
+    resultId: 'ammo_9mm', resultQty: 12,
+  },
+  r_shin_guards: {
+    id: 'r_shin_guards', name: 'Shin guards', station: 'workbench',
+    components: [{ itemId: 'scrap', qty: 2 }, { itemId: 'cloth', qty: 2 }],
+    resultId: 'shin_guards', resultQty: 1,
   },
   r_reflex: {
     id: 'r_reflex', name: 'Reflex sight', station: 'workbench',
@@ -512,6 +572,12 @@ export const STATION_RECIPES: Record<string, FieldRecipe> = {
     id: 'r_fuel_can', name: 'Fuel can', station: 'chemistry',
     components: [{ itemId: 'chemicals', qty: 2 }],
     resultId: 'fuel_can', resultQty: 1,
+  },
+  r_gunpowder: {
+    // SYSTEMS_SPEC §4.2: powder is a Chemistry product, never a drop
+    id: 'r_gunpowder', name: 'Gunpowder', station: 'chemistry',
+    components: [{ itemId: 'chemicals', qty: 2 }],
+    resultId: 'gunpowder', resultQty: 2,
   },
   // --- Machine Shop ---
   r_tire: {
@@ -643,6 +709,7 @@ export const SAFE_LOOT: HuskLootEntry[] = [
   { id: 'ammo_9mm', min: 4, max: 10, chance: 0.5 },
   { id: 'medkit', min: 1, max: 1, chance: 0.3 },
   { id: 'lockpick', min: 1, max: 2, chance: 0.35 },
+  { id: 'circuit_board', min: 1, max: 2, chance: 0.3 },
 ];
 
 /** Harvest nodes in the wild: fallen logs give wood, berry bushes give produce. */
@@ -707,6 +774,8 @@ const FOOTPRINTS: Record<string, [number, number]> = {
   // ammo + small goods
   ammo_9mm: [1, 1], shells: [1, 1], ammo_rifle: [1, 1], ammo_556: [1, 1], bolts: [1, 1],
   scrap: [1, 1], wire: [1, 1], cloth: [1, 1], chemicals: [1, 1], gun_parts: [1, 1],
+  gunpowder: [1, 1], brass: [1, 1], lead: [1, 1], circuit_board: [1, 1], bp_turret: [1, 1],
+  plate_carrier: [2, 2], shin_guards: [1, 1],
   valuables: [1, 1], lockpick: [1, 1], phone: [1, 1], relay_part: [1, 1], beacon_cell: [1, 1],
   flare: [1, 1], fire_starter: [1, 1], gun_oil: [1, 1], cleaning_kit: [1, 1],
   reflex_sight: [1, 1], suppressor: [1, 1], extended_mag: [1, 1], foregrip: [1, 1], laser_sight: [1, 1],
