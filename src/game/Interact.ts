@@ -4,7 +4,8 @@
 import * as THREE from 'three';
 import { useGameStore } from '../store/gameStore';
 import { ITEMS, HUSK_LOOT, HUSK_KIND_LOOT, LOG_LOOT, BUSH_LOOT, rollLoot, weightedChance } from '../data/items';
-import { DESIGNED_RECRUITS, SURVIVOR_LOOKS } from '../data/survivors';
+import { DESIGNED_RECRUITS, SURVIVOR_LOOKS, NPC_LOOKS, type SurvivorLook } from '../data/survivors';
+import { buildHumanFigure } from './figureKit';
 import { CLAIMABLE } from '../data/base';
 import { buildGroundMesh } from './weaponMeshes';
 import { buildFurnitureMesh, applyDisturbed, applyRestored, FURNITURE_LABEL, type FurnitureKind } from './furnitureMeshes';
@@ -67,26 +68,25 @@ export interface Interactable {
   use: () => void;
 }
 
+/**
+ * A standing person — LANE 4 (stage 3): delegates to the figureKit rig,
+ * the same parametric humanoid that builds the player avatar and every
+ * husk. The old box-stacked builder is deleted; looks (skin / jacket /
+ * pants / build / hair) come from SURVIVOR_LOOKS / NPC_LOOKS data.
+ */
 function personMesh(
-  jacket: number,
-  skin: number,
-  opts?: { pants?: number; build?: 'slim' | 'standard' | 'heavy' },
+  look: Pick<SurvivorLook, 'skin' | 'jacket'> & Partial<Omit<SurvivorLook, 'skin' | 'jacket'>>,
 ): THREE.Group {
-  const g = new THREE.Group();
-  const jm = new THREE.MeshStandardMaterial({ color: jacket, roughness: 1 });
-  const sm = new THREE.MeshStandardMaterial({ color: skin, roughness: 0.9 });
-  const buildW = opts?.build === 'slim' ? 0.88 : opts?.build === 'heavy' ? 1.16 : 1;
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.6 * buildW, 0.75, 0.34 * buildW), jm);
-  torso.position.y = 1.15;
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.34, 0.3), sm);
-  head.position.y = 1.72;
-  const legs = new THREE.Mesh(
-    new THREE.BoxGeometry(0.5 * buildW, 0.78, 0.3),
-    new THREE.MeshStandardMaterial({ color: opts?.pants ?? 0x35322c, roughness: 1 }),
-  );
-  legs.position.y = 0.39;
-  g.add(torso, head, legs);
-  return g;
+  return buildHumanFigure({
+    palette: {
+      skin: look.skin,
+      jacket: look.jacket,
+      pants: look.pants ?? 0x35322c,
+      hair: look.hair,
+    },
+    build: look.build,
+    hairStyle: look.hairStyle,
+  }).group;
 }
 
 /** Distinct physical mesh per item — see weaponMeshes.ts. */
@@ -394,8 +394,8 @@ export class InteractSystem {
       const y = hooks.groundY(x, z);
       const look = SURVIVOR_LOOKS[r.key];
       const mesh = look
-        ? personMesh(look.jacket, look.skin, { pants: look.pants, build: look.build })
-        : personMesh(r.jacket, 0xa8785a);
+        ? personMesh(look)
+        : personMesh({ jacket: r.jacket, skin: 0xa8785a });
       mesh.position.set(x, y, z);
       mesh.rotation.y = Math.PI * 0.3;
       hooks.scene.add(mesh);
@@ -484,7 +484,10 @@ export class InteractSystem {
       const mx = x + (n.dx ?? 2.2);
       const mz = z + (n.dz ?? 1.5);
       const y = hooks.groundY(mx, mz);
-      const mesh = personMesh(n.jacket, 0xc9a180);
+      const nLook = NPC_LOOKS[n.id.replace('npc:', '')];
+      const mesh = nLook
+        ? personMesh(nLook)
+        : personMesh({ jacket: n.jacket, skin: 0xc9a180 });
       mesh.position.set(mx, y, mz);
       mesh.rotation.y = Math.PI * 0.75;
       hooks.scene.add(mesh);
