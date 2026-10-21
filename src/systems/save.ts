@@ -40,6 +40,14 @@ export type RawSaveRecord = Omit<Partial<SaveSnapshot>, 'version'> & {
 /**
  * Migrate a raw save record forward to the current version.
  * Throws on unknown versions so bad data never silently loads.
+ *
+ * Parallel-cycle note (Lane 5 field contract): the v3 snapshot grows by
+ * OPTIONAL fields only — craftQueue / storyChoices / baseExt (Lane 7/9/10
+ * state), joining wave 3's dispatches/journal/scouted/baseQueue and wave
+ * 4's appearance. IndexedDB stores records as-is, so current-version
+ * saves pass through untouched below and the new fields ride along; the
+ * STORE defaults any that are absent on load (see gameStore.loadFromSlot).
+ * No version bump, and nothing here fills them in — same rule as wave 3.
  */
 export function migrate(record: RawSaveRecord): SaveSnapshot {
   const s: Record<string, unknown> = { ...record };

@@ -1,4 +1,5 @@
 import type { SurvivorDef } from '../data/survivors';
+import type { SkillId } from '../data/skills';
 // Shared types for the zustand store, game data modules, and save system.
 // Data modules (src/data/*) implement the *Def interfaces declared here.
 
@@ -90,7 +91,11 @@ export const DEFAULT_APPEARANCE: Appearance = {
 // ---------- inventory ----------
 export type ItemCategory =
   | 'weapon-melee' | 'weapon-ranged' | 'ammo' | 'food' | 'medical'
-  | 'material' | 'tool' | 'key' | 'pack' | 'mod';
+  | 'material' | 'tool' | 'key' | 'pack' | 'mod'
+  // parallel cycle (Lane 5 field contract, SYSTEMS_SPEC §1.1): worn
+  // mitigation gets its own category, and blueprint unlock items theirs.
+  // Lane 6 codes its catalog re-categorization against these.
+  | 'armor' | 'blueprint';
 
 export interface ItemDef {
   id: string;
@@ -128,6 +133,17 @@ export interface ItemDef {
   projectileSpeed?: number; // ranged: m/s — set = true projectile with drop, unset = hitscan
   pen?: number; // ammo: armor penetration class 0..2 (vs armored husks)
   disassembly?: { itemId: string; qty: number }[]; // bench yield when stripped for parts
+  // ---- parallel cycle field contract (SYSTEMS_SPEC §1.2) — all optional,
+  // authored by Lane 6 (items) / gated by Lane 7 (crafting) + Lane 8
+  // (skills). Declared here so every lane compiles against one shape. ----
+  tier?: 1 | 2 | 3; // weapons + mods: loot/power tier
+  swingSec?: number; // melee: full swing duration
+  staminaCost?: number; // melee: stamina per swing
+  blockPct?: number; // melee: damage blocked while blocking (0..1)
+  reach?: number; // melee: reach in meters
+  armorSlot?: 'head' | 'torso' | 'legs'; // armor: body slot it protects
+  barterValue?: number; // trader price in "value" units (Lane 6 §3.5 anchors)
+  skillReq?: { skill: SkillId; level: number }; // crafting gate (§4.2/§6.1)
 }
 
 export interface InvItem {
@@ -150,6 +166,12 @@ export interface Equipped {
   melee: string | null; // uid
   ranged: string | null; // uid
   pack: string | null; // uid
+  // parallel cycle field contract (SYSTEMS_SPEC §1.3): worn-armor slots.
+  // OPTIONAL so every pre-cycle save and literal stays valid untouched;
+  // undefined and null both mean "nothing worn there".
+  armorHead?: string | null; // uid
+  armorTorso?: string | null; // uid
+  armorLegs?: string | null; // uid
 }
 
 // ---------- quests ----------
@@ -297,6 +319,41 @@ export interface BaseBuildOrder {
   readyMin: number;
 }
 
+// ---- parallel cycle: Lane 5 field contract ----
+// These shapes are the published schema sibling lanes code against.
+// All are OPTIONAL on the v3 snapshot (passthrough-safe, see save.ts):
+// older saves lack them, the store defaults them on load, no version bump.
+
+/** One timed station-craft order (Lane 7's timer engine owns the logic;
+ *  Lane 5 owns persistence). Times are absolute game minutes, the same
+ *  clock as Dispatch/BaseBuildOrder. */
+export interface CraftOrder {
+  id: string;
+  recipeId: string; // FIELD_RECIPES / STATION_RECIPES id (data/items)
+  stationId: string | null; // StationId, null = field craft
+  qty: number; // units of the result to produce
+  /** Absolute game minutes when the order completes. */
+  readyMin: number;
+}
+
+/** Base-state extensions (Lane 10 owns the logic: claims, heat, siege,
+ *  stockpile; Lane 5 owns persistence). Every field optional — a run
+ *  with no base extensions saves and loads exactly as before. The home
+ *  base itself stays `SaveSnapshot.base`; this is everything around it. */
+export interface BaseExt {
+  /** Secondary claimed sites (home base is `base`, never repeated here). */
+  outposts?: { poiId: string; facilities: string[] }[];
+  /** Last computed base heat (Lane 10's heat math owns the value). */
+  heat?: number;
+  /** Siege-loop state (Lane 10): absent = the loop has never stirred. */
+  siegeState?: 'calm' | 'scouted' | 'warning' | 'siege';
+  /** Absolute game minutes of the next scheduled siege beat, if any. */
+  siegeNextMin?: number;
+  /** Base shelves (SYSTEMS_SPEC §7.5 stockpile screen), distinct from
+   *  vehicle storage — items physically left at the home base. */
+  stockpile?: InvItem[];
+}
+
 export interface SaveSnapshot {
   version: 3;
   savedAt: number;
@@ -334,6 +391,14 @@ export interface SaveSnapshot {
   baseQueue?: BaseBuildOrder[];
   // wave 4: character appearance — optional on v3, store defaults on load
   appearance?: Appearance;
+  // parallel cycle (Lane 5 field contract) — optional on v3, same rule:
+  // absent on older saves, store defaults them on load. Lane 7 persists
+  // its timed craft queue here; Lane 9 records string-valued story
+  // choices the boolean `flags` map cannot hold (e.g. beacon: 'lit');
+  // Lane 10 persists base extensions here.
+  craftQueue?: CraftOrder[];
+  storyChoices?: Record<string, string>;
+  baseExt?: BaseExt;
 }
 
 export interface SaveMeta {

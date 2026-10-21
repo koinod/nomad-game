@@ -11,7 +11,7 @@ import { DEFAULT_APPEARANCE, DIFFICULTIES } from './types';
 import type {
   Appearance, DifficultyId, Equipped, FleetEntry, InvItem, PhoneTab, QuestProgress, QuestStepType,
   SaveMeta, SaveSnapshot, Screen, ToastMsg, TrailerFleetEntry,
-  Dispatch, JournalEntry, ScoutReport, BaseBuildOrder,
+  Dispatch, JournalEntry, ScoutReport, BaseBuildOrder, CraftOrder, BaseExt,
 } from './types';
 import {
   carryLimitKg, encumbranceTier, slotLimit, totalWeightKg, usedSlots,
@@ -124,6 +124,19 @@ interface GameState {
   journal: JournalEntry[];
   scouted: Record<string, ScoutReport>;
   baseQueue: BaseBuildOrder[];
+
+  // parallel cycle — Lane 5 field contract state (see types.ts). Lane 7's
+  // crafting engine drives the queue through these verbs; Lane 9 records
+  // story choices; Lane 10 patches base extensions. All default empty and
+  // ride the v3 save as optional fields.
+  craftQueue: CraftOrder[];
+  enqueueCraft: (order: Omit<CraftOrder, 'id'>) => string;
+  cancelCraft: (id: string) => void;
+  removeCraft: (id: string) => void;
+  storyChoices: Record<string, string>;
+  setStoryChoice: (key: string, value: string) => void;
+  baseExt: BaseExt;
+  setBaseExt: (patch: Partial<BaseExt>) => void;
   dayStats: { kills: number; crafts: number; pickups: number };
   addJournal: (title: string, lines: string[]) => void;
   startDispatch: (
@@ -502,6 +515,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         survivors: [],
         base: null,
         dispatches: [], journal: [], scouted: {}, baseQueue: [],
+        craftQueue: [], storyChoices: {}, baseExt: {},
         dayStats: { kills: 0, crafts: 0, pickups: 0 },
       });
     },
@@ -1374,6 +1388,30 @@ export const useGameStore = create<GameState>()((set, get) => {
     baseQueue: [],
     dayStats: { kills: 0, crafts: 0, pickups: 0 },
 
+    // ---- parallel cycle: Lane 5 field-contract state ----
+    craftQueue: [],
+    storyChoices: {},
+    baseExt: {},
+    enqueueCraft: (order) => {
+      const id = `c${Date.now().toString(36)}${(uidCounter++).toString(36)}`;
+      set({ craftQueue: [...get().craftQueue, { ...order, id }] });
+      return id;
+    },
+    cancelCraft: (id) => {
+      set({ craftQueue: get().craftQueue.filter((o) => o.id !== id) });
+    },
+    removeCraft: (id) => {
+      // completion removal is cancelCraft's twin; kept as a separate verb
+      // so Lane 7's engine reads clearly at the call site (finish != cancel)
+      set({ craftQueue: get().craftQueue.filter((o) => o.id !== id) });
+    },
+    setStoryChoice: (key, value) => {
+      set({ storyChoices: { ...get().storyChoices, [key]: value } });
+    },
+    setBaseExt: (patch) => {
+      set({ baseExt: { ...get().baseExt, ...patch } });
+    },
+
     addJournal: (title, lines) => {
       const s = get();
       const atMin = s.daysElapsed * 1440 + s.timeMinutes;
@@ -1656,6 +1694,9 @@ export const useGameStore = create<GameState>()((set, get) => {
         scouted: s.scouted,
         baseQueue: s.baseQueue,
         appearance: s.appearance,
+        craftQueue: s.craftQueue,
+        storyChoices: s.storyChoices,
+        baseExt: s.baseExt,
       };
       try {
         await saveGameToSlot(slot, snapshot);
@@ -1707,6 +1748,10 @@ export const useGameStore = create<GameState>()((set, get) => {
         // wave 4: appearance — absent on older v3 saves, keep the current look
         appearance: snap.appearance ?? get().appearance,
         appearanceCustomized: snap.appearance !== undefined,
+        // parallel cycle: field-contract state — absent on older v3 saves
+        craftQueue: snap.craftQueue ?? [],
+        storyChoices: snap.storyChoices ?? {},
+        baseExt: snap.baseExt ?? {},
         dayStats: { kills: 0, crafts: 0, pickups: 0 },
         pendingSnapshot: snap,
       });
