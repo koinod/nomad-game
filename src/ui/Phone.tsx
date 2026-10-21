@@ -7,6 +7,8 @@ import { SKILLS, TREES, PERKS, xpToNext } from '../data/skills';
 import { traitName, moraleBand, type SurvivorJob } from '../data/survivors';
 import { FACILITIES, baseHeat, heatBand, buildMinutes } from '../data/base';
 import { poiName } from '../data/dispatch';
+import { TRADERS } from '../data/traders';
+import TraderPanel from './TraderPanel';
 import { UPGRADES, canInstallUpgrade } from '../data/upgrades';
 import { carParams, estimatePerformance, UPGRADE_MASS_KG } from '../game/carSpec';
 import { VEHICLE_DEFS } from '../game/Vehicles';
@@ -569,7 +571,16 @@ function BaseSection() {
   );
 }
 
+/**
+ * NPCs standing in the purged world who front a trader (data/traders.ts
+ * npcKey). Only Kowalski is placed today (lighthouse watch room); Jonah
+ * fronts no bench. Lane 9's W2 placements (Okonkwo, Quartermaster,
+ * Vesper, Wraith) extend this list when the wiring train lands them.
+ */
+const WORLD_TRADER_NPC_KEYS = ['kowalski'];
+
 function LogTab() {
+  const [selectedTraderId, setSelectedTraderId] = useState<string | null>(null);
   const quests = useGameStore((s) => s.quests);
   const doneQuests = useGameStore((s) => s.doneQuests);
   const rep = useGameStore((s) => s.rep);
@@ -656,6 +667,28 @@ function LogTab() {
         })}
       </section>
 
+      {/* traders — Lane 9 W3 mount: benches whose NPCs stand in the world.
+          The panel enforces its own rep/flag gates. */}
+      <section>
+        <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Traders</h3>
+        {TRADERS.filter((t) => WORLD_TRADER_NPC_KEYS.includes(t.npcKey)).map((t) => (
+          <div key={t.id} className="mb-1.5 flex items-center justify-between text-sm">
+            <span className="text-[#d7dde5]">
+              {t.name} <span className="text-xs text-[#8a94a3]">· {FACTIONS.find((f) => f.id === t.faction)?.name ?? t.faction}</span>
+            </span>
+            <button
+              onClick={() => { sfx.play('ui'); setSelectedTraderId(t.id); }}
+              className="rounded border border-[#232b36] bg-[#0b0e12] px-3 py-1 text-[13px] text-[#d7dde5] transition-colors hover:border-[#e8b34b]"
+            >
+              Trade
+            </button>
+          </div>
+        ))}
+        <p className="text-xs leading-relaxed text-[#8a94a3]">
+          Barter only — no currency on the island. Other benches open as their people reach the island.
+        </p>
+      </section>
+
       {/* save */}
       <section>
         <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Save</h3>
@@ -693,6 +726,10 @@ function LogTab() {
         </div>
         <p className="text-xs text-[#8a94a3]">{Math.round(battery)}% — charge at campfires.</p>
       </section>
+
+      {selectedTraderId && (
+        <TraderPanel traderId={selectedTraderId} onClose={() => setSelectedTraderId(null)} />
+      )}
     </div>
   );
 }
