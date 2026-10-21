@@ -183,6 +183,15 @@ export const POI_DEFS: PoiDef[] = [
   // marina shore (open water: findLandZ falls back to the exact guess)
   { id: 'airbase', x: AIRBASE_CENTER[0], zGuess: AIRBASE_CENTER[1] },
   { id: 'carrier', x: -688, zGuess: 48 },
+  // W1 (stage 7): Lane 9's six faction sites — named ground (ownership,
+  // markers, NPCs, loot) until the parked buildings return. Coordinates
+  // per worldWiring WORLD_WIRING_STEPS W1; z resolves via findLandZ.
+  { id: 'tollgate', x: 672, zGuess: 60 },
+  { id: 'raider_fort', x: 500, zGuess: 150 },
+  { id: 'barn', x: -40, zGuess: 120 },
+  { id: 'warehouse', x: 140, zGuess: -90 },
+  { id: 'gas_station', x: -160, zGuess: -30 },
+  { id: 'strip_mall', x: -60, zGuess: -120 },
 ];
 
 /** Find a walkable z near the guess (height in a sane band). */
@@ -1023,7 +1032,45 @@ export class World {
     sign('relay_station', -14, 12, 'RELAY RIDGE', 0.2);
     sign('lighthouse_base', -16, 9, 'LIGHTHOUSE POINT', 0.55);
     sign('airbase', -42, 58, 'AIRBASE — RESTRICTED', 0.9);
-
+    // W1 (stage 7): the six new faction sites get signs — named ground
+    // until their buildings return (buildings stay parked).
+    sign('tollgate', -8, 10, 'EASTERN TOLLGATE', -0.5);
+    sign('raider_fort', -10, 8, 'DUNE FORT', 0.4);
+    sign('barn', 8, -8, 'UNION FARM', 0.3);
+    sign('warehouse', -10, -8, 'DEPOT ROW', -0.3);
+    sign('gas_station', 8, 8, 'LAST GAS', 0.5);
+    sign('strip_mall', -8, -10, 'SHOAL PLAZA', -0.2);
+    // the tollgate's barrier arm: a striped bar on a pivot post — the
+    // gate reads as a gate with no building attached.
+    {
+      const [px, pz] = this.poi('tollgate');
+      const bx = px - 2;
+      const bz = pz - 6;
+      const by = this.groundY(bx, bz);
+      const g = new THREE.Group();
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.35, 1.1, 0.35), postMat);
+      post.position.y = 0.55;
+      post.castShadow = true;
+      g.add(post);
+      const stripeMat = new THREE.MeshStandardMaterial({ color: 0xc23b2e, roughness: 0.8 });
+      const arm = new THREE.Group();
+      for (let i = 0; i < 5; i++) {
+        const seg = new THREE.Mesh(
+          new THREE.BoxGeometry(0.9, 0.16, 0.08),
+          i % 2 === 0 ? stripeMat : boardMat,
+        );
+        seg.position.x = 0.45 + i * 0.9;
+        seg.castShadow = true;
+        arm.add(seg);
+      }
+      arm.position.set(0.1, 1.02, 0);
+      arm.rotation.z = 0.06; // resting, a hair off level
+      g.add(arm);
+      g.position.set(bx, by, bz);
+      g.rotation.y = 0.5;
+      g.name = 'prop:tollgate_barrier';
+      this.scene.add(g);
+    }
   }
 
   private buildRelayRuin(): void {

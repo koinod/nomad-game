@@ -3,6 +3,7 @@ import { useGameStore, claimsFromLegacyBase } from '../store/gameStore';
 import { ITEMS, STATION_LABEL } from '../data/items';
 import { QUESTS } from '../data/quests';
 import { FACTIONS, repTier } from '../data/factions';
+import { MAP_MARKERS } from '../data/territory';
 import { SKILLS, TREES, PERKS, xpToNext } from '../data/skills';
 import { traitName, moraleBand, type SurvivorJob } from '../data/survivors';
 import { FACILITIES, baseHeat, heatBand, buildMinutes, tieredFacility } from '../data/base';
@@ -379,6 +380,31 @@ function WorldMap() {
       ctx.fillRect(px - 1.5, py - 1.5, 3, 3);
       ctx.fillStyle = 'rgba(215,221,229,0.85)';
       ctx.fillText(id.replace(/_/g, ' '), px + 4, py + 3);
+    }
+
+    // W4 (stage 7): territory markers — owner-colored pins with the
+    // site's faction label, resolved through the live POI positions.
+    const OWNER_COLORS: Record<string, string> = {
+      player: '#5aa469', union: '#7ab0c9', skulls: '#d9534f',
+      tollkeepers: '#e8b34b', remnants: '#b8b0a4', drowned: '#4a7a9c',
+      lighthouse: '#e8e0cc', enclave: '#9a6ac9', neutral: '#8a94a3',
+      contested: '#d7834f',
+    };
+    ctx.font = '7px sans-serif';
+    for (const m of MAP_MARKERS) {
+      if (!m.poiId) continue;
+      const p = st.poiPositions[m.poiId];
+      if (!p) continue;
+      const [px, py] = toPx(p[0], p[1]);
+      ctx.fillStyle = OWNER_COLORS[m.owner] ?? '#8a94a3';
+      ctx.beginPath();
+      ctx.arc(px, py, 2.6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(11,14,18,0.8)';
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(215,221,229,0.75)';
+      ctx.fillText(m.label, px + 4, py - 4);
     }
 
     // SAT UPLINK: the relay feeds live tracking — the car as an amber diamond

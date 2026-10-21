@@ -8,6 +8,8 @@ import { ITEMS } from '../data/items';
 import { QUESTS } from '../data/quests';
 import { ENCLAVE_CACHES, ENCLAVE_RADIO_BURST } from '../data/worldWiring';
 import { buildContainerDefs } from '../game/Interact';
+import { POI_DEFS } from '../game/World';
+import { MAP_MARKERS, territoryAt } from '../data/territory';
 
 describe('stage 7 item 10 — legacy armor', () => {
   it('armored_vest / riot_helmet are armor with body slots and their values intact', () => {
@@ -49,6 +51,32 @@ describe('stage 7 item 10 — legacy armor', () => {
     s.equipUid('v1');
     s.unequipSlot('armorTorso');
     expect(useGameStore.getState().equipped.armorTorso ?? null).toBeNull();
+  });
+});
+
+describe('stage 7 item 1 — W1 POIs + W4 markers', () => {
+  it('POI_DEFS carries Lane 9\u2019s six sites at the W1 coordinates', () => {
+    const want: Record<string, [number, number]> = {
+      tollgate: [672, 60], raider_fort: [500, 150], barn: [-40, 120],
+      warehouse: [140, -90], gas_station: [-160, -30], strip_mall: [-60, -120],
+    };
+    for (const [id, [x, z]] of Object.entries(want)) {
+      const def = POI_DEFS.find((p) => p.id === id);
+      expect(def, id).toBeDefined();
+      expect(def!.x).toBe(x);
+      expect(def!.zGuess).toBe(z);
+    }
+  });
+
+  it('every map marker resolves to a real POI, and territory knows its sites', () => {
+    const poiIds = new Set(POI_DEFS.map((p) => p.id));
+    for (const m of MAP_MARKERS) {
+      expect(m.poiId, m.id).toBeDefined();
+      expect(poiIds.has(m.poiId!), m.id).toBe(true);
+    }
+    for (const id of ['tollgate', 'raider_fort', 'barn', 'warehouse', 'gas_station', 'strip_mall']) {
+      expect(territoryAt(id)?.poiId).toBe(id);
+    }
   });
 });
 
