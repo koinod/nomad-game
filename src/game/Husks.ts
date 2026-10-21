@@ -14,6 +14,7 @@ import { buildHuskFigure, type FigureRig } from './figureKit';
 import { computeVisibility, canHuskSee } from './visibility';
 import { resolveCollisions, type Collider } from './Colliders';
 import { sfx } from '../systems/audio';
+import type { SiegeWaveRequest } from '../systems/baseClaims';
 import { useGameStore } from '../store/gameStore';
 import { DIFFICULTIES } from '../store/types';
 
@@ -817,6 +818,53 @@ export class HuskManager {
   get activeCount(): number {
     let n = 0;
     for (const h of this.husks) if (h.alive) n++;
+    return n;
+  }
+
+  /**
+   * Stage 7 (item 7): Lane 10's SiegeSpawner dependency, named in their
+   * adapter contract. Spawns one planned wave on a ring ~45m around the
+   * claim anchor (land + building vetoes apply, re-rolled per husk),
+   * then sends every spawned husk investigating the anchor — the FSM's
+   * door-seeking converges them on the gates/storage. Returns how many
+   * actually spawned. Scout parties (the heat≥30 state) pass
+   * { scout: true } and zone separately so wave bookkeeping never
+   * counts them as a siege.
+   */
+  spawnSiegeWave(
+    req: SiegeWaveRequest,
+    groundY: (x: number, z: number) => number,
+    opts?: { scout?: boolean },
+  ): number {
+    const zoneId = `${opts?.scout ? 'scout' : 'siege'}:${req.siteId}`;
+    const n = Math.max(0, Math.floor(req.count));
+    let spawned = 0;
+    for (let i = 0; i < n; i++) {
+      const kind = req.kinds[i % Math.max(1, req.kinds.length)] ?? 'shambler';
+      const ang = (i / Math.max(1, n)) * Math.PI * 2 + this.rng() * 0.5;
+      let placed: [number, number] | null = null;
+      for (let tries = 0; tries < 8 && !placed; tries++) {
+        const r = 45 + this.rng() * 10;
+        const x = req.x + Math.cos(ang) * r;
+        const z = req.z + Math.sin(ang) * r;
+        if (groundY(x, z) > 0.8 && !this.spawnBlocked?.(x, z)) placed = [x, z];
+      }
+      if (!placed) continue;
+      this.addHusk(`${zoneId}_${req.wave}_${this.spawnCounter++}`, kind as HuskKind, placed[0], placed[1], zoneId, groundY);
+      const h = this.husks[this.husks.length - 1];
+      h.investigateAt(
+        new THREE.Vector3(req.x, groundY(req.x, req.z), req.z),
+        { delay: Math.min(2, spawned * 0.3), jitter: 5 },
+      );
+      spawned++;
+    }
+    return spawned;
+  }
+
+  /** Live husks carrying a zone id (siege/scout bookkeeping). */
+  aliveInZone(zoneId: string): number {
+    let n = 0;
+    for (const h of this.husks) if (h.alive && h.zoneId === zoneId) n++;
     return n;
   }
 

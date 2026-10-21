@@ -18,6 +18,9 @@ import { prefabDef } from '../data/base';
 import { powerBudget, TURRET_POWER_KW, type BaseInstance } from '../systems/baseClaims';
 import { TURRET_DEF, TURRET_GHOST_SPEC } from '../systems/crafting';
 import type { SurvivorDef } from '../data/survivors';
+import * as THREE from 'three';
+import { HuskManager } from '../game/Husks';
+import { XP_EVENTS } from '../systems/skills';
 
 describe('stage 7 item 10 — legacy armor', () => {
   it('armored_vest / riot_helmet are armor with body slots and their values intact', () => {
@@ -282,6 +285,43 @@ describe('stage 7 item 6 — turrets: budget, deploy, stockpile feed', () => {
     expect(s.takeFromStockpile('shore_camp', 'ammo_9mm', 200)).toBe(150);
     expect(s.takeFromStockpile('shore_camp', 'ammo_9mm', 10)).toBe(0);
     expect(useGameStore.getState().claims.home?.stockpile).toEqual([]);
+  });
+});
+
+describe('stage 7 item 7 — HuskManager.spawnSiegeWave (Lane 10\u2019s SiegeSpawner)', () => {
+  const flatLand = () => 5;
+  const req = {
+    wave: 1, count: 4, kinds: ['shambler', 'stalker'] as never[],
+    siteId: 'shore_camp', x: 0, z: 0, target: 'gates' as const,
+  };
+
+  it('spawns the planned count on the perimeter ring, zoned as a siege', () => {
+    const mgr = new HuskManager(new THREE.Scene(), [], 42);
+    const spawned = mgr.spawnSiegeWave(req, flatLand);
+    expect(spawned).toBe(4);
+    expect(mgr.aliveInZone('siege:shore_camp')).toBe(4);
+    for (const h of mgr.husks) {
+      const d = Math.hypot(h.group.position.x, h.group.position.z);
+      expect(d).toBeGreaterThan(40);
+      expect(d).toBeLessThan(60);
+    }
+  });
+
+  it('scouts zone separately so wave bookkeeping never counts them', () => {
+    const mgr = new HuskManager(new THREE.Scene(), [], 7);
+    mgr.spawnSiegeWave({ ...req, count: 2 }, flatLand, { scout: true });
+    expect(mgr.aliveInZone('scout:shore_camp')).toBe(2);
+    expect(mgr.aliveInZone('siege:shore_camp')).toBe(0);
+  });
+
+  it('open water vetoes every spawn point', () => {
+    const mgr = new HuskManager(new THREE.Scene(), [], 3);
+    expect(mgr.spawnSiegeWave(req, () => 0)).toBe(0);
+    expect(mgr.husks.length).toBe(0);
+  });
+
+  it('the XP event the loop pays is Lane 8\u2019s siege_survived', () => {
+    expect(XP_EVENTS.siege_survived).toEqual({ skill: 'leadership', xp: 12, label: 'Siege survived (present)' });
   });
 });
 

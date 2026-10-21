@@ -9,7 +9,7 @@ import { TRAITS as TRAIT_DEFS } from '../data/survivors';
 import { QUESTS } from '../data/quests';
 import { FACTIONS, STARTING_REP, LEGACY_REP_ALIAS } from '../data/factions';
 import { ENCLAVE_RADIO_BURST } from '../data/worldWiring';
-import { applyUpkeep, dailyMoraleTick, FOOD_ITEMS, WATER_ITEMS } from '../systems/morale';
+import { applyUpkeep, dailyMoraleTick, moraleEvent, FOOD_ITEMS, WATER_ITEMS } from '../systems/morale';
 import {
   comfortScore, claimChecklist, claimReady, applyClaim, applyRelocation, powerBudget,
 } from '../systems/baseClaims';
@@ -135,6 +135,8 @@ interface GameState {
   moraleTick: () => void;
   /** Lane 10's daily upkeep + morale pass (Stage 4 step 4b). */
   baseDailyTick: () => void;
+  /** §5.4 morale events over the whole crew (stage 7: siege outcomes). */
+  applyMoraleEvent: (kind: 'siegeWin' | 'siegeLoss' | 'death' | 'recruit') => void;
 
   // base management (BASE_DESIGN)
   base: { poiId: string; facilities: string[] } | null;
@@ -1409,6 +1411,12 @@ export const useGameStore = create<GameState>()((set, get) => {
       set({ survivors: s.survivors.map((x) => (x.id === id ? { ...x, job } : x)) });
       s.addSkillXp('leadership', 2);
     },
+    applyMoraleEvent: (kind) => {
+      const s = get();
+      if (s.survivors.length === 0) return;
+      set({ survivors: moraleEvent(s.survivors, kind) });
+    },
+
     moraleTick: () => {
       const s = get();
       if (s.survivors.length === 0) return;

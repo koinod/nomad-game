@@ -36,6 +36,10 @@ import { ENDING_LINES } from '../narrative/dialogue';
 import { CLAIM_SITES, claimSite } from '../data/base';
 import { TurretSystem } from './Turrets';
 import {
+  computeHeat, siegeForecast, planSiegeWaves, type SiegeWavePlan,
+} from '../systems/baseClaims';
+import { poiName } from '../data/dispatch';
+import {
   totalWeightKg, carryLimitKg, encumbranceTier,
 } from '../store/inventoryUtils';
 import { mulberry32, clamp } from './rng';
@@ -64,6 +68,12 @@ export class Game {
   private animals: AnimalManager | null = null;
   private interact: InteractSystem | null = null;
   private turrets: TurretSystem | null = null;
+  // siege loop (stage 7): the wave plan is runtime-only — baseExt
+  // persists the STATE; a save loaded mid-siege re-arms as a warning.
+  private siegeT = 0;
+  private siegePlan: { siteId: string; waves: SiegeWavePlan[]; next: number } | null = null;
+  private scoutNight = -1;
+  private wasDeadSiege = false;
   // thrown weapons in flight + molotov fire zones
   private throwables: {
     mesh: THREE.Mesh;
@@ -982,6 +992,13 @@ export class Game {
     // husks' own damage seam; power/ammo enforced inside the system
     this.turrets?.update(dt, husks);
 
+    // the siege loop (stage 7) ticks at 1Hz over BaseExt state
+    this.siegeT += dt;
+    if (this.siegeT >= 1) {
+      this.siegeT = 0;
+      this.updateSiege(s, night);
+    }
+
     // husk death bookkeeping (kill counted once when the tip-over starts)
     for (const h of husks.husks) {
       if (h.state === 'dead' && !h.killReported) {
@@ -1260,6 +1277,146 @@ export class Game {
     s.addToast(friendly ? 'The Skulls toll crew waves you through.' : 'Skulls toll crew on this stretch — they\u2019re watching the road.');
   }
 
+  /**
+   * The siege loop (stage 7, item 7) — Lane 10's §3.7 state machine
+   * over BaseExt, ticking at 1Hz:
+   *   heat ≥30 → 'scouted' (a scout pair sniffs the perimeter at night)
+   *   heat ≥60 → 'warning' (siege scheduled for the NEXT nightfall;
+   *              if the player is away when it lands, the warning waits)
+   *   nightfall + player near → 'siege': planSiegeWaves spawn through
+   *              HuskManager.spawnSiegeWave, one wave at a time.
+   *   all waves dead → survived: Lane 8's siege_survived XP event,
+   *              §5.4 siegeWin morale, journal + toast.
+   *   player death mid-siege → broken: siegeLoss morale, back to
+   *              'scouted' (the surviving husks stay in the world).
+   */
+  private updateSiege(s: ReturnType<typeof useGameStore.getState>, night: boolean): void {
+    const ext = s.baseExt;
+    const state = ext.siegeState ?? 'calm';
+    if (s.dead && !this.wasDeadSiege && state === 'siege') {
+      this.siegePlan = null;
+      s.setBaseExt({ siegeState: 'scouted', siegeNextMin: undefined });
+      s.applyMoraleEvent('siegeLoss');
+      s.addJournal('The siege broke', [
+        'They came in the dark and the ground didn\u2019t hold. What matters now is who\u2019s still standing — and that the island knows the base can bleed.',
+      ]);
+      s.addToast('The siege broke the base.');
+    }
+    this.wasDeadSiege = s.dead;
+
+    const home = s.claims.home;
+    if (!home) {
+      if (state !== 'calm') s.setBaseExt({ siegeState: 'calm', siegeNextMin: undefined });
+      this.siegePlan = null;
+      return;
+    }
+    const anchor = s.poiPositions[home.siteId]
+      ?? (home.siteId === 'military_base' ? s.poiPositions['airbase'] : undefined);
+    if (!anchor || !this.husks) return;
+    const heat = computeHeat(home, s.survivors, s.daysElapsed, ext.localKillsNearBase ?? 0);
+    if (ext.heat !== heat.heat) s.setBaseExt({ heat: heat.heat });
+    const absNow = s.daysElapsed * 1440 + s.timeMinutes;
+    const nextNightfall = (s.timeMinutes < 1080 ? s.daysElapsed : s.daysElapsed + 1) * 1440 + 1080;
+    const siteName = poiName(home.siteId);
+
+    if (state === 'calm' || state === 'scouted') {
+      if (heat.tier === 'warning' || heat.tier === 'siege') {
+        s.setBaseExt({ siegeState: 'warning', siegeNextMin: nextNightfall });
+        s.addJournal(`Siege warning — ${siteName}`, [
+          siegeForecast(heat.heat).note,
+          'They\u2019ve counted the stockpile and the walls. Tomorrow night they come to collect — be home, be armed, or be gone.',
+        ]);
+        s.addToast(`Siege warning at ${siteName} — tomorrow night.`);
+        return;
+      }
+      if (heat.tier === 'scout' && state === 'calm') {
+        s.setBaseExt({ siegeState: 'scouted' });
+        s.addJournal(`Scouts at ${siteName}`, [
+          'Movement at the perimeter after dark — sniffing, counting. The base is being read. Bank less, wall more, or thin them out.',
+        ]);
+        s.addToast(`Scout activity at ${siteName}.`);
+        return;
+      }
+      if (heat.tier === 'calm' && state === 'scouted') {
+        s.setBaseExt({ siegeState: 'calm' });
+        return;
+      }
+      // scouted + night: one scout pair per night sniffs the perimeter
+      if (state === 'scouted' && night && this.scoutNight !== s.daysElapsed) {
+        this.scoutNight = s.daysElapsed;
+        this.husks.spawnSiegeWave(
+          { wave: 0, count: 2, kinds: ['shambler', 'stalker'], siteId: home.siteId, x: anchor[0], z: anchor[1], target: 'gates' },
+          (x, z) => this.groundY(x, z),
+          { scout: true },
+        );
+      }
+      return;
+    }
+
+    if (state === 'warning') {
+      if (heat.tier !== 'warning' && heat.tier !== 'siege') {
+        // the pressure bled off — stand down to whatever the heat says
+        s.setBaseExt({ siegeState: heat.tier === 'scout' ? 'scouted' : 'calm', siegeNextMin: undefined });
+        return;
+      }
+      if (absNow < (ext.siegeNextMin ?? nextNightfall)) return;
+      const playerNear = Math.hypot(s.pos[0] - anchor[0], s.pos[2] - anchor[1]) <= 120;
+      if (!playerNear) return; // the warning waits for its audience
+      const waves = planSiegeWaves(siegeForecast(heat.heat), this.rng);
+      if (waves.length === 0) {
+        s.setBaseExt({ siegeState: 'scouted', siegeNextMin: undefined });
+        return;
+      }
+      this.siegePlan = { siteId: home.siteId, waves, next: 0 };
+      s.setBaseExt({ siegeState: 'siege' });
+      s.addJournal(`Siege night — ${siteName}`, [
+        'They\u2019re coming in waves, for the gates and the stores. Hold the ground until the last of them is down.',
+      ]);
+      s.addToast(`Siege at ${siteName} — they\u2019re coming.`);
+      this.spawnNextSiegeWave(anchor);
+      return;
+    }
+
+    // state === 'siege'
+    if (!this.siegePlan || this.siegePlan.siteId !== home.siteId) {
+      // loaded mid-siege (the plan is runtime-only): re-arm as a warning
+      s.setBaseExt({ siegeState: 'warning', siegeNextMin: nextNightfall });
+      s.addToast(`The siege at ${siteName} regroups — warning is out again.`);
+      return;
+    }
+    const alive = this.husks.aliveInZone(`siege:${home.siteId}`);
+    if (alive > 0) return;
+    if (this.siegePlan.next < this.siegePlan.waves.length) {
+      this.spawnNextSiegeWave(anchor);
+      return;
+    }
+    // survived
+    this.siegePlan = null;
+    s.setBaseExt({
+      siegeState: heat.tier === 'scout' || heat.tier === 'warning' || heat.tier === 'siege' ? 'scouted' : 'calm',
+      siegeNextMin: undefined,
+    });
+    const ev = XP_EVENTS.siege_survived;
+    s.addSkillXp(ev.skill, ev.xp);
+    s.applyMoraleEvent('siegeWin');
+    s.addJournal(`Siege survived — ${siteName}`, [
+      'The last of them is down and the ground is still yours. The crew stands a little taller this morning.',
+    ]);
+    s.addToast(`${siteName} held. The siege is broken.`);
+  }
+
+  private spawnNextSiegeWave(anchor: [number, number]): void {
+    const plan = this.siegePlan;
+    if (!plan || !this.husks) return;
+    const w = plan.waves[plan.next];
+    if (!w) return;
+    plan.next += 1;
+    this.husks.spawnSiegeWave(
+      { ...w, siteId: plan.siteId, x: anchor[0], z: anchor[1], target: 'gates' },
+      (x, z) => this.groundY(x, z),
+    );
+  }
+
   /** Called by the store when a container's staged loot is fully taken. */
   completeContainerLoot(containerId: string): void {
     this.interact?.setContainerEmptied(containerId);
@@ -1272,6 +1429,15 @@ export class Game {
     this.deadHusks.add(h.id);
     const s = useGameStore.getState();
     s.questEvent('kill', 'husk', 1);
+    // siege heat (§3.7): kills near home feed tomorrow's pressure
+    const home = s.claims.home;
+    if (home) {
+      const anchor = s.poiPositions[home.siteId]
+        ?? (home.siteId === 'military_base' ? s.poiPositions['airbase'] : undefined);
+      if (anchor && Math.hypot(h.group.position.x - anchor[0], h.group.position.z - anchor[1]) <= 100) {
+        s.setBaseExt({ localKillsNearBase: (s.baseExt.localKillsNearBase ?? 0) + 1 });
+      }
+    }
     // the body stays where it fell — search it for zone + kind loot
     this.interact?.registerCorpse(h.id, h.group.position.x, h.group.position.z, h.zoneId, h.kind);
   }
