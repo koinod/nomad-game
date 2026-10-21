@@ -10,7 +10,7 @@ import {
   shriekAlertRadius, shriekNoiseLevel, shouldBruteCharge, specialChance, spitFlightTime, spitVelocity,
   SPIT_GRAVITY,
 } from './huskMath';
-import { buildHuskFigure, type FigureRig } from './figureKit';
+import { bindFigureGLB, buildHuskFigure, figureGLBUrl, poseSlump, type FigureRig } from './figureKit';
 import { computeVisibility, canHuskSee } from './visibility';
 import { resolveCollisions, type Collider } from './Colliders';
 import { sfx } from '../systems/audio';
@@ -211,6 +211,55 @@ export class Husk {
       if (o instanceof THREE.Mesh) o.castShadow = true;
     });
     this.group.userData.headY = KIND_STATS[this.kind].profile.headY;
+  }
+
+  private authoredRig = false;
+
+  /**
+   * AUTHORED FIGURES WAVE 1: swap this husk's procedural rig for the
+   * authored shambler GLB (loaded once by the manager) bound through
+   * figureKit's bindFigureGLB — same named pivots, same poseSlump base,
+   * same rewire buildMesh performs, so every behavior path (walk swing,
+   * flinch, jaw, damage flash) poses it identically. Shambler only:
+   * every other kind keeps its interim kit mesh, and any failure keeps
+   * the interim mesh too — the game never waits on art.
+   */
+  useAuthoredShambler(template: THREE.Object3D): boolean {
+    if (this.kind !== 'shambler' || this.authoredRig) return false;
+    const root = template.clone(true);
+    // per-husk materials: the damage flash and eye pulse are per-husk
+    root.traverse((o) => {
+      if (o instanceof THREE.Mesh) o.material = (o.material as THREE.Material).clone();
+    });
+    let rig: FigureRig;
+    try {
+      rig = bindFigureGLB(root, KIND_STATS[this.kind].height);
+    } catch {
+      return false;
+    }
+    // the identical slump the procedural build applies, from the same
+    // per-husk seed (advanced past the two wardrobe rolls it consumed)
+    const vrnd = hashId(this.id);
+    vrnd();
+    vrnd();
+    poseSlump(rig, 0.14, vrnd);
+    if (this.rig) this.group.remove(this.rig.group);
+    this.rig = rig;
+    this.authoredRig = true;
+    this.group.add(rig.group);
+    this.mats.length = 0;
+    this.mats.push(...rig.mats);
+    this.bodyMat = rig.bodyMat;
+    this.headMesh = rig.head;
+    this.torsoMesh = rig.torso;
+    this.torsoBaseRotX = rig.pose.torsoX;
+    this.jawMesh = rig.jaw;
+    this.sacMesh = rig.sac;
+    this.eyeMat = rig.eyeMat;
+    rig.group.traverse((o) => {
+      if (o instanceof THREE.Mesh) o.castShadow = true;
+    });
+    return true;
   }
 
   get alive(): boolean {
@@ -741,6 +790,37 @@ interface SpitGlob {
   vx: number; vy: number; vz: number;
 }
 
+/**
+ * AUTHORED FIGURES WAVE 1 — the authored shambler GLB, loaded once per
+ * session (browser only; the interim kit mesh is the standing fallback,
+ * so a failed/slow load changes nothing but the mesh tier). Every
+ * manager registers; when the template lands, live shamblers swap and
+ * later spawns swap at birth.
+ */
+let authoredShamblerTemplate: THREE.Object3D | null = null;
+let authoredShamblerLoading = false;
+const authoredShamblerWaiters: HuskManager[] = [];
+
+function ensureAuthoredShambler(mgr: HuskManager): void {
+  if (authoredShamblerTemplate) {
+    mgr.applyAuthoredShambler();
+    return;
+  }
+  authoredShamblerWaiters.push(mgr);
+  if (authoredShamblerLoading || typeof window === 'undefined') return;
+  authoredShamblerLoading = true;
+  import('three/addons/loaders/GLTFLoader.js')
+    .then(({ GLTFLoader }) => new GLTFLoader().loadAsync(`/${figureGLBUrl('husk_shambler_authored')}`))
+    .then((gltf) => {
+      authoredShamblerTemplate = gltf.scene;
+      for (const m of authoredShamblerWaiters) m.applyAuthoredShambler();
+      authoredShamblerWaiters.length = 0;
+    })
+    .catch(() => {
+      /* art load failed — interim meshes stand; behavior is untouched */
+    });
+}
+
 export class HuskManager {
   readonly scene: THREE.Scene;
   readonly zones: SpawnZone[];
@@ -764,6 +844,13 @@ export class HuskManager {
     this.scene = scene;
     this.zones = zones;
     this.rng = mulberry32(seed ^ 0xbeef01);
+    ensureAuthoredShambler(this);
+  }
+
+  /** Swap every live shambler onto the authored rig (wave 1). */
+  applyAuthoredShambler(): void {
+    if (!authoredShamblerTemplate) return;
+    for (const h of this.husks) h.useAuthoredShambler(authoredShamblerTemplate);
   }
 
   private landPoint(zone: SpawnZone, groundY: (x: number, z: number) => number): [number, number] | null {
@@ -779,6 +866,7 @@ export class HuskManager {
 
   private addHusk(id: string, kind: HuskKind, x: number, z: number, zoneId: string, groundY: (x: number, z: number) => number): void {
     const h = new Husk(id, kind, x, z, zoneId, groundY);
+    if (authoredShamblerTemplate) h.useAuthoredShambler(authoredShamblerTemplate);
     this.husks.push(h);
     this.scene.add(h.group);
   }

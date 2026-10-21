@@ -438,8 +438,13 @@ export function buildHuskFigure(kind: HuskFigureKind, o: HuskFigureOptions): Fig
   }
 }
 
-/** The infected posture: torso slumped, head lolled, arms hanging forward. */
-function poseSlump(rig: FigureRig, slump: number, vrnd: () => number): void {
+/**
+ * The infected posture: torso slumped, head lolled, arms hanging forward.
+ * Exported so an authored GLB rig (bindFigureGLB) receives the IDENTICAL
+ * base pose the procedural builders apply — pose bases are behavior
+ * (flinch/walk relax back to them), not decoration.
+ */
+export function poseSlump(rig: FigureRig, slump: number, vrnd: () => number): void {
   rig.torso.rotation.x = slump;
   rig.pose.torsoX = slump;
   rig.head.rotation.z = 0.14 + vrnd() * 0.12;

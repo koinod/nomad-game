@@ -15,3 +15,14 @@ figureKit builders (`src/game/figureKit.ts`) via
   `sac`, eye material on `eyes`, torso material on `torsoMesh`) can be
   bound at runtime with `bindFigureGLB()` from figureKit — that is the
   upgrade path when hero figures are authored.
+
+## Exception: `husk_shambler_authored.glb` IS runtime-loaded
+
+Authored Figures Wave 1 (2026-10-21): the standard husk's authored
+model (built by `tools/figures/build_shambler_authored.py`, gate proofs
+in `design-refs/proof-figures-authored/`) is the first figure GLB the
+game actually loads. `HuskManager` loads it once, binds each shambler
+through `bindFigureGLB` + the kit's `poseSlump`, and keeps the
+procedural kit mesh as the standing fallback (load failure changes
+nothing but the mesh tier). All other classes remain procedural; their
+`.glb` files here stay posed proof artifacts.
