@@ -148,7 +148,8 @@ export const BETA_ROADS: BetaRoad[] = [
   },
   {
     // NC-12 west fork (§2 diagram's SW arm): Refuge → Pier HQ, running
-    // the sound channel's east bank.
+    // the marsh shore down to the harbor — east of the channel's
+    // estuary reach, never across it (Phase 1.5: no road touches water).
     id: 'nc12_west_fork', maxGrade: 0.08, halfWidth: 4.2,
     points: [[-92, 2], [-160, 34], [-224, 74], [-272, 108], [-318, 142], [-366, 166], [-402, 186], [-446, 210]],
   },
@@ -175,14 +176,26 @@ export const BETA_ROADS: BetaRoad[] = [
 
 // ─── The dredged sound channel (spec §3.3) ───────────────────────────────────
 //
-// The navigable water road: north bay → down the west sound past the
-// Pier HQ, dredged to −4.2 m against the −1 m-class shoals so the Salt
-// Skiff and the Heavy Logistics Carrier can move. betaTerrain carves it
+// The navigable water road of the WESTERN SOUND (§1.1/§3.3): the
+// maintained cut runs from the south sound entrance, across the shoal
+// bar, up the sound to the Pier HQ harbor mouth, then turns into the
+// marsh as the dredged estuary approach, ending at the estuary head
+// NE of the wreck. It never crosses the island — the dry waist between
+// the west block and the central mass is land the whole way (the
+// inland spur climbs it overland; no road on the map touches water),
+// and the north bay is reached by open water around the coasts, not
+// by a cut through the island. (Phase 1.5 shape pass, Ty's gate: the
+// original line ran from the north bay diagonally through the island's
+// waist and read from the air as a strait severing the Ridge from the
+// main island — and the spur AND the west fork both graded down into
+// it. That route is deleted, not patched.)
+// Dredged to −4.2 m against the −1 m-class shoals so the Salt Skiff
+// and the Heavy Logistics Carrier can move. betaTerrain carves it
 // into the height data; daymarkers (below) line it.
 
 export const BETA_SOUND_CHANNEL: [number, number][] = [
-  [120, -300], [30, -215], [-70, -140], [-185, -60], [-262, 32],
-  [-322, 112], [-398, 150], [-540, 158], [-556, 240], [-540, 300],
+  [-640, 318], [-566, 256], [-556, 203], [-530, 176], [-505, 148],
+  [-405, 138],
 ];
 export const BETA_CHANNEL_DEPTH = -4.2;
 /** Full-depth halfwidth of the dredge cut (m); banks feather beyond it. */
@@ -196,10 +209,12 @@ export interface BetaDaymarker {
   side: 'port' | 'starboard';
 }
 
-/** Daymarkers along the channel, alternating banks every ~85 m of arc,
+/** Daymarkers along the channel, alternating banks every ~34 m of
+ *  arc — harbor-approach density for a short, narrow maintained cut —
  *  offset just outside the dredge cut. Generated from the channel line
  *  so the markers and the water can never disagree. Marking stops
- *  ~140 m short of the harbor end — the Pier's own basin takes over. */
+ *  ~50 m short of the estuary head, where the maintained cut gives
+ *  way to unmarked marsh creeks. */
 export const BETA_DAYMARKERS: BetaDaymarker[] = (() => {
   const out: BetaDaymarker[] = [];
   const pts = BETA_SOUND_CHANNEL;
@@ -208,7 +223,7 @@ export const BETA_DAYMARKERS: BetaDaymarker[] = (() => {
     totalArc += Math.hypot(pts[s + 1][0] - pts[s][0], pts[s + 1][1] - pts[s][1]);
   }
   let arc = 0;
-  let next = 40;
+  let next = 34;
   let n = 0;
   for (let s = 0; s + 1 < pts.length; s++) {
     const [ax, az] = pts[s];
@@ -216,17 +231,15 @@ export const BETA_DAYMARKERS: BetaDaymarker[] = (() => {
     const len = Math.hypot(bx - ax, bz - az);
     const dx = (bx - ax) / len;
     const dz = (bz - az) / len;
-    while (next < arc + len && next < totalArc - 140) {
+    while (next < arc + len && next < totalArc - 50) {
       const t = (next - arc) / len;
       const cx = ax + dx * len * t;
       const cz = az + dz * len * t;
       const side = n % 2 === 0 ? 'port' : 'starboard';
-      // Downstream direction is southbound; port (west) = left of
-      // travel = perpendicular (−dz, dx) rotated — for a southbound
-      // heading (+z), port is +x?? No: facing +z (south), left hand is
-      // EAST. Port = left = east on this heading convention; the
-      // west bank is starboard. Keep the geometry honest: offset along
-      // the left normal for port, right normal for starboard.
+      // Travel along the line runs from the sound entrance to the
+      // estuary head (inland, roughly northbound). Port is the LEFT
+      // bank on that heading, offset along the left normal
+      // (dz, −dx) of the direction of travel; starboard mirrors it.
       const lx = dz;   // left normal of (dx, dz) in x/z plane (z south)
       const lz = -dx;
       const sgn = side === 'port' ? 1 : -1;
@@ -237,7 +250,7 @@ export const BETA_DAYMARKERS: BetaDaymarker[] = (() => {
         side,
       });
       n++;
-      next += 85;
+      next += 34;
     }
     arc += len;
   }
@@ -333,7 +346,7 @@ export const BETA_POI_PLACEMENTS: BetaPoiPlacement[] = [
   { poiId: 'barn', x: -118, z: 38, sector: 'refuge', note: 'Union farm in the Refuge\'s agricultural orbit (§2: agrarian production) — fields west of the sanctuary, on the west fork.' },
   { poiId: 'forest_cache', x: -255, z: -45, sector: 'forest_spine', note: 'Hunting stash in the maritime forest spine (§1.1 biome placement), west-center.' },
   { poiId: 'jonah_camp', x: -368, z: -6, sector: 'forest_spine', note: 'The inland claim alternative: forest cover, deer, worse water — its shipped note, in the west forest below the spur (§1.1 biome placement).' },
-  { poiId: 'wreck', x: -470, z: 96, sector: 'west_sound', note: 'The beached wreck on the marsh shore west of the dredged channel — shore salvage (§1.1 biome placement: sound littoral).' },
+  { poiId: 'wreck', x: -470, z: 96, sector: 'west_sound', note: 'The beached wreck on the marsh shore at the dredged channel\'s estuary reach — shore salvage on the sound littoral (§1.1 biome placement).' },
   { poiId: 'marina', x: -478, z: 222, sector: 'pier_hq', note: 'Spec sector: the marina IS the Pier HQ (same docks, same holders).' },
   { poiId: 'carrier', x: -548, z: 199, sector: 'west_sound', note: 'The beached Heavy Logistics Carrier in the dredged channel off the Pier\'s west shore (§3.3 names it a channel user) — anchored in −4 m water by design.' },
 ];
