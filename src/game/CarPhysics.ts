@@ -157,7 +157,7 @@ export class CarPhysics {
     for (let i = 0; i < 4; i++) {
       ctrl.setWheelSuspensionStiffness(i, 32);
       ctrl.setWheelMaxSuspensionTravel(i, 0.28);
-      ctrl.setWheelFrictionSlip(i, this.params.tireMu * 4.0);
+      ctrl.setWheelFrictionSlip(i, this.params.tireMu * this.gripScale * 4.0);
       ctrl.setWheelSideFrictionStiffness(i, 0.9);
     }
     this.controller = ctrl;
@@ -170,11 +170,25 @@ export class CarPhysics {
     if (this.chassisCollider) this.chassisCollider.setMass(this.params.massKg);
     if (this.controller) {
       for (let i = 0; i < 4; i++) {
-        this.controller.setWheelFrictionSlip(i, this.params.tireMu * 4.0);
+        this.controller.setWheelFrictionSlip(i, this.params.tireMu * this.gripScale * 4.0);
         // the lift kit is geometry, not a stat: longer rest length,
         // softer springs — clearance you can see, roll you can feel
         this.controller.setWheelSuspensionRestLength(i, this.restLen());
         this.controller.setWheelSuspensionStiffness(i, this.params.lifted ? 26 : 32);
+      }
+    }
+  }
+
+  private gripScale = 1;
+
+  /** Weather's grip vote: 1 = dry, ~0.65 = soaked (WeatherSystem's
+   *  gripFactor). Multiplies the tire compound's mu everywhere the
+   *  sim uses it — rigid body and kinematic fallback alike. */
+  setGripScale(scale: number): void {
+    this.gripScale = Math.max(0.3, Math.min(1, scale));
+    if (this.controller) {
+      for (let i = 0; i < 4; i++) {
+        this.controller.setWheelFrictionSlip(i, this.params.tireMu * this.gripScale * 4.0);
       }
     }
   }
@@ -359,7 +373,7 @@ export class CarPhysics {
     const tq = torqueAt(p.torqueCurve, Math.min(rpm, p.redlineRpm));
     let force = ((tq * p.gears[gear] * p.finalDrive * p.drivetrainEff) / p.wheelRadiusM) * th;
     const transfer = (p.massKg * Math.abs(force) / p.massKg * 0.52) / 2.718;
-    const tractionMax = p.tireMu * (p.massKg * 9.81 * p.rearLoadFrac + transfer);
+    const tractionMax = p.tireMu * this.gripScale * (p.massKg * 9.81 * p.rearLoadFrac + transfer);
     force = THREE.MathUtils.clamp(force, -tractionMax, tractionMax);
     if (th < 0 && this.speed > 0.5) force = -22000 / Math.max(1, 1); // braking
     const resist = p.dragK * this.speed * Math.abs(this.speed)
