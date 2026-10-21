@@ -378,9 +378,13 @@ door_stbd = build_door(-1, "Stbd")
 box("SH_CabinFloor", (1.9, 0, 0.99), (5.6, 2.02, 0.06), INTD, parent=ROOTOB)
 box("SH_CabinCeiling", (1.9, 0, 2.90), (5.6, 2.02, 0.05), INTM, parent=ROOTOB)
 for sgn, nm in ((1, "Port"), (-1, "Stbd")):
-    box("SH_CabinWall" + nm, (1.55, sgn * 1.03, 1.95), (4.9, 0.05, 1.86), INTM, parent=ROOTOB)
+    # walls stop at the door aperture (x 2.58..3.98) so the doorway opens into the real cabin
+    box("SH_CabinWall" + nm, (0.84, sgn * 1.03, 1.95), (3.48, 0.05, 1.86), INTM, parent=ROOTOB)
+    box("SH_CabinWallFwd" + nm, (4.29, sgn * 1.03, 1.95), (0.62, 0.05, 1.86), INTM, parent=ROOTOB)
 box("SH_BulkheadAft", (-0.85, 0, 1.95), (0.06, 2.02, 1.92), INTM, parent=ROOTOB)
-box("SH_BulkheadFwd", (4.62, 0, 1.95), (0.06, 2.02, 1.92), INTM, parent=ROOTOB)
+# fwd bulkhead has a center passage (cockpit <-> cabin walkway, as on the real aircraft)
+for sgn in (1, -1):
+    box("SH_BulkheadFwd%d" % sgn, (4.62, sgn * 0.685, 1.95), (0.06, 0.65, 1.92), INTM, parent=ROOTOB)
 # dome lights
 for x in (3.4, 1.2):
     box("SH_DomeLight%d" % int(x * 10), (x, 0, 2.86), (0.22, 0.3, 0.03), WHITEL, parent=ROOTOB)
@@ -389,13 +393,13 @@ for x in (3.4, 1.2):
 box("SH_Panel", (6.06, 0, 1.98), (0.34, 1.72, 0.78), INTD,
     rot=(0, math.radians(12), 0), parent=ROOTOB)
 box("SH_Glareshield", (6.16, 0, 2.42), (0.42, 1.78, 0.06), DARK, parent=ROOTOB)
-# MFD screens: 2 per pilot
+# MFD screens: 2 per pilot — on the panel's PILOT face (x 5.87, panel spans 5.89..6.23)
 for sgn in (1, -1):
-    pane_s = box("SH_MFD%d_a" % sgn, (6.22, sgn * 0.46, 2.06), (0.04, 0.40, 0.34), SCRN,
+    pane_s = box("SH_MFD%d_a" % sgn, (5.87, sgn * 0.46, 2.06), (0.04, 0.40, 0.34), SCRN,
                  rot=(0, math.radians(12), 0), parent=ROOTOB)
-    box("SH_MFD%d_b" % sgn, (6.22, sgn * 0.44, 1.68), (0.04, 0.38, 0.26), SCRN2,
+    box("SH_MFD%d_b" % sgn, (5.87, sgn * 0.44, 1.68), (0.04, 0.38, 0.26), SCRN2,
         rot=(0, math.radians(12), 0), parent=ROOTOB)
-box("SH_MFDCenter", (6.22, 0, 1.86), (0.04, 0.34, 0.44), SCRN, rot=(0, math.radians(12), 0), parent=ROOTOB)
+box("SH_MFDCenter", (5.87, 0, 1.86), (0.04, 0.34, 0.44), SCRN, rot=(0, math.radians(12), 0), parent=ROOTOB)
 box("SH_Console", (5.72, 0, 1.24), (0.85, 0.44, 0.5), INTD, parent=ROOTOB)
 box("SH_OverheadPanel", (5.95, 0, 2.80), (0.6, 0.8, 0.06), INTD, parent=ROOTOB)
 # pedestal throttle quadrant hint

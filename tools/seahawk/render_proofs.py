@@ -89,10 +89,13 @@ door.location.x += 1.04
 gun.location.y -= 0.25
 gun.rotation_euler = (0, 0, 0)
 
-# ---- cockpit cutaway: hide shell, camera at pilot eye
+# ---- cockpit cutaway: hide shell, camera behind pilot shoulder + cabin fill light
 for nm in ("SH_Fuselage", "SH_AntiGlare", "SH_Doghouse", "SH_WindshieldPillar",
            "DoorPivot_Port", "DoorPivot_Stbd", "SH_DoorRailPort", "SH_DoorRailStbd"):
     ob = O(nm)
     if ob: ob.hide_render = True
-shot("07_cockpit.png", (5.02, -0.62, 2.06), (7.0, -0.25, 1.88), lens=30)
+if not ONLY or "07_cockpit.png" in ONLY:
+    bpy.ops.object.light_add(type='POINT', location=(5.2, 0, 2.35))
+    fill = bpy.context.object; fill.name = "CockpitFill"; fill.data.energy = 14
+shot("07_cockpit.png", (4.80, 0.95, 2.35), (6.05, -0.25, 1.70), lens=26)
 print("ALL PROOFS DONE ->", OUT)
