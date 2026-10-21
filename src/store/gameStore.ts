@@ -19,7 +19,7 @@ import {
   carryLimitKg, encumbranceTier, slotLimit, totalWeightKg, usedSlots,
 } from './inventoryUtils';
 import { arrangeItems as arrangeGridItems, packGridDims } from './gridUtils';
-import { applyXp, canBuyPerk } from '../systems/skills';
+import { applyXp, canBuyPerk, XP_EVENTS } from '../systems/skills';
 import { deleteSaveSlot, listSaveSlots, loadGameFromSlot, saveGameToSlot } from '../systems/save';
 import { sfx } from '../systems/audio';
 import { getGame } from '../game/instance';
@@ -747,7 +747,14 @@ export const useGameStore = create<GameState>()((set, get) => {
       }
       const it = s.inventory.find((i) => i.itemId === cost.itemId);
       if (!it || !s.removeItem(it.uid, cost.qty)) return;
+      const condBefore = row.condPct;
       const msg = eng.applyRepair(uid, kind);
+      // Lane 8 vehicle_repaired_full: a repair that tops the vehicle off
+      // at 100% condition pays the driver award
+      const condAfter = eng.getVehicleStates().find((v) => v.defId === uid)?.condition;
+      if (condBefore < 100 && condAfter !== undefined && condAfter >= 1) {
+        s.addSkillXp(XP_EVENTS.vehicle_repaired_full.skill, XP_EVENTS.vehicle_repaired_full.xp);
+      }
       s.addToast(msg);
       sfx.play('craft', { volume: 0.6 });
       s.refreshStorage();
@@ -1001,6 +1008,8 @@ export const useGameStore = create<GameState>()((set, get) => {
       }
       get().setCondition(uid, 100);
       if (w.jammed) get().setJammed(uid, false);
+      // Lane 8 repair event: a completed bench repair pays mechanics XP
+      get().addSkillXp(XP_EVENTS.repair.skill, XP_EVENTS.repair.xp);
       s.addToast(`${def.name} stripped, cleaned and rebuilt — good as new.`);
     },
 
@@ -1477,6 +1486,9 @@ export const useGameStore = create<GameState>()((set, get) => {
       }
       const heal = ITEMS[used]?.heal ?? 0;
       const hp = Math.min(maxHp, sv.hp + heal);
+      // Lane 8: treatment that flips an injured survivor back to healthy
+      // pays survivor_recovered INSTEAD of the plain heal award
+      const recovered = sv.status === 'injured' && hp >= 60;
       set({
         survivors: s.survivors.map((x) =>
           x.id === survivorId
@@ -1485,7 +1497,8 @@ export const useGameStore = create<GameState>()((set, get) => {
         ),
       });
       s.addToast(`${sv.name} treated with a ${ITEMS[used]?.name ?? used} (+${heal} HP).`);
-      s.addSkillXp('medicine', 4);
+      const ev = recovered ? XP_EVENTS.survivor_recovered : XP_EVENTS.heal;
+      s.addSkillXp(ev.skill, ev.xp);
       sfx.play('craft', { volume: 0.4 });
     },
     baseTick: () => {
@@ -1719,7 +1732,10 @@ export const useGameStore = create<GameState>()((set, get) => {
       s.addItem(recipe.resultId, recipe.resultQty, true);
       set({ dayStats: { ...get().dayStats, crafts: get().dayStats.crafts + 1 } });
       s.addToast(`Crafted ${recipe.resultQty > 1 ? `${recipe.resultQty}× ` : ''}${ITEMS[recipe.resultId]?.name ?? recipe.resultId}.`);
-      s.addSkillXp('mechanics', 6);
+      // Lane 8 station_craft_gated: recipes gated at skillReq level 3+
+      // (Lane 6/7 data on the recipe) pay the higher station award
+      const craftEv = (recipe.skillReq?.level ?? 0) >= 3 ? XP_EVENTS.station_craft_gated : XP_EVENTS.station_craft;
+      s.addSkillXp(craftEv.skill, craftEv.xp);
       // Efficient Hands: one in five crafts comes back with a spare part
       if (s.perks.includes('me_efficient') && recipe.components.length > 0 && Math.random() < 0.2) {
         s.addItem(recipe.components[0].itemId, 1, true);

@@ -10,6 +10,13 @@ import { bloomSpread, moveSpread, rangeFalloff } from './gunMath';
 import {
   applyWear, armorMult, conditionDamageMult, rollJam, WEAR_PER_SHOT, WEAR_PER_SWING,
 } from './gunMath';
+import { AMBIENT_SPECIALS } from './huskMath';
+
+/** Special-class husks (Lane 8 §6.1: their kills pay the special_kill XP
+ *  event instead of the standard melee/ranged award). */
+export function isSpecialKind(kind: string): boolean {
+  return (AMBIENT_SPECIALS as readonly string[]).includes(kind);
+}
 
 export interface CombatFx {
   impact: (p: THREE.Vector3, kind: 'flesh' | 'dust', damage: number, head: boolean) => void;
@@ -94,6 +101,9 @@ export interface MeleeResult {
   swung: boolean;
   hits: number;
   kills: number;
+  /** Of `kills`, how many were special-class husks (per-kill kinds are
+   *  surfaced so the caller can pay Lane 8's special_kill event for them). */
+  specialKills: number;
   stats: MeleeStats;
 }
 
@@ -109,11 +119,11 @@ export function tryMelee(h: CombatHooks): MeleeResult {
     sfx.play('swing', { volume: 0.6 });
     h.onThrow(itemId);
     const tStats: MeleeStats = { damage: 0, range: 0, halfArcRad: 0, swingTime: 0.4, knockback: 0, stamina: 6, cleave: 0 };
-    return { swung: true, hits: 0, kills: 0, stats: tStats };
+    return { swung: true, hits: 0, kills: 0, specialKills: 0, stats: tStats };
   }
   // no melee weapon but a gun in hand: bash with the gun itself
   const stats = itemId == null && equippedRangedDef() ? GUN_BASH_STATS : meleeStatsFor(itemId);
-  const empty: MeleeResult = { swung: false, hits: 0, kills: 0, stats };
+  const empty: MeleeResult = { swung: false, hits: 0, kills: 0, specialKills: 0, stats };
   // a weapon worn to nothing is scrap until the bench sees it
   const meleeInst = (() => {
     const s = useGameStore.getState();
@@ -145,6 +155,7 @@ export function tryMelee(h: CombatHooks): MeleeResult {
   const execMult = perks.includes('br_executioner') ? 1.5 : 1;
   const backstab = perks.includes('gh_backstab');
   let kills = 0;
+  let specialKills = 0;
   for (const t of targets) {
     const dir = new THREE.Vector3(
       t.husk.group.position.x - h.playerPos.x,
@@ -170,6 +181,7 @@ export function tryMelee(h: CombatHooks): MeleeResult {
     sfx.play('thud', { volume: 0.9 });
     if (killed) {
       kills++;
+      if (isSpecialKind(t.husk.kind)) specialKills++;
       sfx.play('killconfirm', { volume: 0.5 });
     }
   }
@@ -186,7 +198,7 @@ export function tryMelee(h: CombatHooks): MeleeResult {
       st.setCondition(wearTarget.uid, applyWear(wearTarget.condition ?? 100, WEAR_PER_SWING));
     }
   }
-  return { swung: true, hits: targets.length, kills, stats };
+  return { swung: true, hits: targets.length, kills, specialKills, stats };
 }
 
 export interface RangedResult {
@@ -194,13 +206,16 @@ export interface RangedResult {
   hit: boolean;
   killed: boolean;
   headshot: boolean; // any pellet found the head
+  /** The kill (if any) was a special-class husk — pays Lane 8's
+   *  special_kill event instead of the plain/headshot ranged award. */
+  special: boolean;
   damage: number; // total damage dealt (drives tick volume + puff size)
   projectile?: boolean; // a true round is in flight — the verdict lands later
 }
 
 /** Fire the equipped ranged weapon. */
 export function tryRanged(h: CombatHooks): RangedResult {
-  const miss: RangedResult = { fired: false, hit: false, killed: false, headshot: false, damage: 0 };
+  const miss: RangedResult = { fired: false, hit: false, killed: false, headshot: false, special: false, damage: 0 };
   const def = equippedRangedDef();
   if (!def || def.category !== 'weapon-ranged' || !def.ammoId) {
     useGameStore.getState().addToast('No ranged weapon equipped.');
@@ -297,11 +312,12 @@ export function tryRanged(h: CombatHooks): RangedResult {
       weaponId: def.id,
     });
     afterShot();
-    return { fired: true, hit: false, killed: false, headshot: false, damage: 0, projectile: true };
+    return { fired: true, hit: false, killed: false, headshot: false, special: false, damage: 0, projectile: true };
   }
   let hit = false;
   let killed = false;
   let headshot = false;
+  let specialKill = false;
   let totalDamage = 0;
   for (let p = 0; p < pellets; p++) {
     // each pellet jitters around the (possibly swaying) aim dir
@@ -337,7 +353,10 @@ export function tryRanged(h: CombatHooks): RangedResult {
       hit = true;
       totalDamage += dealt;
       if (res.head) headshot = true;
-      if (k) killed = true;
+      if (k) {
+        killed = true;
+        if (isSpecialKind(res.husk.kind)) specialKill = true;
+      }
     } else if (h.fx) {
       // a miss still draws its line — walk the ray to the dirt so the
       // tracer ends where the round actually went
@@ -364,7 +383,7 @@ export function tryRanged(h: CombatHooks): RangedResult {
   else if (headshot) sfx.play('headshot', { volume: 0.9 });
   else if (hit) sfx.play('tick', { volume: 0.35 + Math.min(0.6, totalDamage / 90) });
   afterShot();
-  return { fired: true, hit, killed, headshot, damage: totalDamage };
+  return { fired: true, hit, killed, headshot, special: specialKill, damage: totalDamage };
 }
 
 function equippedRangedDef() {

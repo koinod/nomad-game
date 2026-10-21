@@ -15,7 +15,14 @@ import {
   accelRate, expDamp, sprintFovKick, wadeBlocksJump, wadeBlocksSprint, wadeFactor,
 } from './moveMath';
 import { useGameStore } from '../store/gameStore';
+import { XP_EVENTS, type XpEventId } from '../systems/skills';
 import { ITEMS } from '../data/items';
+
+/** Pay a Lane 8 XP event through the store (amounts live in the table). */
+function awardXpEvent(id: XpEventId, mult = 1): void {
+  const ev = XP_EVENTS[id];
+  useGameStore.getState().addSkillXp(ev.skill, ev.xp * mult);
+}
 import { magSizeOf, modAdsTimeMult, modRecoilMult } from '../data/mods';
 import {
   RECOIL_RECOVERABLE, bloomAdd, bloomDecay, kickFor, recoveryStep, swayOffset,
@@ -363,11 +370,16 @@ export class Player {
   }
 
   /** Feedback for a projectile round that just landed (Game reports it —
-   *  the hitmark, camera punch and kill XP mirror the hitscan path). */
-  registerShotFeedback(killed: boolean, head: boolean): void {
+   *  the hitmark, camera punch and kill XP mirror the hitscan path).
+   *  Kill XP follows Lane 8's event table: a special-class kill pays
+   *  special_kill, a headshot kill the headshot event, else the plain
+   *  ranged award. */
+  registerShotFeedback(killed: boolean, head: boolean, special = false): void {
     useGameStore.getState().setHitmark(killed ? 'kill' : head ? 'headshot' : 'hit');
     this.hitPunch = killed ? 0.3 : head ? 0.24 : 0.18;
-    if (killed) useGameStore.getState().addSkillXp('combat', 8);
+    if (killed) {
+      awardXpEvent(special ? 'special_kill' : head ? 'husk_kill_ranged_headshot' : 'husk_kill_ranged');
+    }
   }
 
   /** Eye position + aim dir for hitscan (camera-driven). Leaning shifts the
@@ -831,7 +843,13 @@ export class Player {
           this.hitPunch = res.kills > 0 ? 0.34 : 0.22;
           useGameStore.getState().setHitmark(res.kills > 0 ? 'kill' : 'hit');
         }
-        if (res.kills > 0) useGameStore.getState().addSkillXp('combat', 10 * res.kills);
+        if (res.kills > 0) {
+          // Lane 8 events: plain melee kills pay husk_kill_melee each;
+          // special-class kills pay special_kill instead
+          const plain = res.kills - res.specialKills;
+          if (plain > 0) awardXpEvent('husk_kill_melee', plain);
+          if (res.specialKills > 0) awardXpEvent('special_kill', res.specialKills);
+        }
       }
     }
     const rangedEquipped = equippedRangedDef();
@@ -907,7 +925,11 @@ export class Player {
             fired.killed ? 'kill' : fired.headshot ? 'headshot' : 'hit',
           );
           this.hitPunch = fired.killed ? 0.3 : fired.headshot ? 0.24 : 0.18;
-          if (fired.killed) useGameStore.getState().addSkillXp('combat', 8);
+          if (fired.killed) {
+            awardXpEvent(
+              fired.special ? 'special_kill' : fired.headshot ? 'husk_kill_ranged_headshot' : 'husk_kill_ranged',
+            );
+          }
         } else if (!fired.projectile) {
           // a miss can still drop a rabbit or deer downrange (hitscan only —
           // projectile rounds report their own verdict when they land)

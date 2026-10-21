@@ -26,6 +26,8 @@ import { floorYAt, floorYAtRef, resolveCollisions, type Collider, type FloorRect
 import { survivingVehicleSave } from './saveMigration';
 import { sfx, ambience } from '../systems/audio';
 import { useCraftQueue } from '../systems/crafting';
+import { XP_EVENTS } from '../systems/skills';
+import { isSpecialKind } from './Combat';
 import { ENDING_LINES } from '../narrative/dialogue';
 import {
   totalWeightKg, carryLimitKg, encumbranceTier,
@@ -64,8 +66,10 @@ export class Game {
   }[] = [];
   private fireZones: { group: THREE.Group; t: number; x: number; z: number }[] = [];
   private decoys: { group: THREE.Group; t: number; tick: number; x: number; z: number }[] = [];
-  // hold-to-search state (container / corpse / safe)
-  private searching: { id: string; label: string; t: number; dur: number; x: number; z: number; hp: number } | null = null;
+  // hold-to-search state (container / corpse / safe); `alerted` tracks
+  // whether any husk hunted/attacked during the search — Lane 8's
+  // search_undetected award only pays when it stays false
+  private searching: { id: string; label: string; t: number; dur: number; x: number; z: number; hp: number; alerted: boolean } | null = null;
   vehicles!: VehicleManager;
   private carPhysics: CarPhysics | null = null;
   private weather = new WeatherSystem({ seed: 987654321 });
@@ -866,7 +870,7 @@ export class Game {
         if (killed) sfx.play('killconfirm', { volume: 0.55 });
         else if (hit.head) sfx.play('headshot', { volume: 0.9 });
         else sfx.play('tick', { volume: 0.35 + Math.min(0.6, dealt / 90) });
-        player.registerShotFeedback(killed, hit.head);
+        player.registerShotFeedback(killed, hit.head, killed && isSpecialKind(hit.husk.kind));
       },
       (point) => this.fx?.impactDust(point),
     );
@@ -928,6 +932,9 @@ export class Game {
     // the press is consumed so the prompt block below doesn't restart the search.
     if (this.searching) {
       const q = this.searching;
+      if (!q.alerted && husks.husks.some((h) => h.state === 'hunt' || h.state === 'attack')) {
+        q.alerted = true;
+      }
       if (input.interact) {
         input.interact = false;
         this.searching = null;
@@ -958,7 +965,12 @@ export class Game {
             s.addSkillXp('scavenging', 3);
           } else {
             s.addSkillXp('scavenging', 4);
-            s.addSkillXp('stealth', 5);
+            // Lane 8 search_undetected: the stealth award pays only when
+            // no husk hunted/attacked at any point during the search
+            if (!q.alerted) {
+              const ev = XP_EVENTS.search_undetected;
+              s.addSkillXp(ev.skill, ev.xp);
+            }
           }
           this.searching = null;
           s.setSearch(null);
@@ -1221,6 +1233,7 @@ export class Game {
       x: this.player!.pos.x,
       z: this.player!.pos.z,
       hp: s.hp,
+      alerted: (this.husks?.husks ?? []).some((h) => h.state === 'hunt' || h.state === 'attack'),
     };
     return true;
   }
