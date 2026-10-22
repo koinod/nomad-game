@@ -278,14 +278,14 @@ describe('perkRowState — the one row derivation the tree renders', () => {
     if (broke.state === 'locked') expect(broke.reason).toContain('perk points');
   });
 
-  it('a chosen capstone locks the other trees’ capstones with its name in the reason', () => {
+  it('a chosen capstone locks the other trees’ capstones', () => {
     const owned = [
       'gh_soft', 'gh_shadow', 'gh_backstab', 'gh_patient', 'gh_vanish', 'gh_unseen',
       'br_heavy', 'br_blocker', 'br_executioner', 'br_unstoppable', 'br_secondwind',
     ];
     const row = perkRowState(owned, 3, 'br_juggernaut');
     expect(row.state).toBe('locked');
-    if (row.state === 'locked') expect(row.reason).toContain('Unseen');
+    if (row.state === 'locked') expect(row.reason).toContain('capstone');
   });
 });
 

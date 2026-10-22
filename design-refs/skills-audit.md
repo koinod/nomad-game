@@ -158,3 +158,70 @@ Gaps / notes:
    XP_EVENTS where the site is touched anyway.
 6. UI: single tree in the Character app via `perkRowState`;
    forest-true armor display.
+
+---
+
+# Phase B resolution (same lane, after the audit)
+
+Single source of truth: `src/systems/perkEffects.ts` — every perk's
+gameplay number derives from its `PerkDef.effect` record; no call site
+keeps a private copy of a perk constant.
+
+| Perk | Disposition |
+|---|---|
+| sc_keen | WIRED — loot roll `chanceMult` in Interact (containers + corpses); Keen Eye uniques now actually surface |
+| sc_salvager | WIRED — store disassembly passes through `disassemblyYields` (+1 first material, stacks with me_scrounger) |
+| sc_pockets | WIRED — pockets grid grows 2×2→4×2 via `pocketsSpec(perks)` threaded through containers/store/UI |
+| sc_packmule | EXTENDED — +8kg (existing) and the heavy tier now starts 10kg later (`heavyShiftKg` in encumbranceTier at all 6 call sites; two display sites also gained the missing +8kg) |
+| sc_appraiser | WIRED — trader give-side discount ×1/1.2 via `appraisedOffer` in TraderPanel |
+| sc_remembers | WIRED — loot respawn clock ×0.5 (`respawnClockMult` on container open) |
+| sc_nightharvest | COMPLETED — night loot chance ×1.5 joins the existing stealth half |
+| sc_locksmith | WIRED — forced entry built (see below); pick-keeping unchanged |
+| sc_fingers | COMPLETED — duration via `searchDurationMult`; search noise now exists and Patient shrinks it |
+| br_blocker | WIRED — block mitigation now perk-aware (75%→85%) and blocking a hit costs stamina (10, −40% with Blocker) |
+| br_adrenaline | WIRED — kill grants 5s of −25% stamina costs (Player stamina spend) |
+| br_secondwind | WIRED — once/day at ≤25% HP: restore 30% max HP + full stamina (store, `secondWindDay`) |
+| br_unstoppable | WIRED + TRIMMED — knockback system built (husk hits shove 0.45m; Unstoppable halves it); the "swings can't be interrupted" clause was CUT from the description — no swing-interrupt mechanic exists |
+| br_juggernaut | COMPLETED — brute hits now break blocks (`blockBreak`); only Juggernaut holds a guard vs brutes |
+| me_tinkerer | WIRED — timed-craft durations ÷1.25 at enqueue (`effectiveDurationMin`) |
+| me_grease | WIRED — vehicle repair costs ×0.75 of computed parts (`vehicleRepairCost`) |
+| me_gunsmith | COMPLETED — attach uses `modPartCost` (already halved); detach now REFUNDS the same discounted gun_parts |
+| me_juryrig | WIRED — field-repair cap system built: away from a workshop, condition clamps at 60% (80% Jury-Rig); workshops finish the job |
+| me_fabricator | WIRED — industrial timed crafts ×0.6 |
+| me_scrounger | WIRED — +1 gun_parts on disassembly (stacks with Salvager → +2 total on gun yields) |
+| me_masterfab | WIRED — new timed recipe `r_gun_parts` (workbench, scrap 3 + wire 1 → gun_parts) gated by `perkReq`; turret blueprint waived for Master Fabricators |
+| gh_patient | WIRED — search-noise system built (8m base on container searches; Patient → 0) |
+| gh_vanish | WIRED — husk lose-sight 6s→3s (`loseSightSec`) + flashbang blind radius +4m (`flashRadiusBonus`) |
+| gh_lootghost | WIRED — no search noise with the perk; container alarm trips ×0.5 (`alarmTripMult`), rolled in Interact |
+| gh_coldblood | WIRED — shrieker shrieks now redirect to a decoy point ~14m off 50% of the time |
+| gh_nightowl | TRIMMED — "slight night vision (ambient lift)" cut from the description (no rendering seam); stealth half was already real |
+
+New micro-systems built because perks promised them (smallest honest
+versions): search noise, forced entry (locked + no pick anywhere in
+the carried forest → smash: 2× time, forced_entry noise class,
+`loot_ghost` containers exempt from the bang via Locksmith halving),
+player knockback, block stamina cost, field-repair cap.
+
+Gate unification: `craftRecipe` (instant path) now enforces the same
+`skillReq` from the same store `skills` map the tree renders; the
+queue path already did. A test pins that RECIPE_META and items.ts
+never disagree where both declare. `perkReq` added to the craft gate
+for capstone-perk recipes.
+
+XP: all 20 §6.1 events verified firing (table in Phase A §3) plus one
+lane addition — `day_survived` (scavenging +8) on `advanceDay`, the
+spec's missing survival-time source. New test file pins:
+`src/tests/perk-effects.test.ts` (38), `src/tests/skills-wiring.test.ts`
+(store-level integration: damage/gates/disassembly/durations/UI rows).
+
+UI: the duplicate compact `SkillsTab` inside CharacterTab was deleted;
+`SkillsPanel` is the single tree and its rows derive from
+`perkRowState` (systems/skills) — display and gate share one
+derivation. CharacterTab armor now counts the whole carried forest,
+matching `damagePlayer`.
+
+Residuals (unchanged from Phase A): survivor XP never accrues
+(authored levels only — out of scope, order #6 territory); no
+per-wound health model exists to display (Character shows the hp-band
+treatment model that does exist). Gate at close: tsc clean, vitest
+881/881 (baseline 821), production build green.
