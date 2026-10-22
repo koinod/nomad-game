@@ -154,6 +154,8 @@ export interface ItemDef {
   bloomMax?: number; // ranged: extra spread (radians) at full bloom
   adsTime?: number; // ranged: seconds for the hip -> sights transition
   sway?: number; // ranged: ADS sway amplitude class (scaled in gunMath)
+  sight?: 'iron' | 'dot' | 'scope'; // ranged: fixed sight picture (gunMath SIGHT_PROFILES); a mounted reflex mod overrides to 'dot'
+  sightZoom?: number; // ranged: per-weapon magnification when sight is 'scope' (default 4)
   projectileSpeed?: number; // ranged: m/s — set = true projectile with drop, unset = hitscan
   pen?: number; // ammo: armor penetration class 0..2 (vs armored husks)
   disassembly?: { itemId: string; qty: number }[]; // bench yield when stripped for parts

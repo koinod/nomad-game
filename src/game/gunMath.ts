@@ -140,6 +140,89 @@ export function rayGroundDistance(
   return null;
 }
 
+// ---------------------------------------------------------------- sights ---
+
+/**
+ * Sight types (Ian 2026-10-22: "sights (iron vs scopes or dot sights)").
+ * Every firearm resolves to exactly one sight picture:
+ *  - iron:  the gun's own posts — no zoom beyond the shipped ADS picture.
+ *  - dot:   a reflex/red-dot — ~1.25x tighter than iron, snaps up fast,
+ *           clean single-dot reticle.
+ *  - scope: magnified glass — zoom per weapon (def.sightZoom, default 4x),
+ *           slow to raise, tightest cone, and the sway you barely feel
+ *           on irons is honestly magnified.
+ * A mounted reflex_sight mod (the optic-slot attachment that already
+ * exists) overrides the gun's fixed sight — the mounted optic IS the
+ * sight picture. Zoom is real optics math: FOV from the tangent ratio,
+ * so the magnification figure is the true one, not a vibes number.
+ */
+export type SightType = 'iron' | 'dot' | 'scope';
+
+export interface SightProfile {
+  type: SightType;
+  /** Magnification vs the hip FOV — before any per-weapon scope zoom. */
+  zoom: number;
+  /** Hip -> sights time scale (dot snaps up, glass takes its time). */
+  adsTimeMult: number;
+  /** Spread scale at full sights (glass steadies the picture). */
+  adsSpreadMult: number;
+  /** Sway amplitude scale at full sights (magnification magnifies). */
+  swayMult: number;
+}
+
+export const SIGHT_PROFILES: Record<SightType, SightProfile> = {
+  // zoom 1.677 reproduces the shipped sights FOV (38° off a 60° base):
+  // irons gain nothing and lose nothing in this pass.
+  iron: { type: 'iron', zoom: 1.677, adsTimeMult: 1.0, adsSpreadMult: 1.0, swayMult: 1.0 },
+  // 2.10 / 1.677 = 1.25x over the iron picture, per the directive.
+  dot: { type: 'dot', zoom: 2.1, adsTimeMult: 0.72, adsSpreadMult: 0.9, swayMult: 0.9 },
+  scope: { type: 'scope', zoom: 4.0, adsTimeMult: 1.35, adsSpreadMult: 0.55, swayMult: 1.6 },
+};
+
+/** The hip-fire base FOV the zoom figures are measured against. */
+export const HIP_FOV = 60;
+
+/** Vertical FOV (degrees) at the given magnification off a base FOV. */
+export function fovForZoom(baseFovDeg: number, zoom: number): number {
+  const half = (baseFovDeg * Math.PI) / 360;
+  return (2 * Math.atan(Math.tan(half) / Math.max(1, zoom)) * 180) / Math.PI;
+}
+
+/** Resolve a weapon's sight: a mounted reflex mod wins; otherwise the
+ *  def's fixed sight; otherwise honest irons. Scopes carry their
+ *  per-weapon zoom (sightZoom, default 4x). */
+export function sightFor(
+  def: { sight?: SightType; sightZoom?: number },
+  mods: readonly string[],
+): SightProfile {
+  if (mods.includes('reflex_sight')) return SIGHT_PROFILES.dot;
+  const base = SIGHT_PROFILES[def.sight ?? 'iron'];
+  if (base.type === 'scope' && def.sightZoom != null) return { ...base, zoom: def.sightZoom };
+  return base;
+}
+
+/** Sights FOV for an equipped weapon at full ADS. */
+export function sightFov(def: { sight?: SightType; sightZoom?: number }, mods: readonly string[]): number {
+  return fovForZoom(HIP_FOV, sightFor(def, mods).zoom);
+}
+
+/** 0 at the shoulder point of the ADS blend, 1 at full sights — the
+ *  progression sight spread/sway effects ease in over. */
+export function adsProgression(adsBlend: number): number {
+  return Math.min(1, Math.max(0, (adsBlend - 0.55) / 0.45));
+}
+
+/** Spread scale from the sight at a given ADS blend: 1 from the hip,
+ *  easing to the profile's sights figure as the gun settles. */
+export function sightSpreadMult(sight: SightProfile, adsBlend: number): number {
+  return 1 + (sight.adsSpreadMult - 1) * adsProgression(adsBlend);
+}
+
+/** Sway-amplitude scale from the sight at a given ADS blend. */
+export function sightSwayMult(sight: SightProfile, adsBlend: number): number {
+  return 1 + (sight.swayMult - 1) * adsProgression(adsBlend);
+}
+
 // -------------------------------------------------------------- condition ---
 
 /** Wear: spec §1.3 — 1 condition per 25 shots / per 20 landed swings. */
