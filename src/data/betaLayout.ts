@@ -163,16 +163,23 @@ export const BETA_ROADS: BetaRoad[] = [
     // the Refuge and crossed the ground the waist channel now cuts, so
     // the spur runs the NORTH side instead — out of the Citadel west
     // along the north coast, around the north-bay inlet on its south
-    // shore, a call at the relay knoll pad, then the climb up the
-    // face's NW shoulder to the Ridge pad's east-center. The legs hold
-    // the shore and contour bands so the graded profile tracks the
-    // field; 14% mountain grade (steep alpine switchbacks run 12–15%).
+    // shore, a call at the relay knoll pad, the climb up the massif's
+    // EAST face to the forest top, then the long plateau traverse
+    // west (south of the helipad and the redoubt) and into the Ridge
+    // pad from its west edge — arriving over ground already at
+    // height, the way the old south arrival did (a grade-clamped
+    // profile cannot climb a pad's feather ring at the edge; it has
+    // to arrive across the top, with the arc to already be at
+    // height). 14% mountain grade (steep alpine switchbacks run
+    // 12–15%); the face legs bench at the clamp.
     id: 'inland_spur', maxGrade: 0.14, halfWidth: 4.2,
     points: [
-      [268, -252], [185, -246], [80, -215], [-20, -190], [-90, -175],
-      [-150, -160], [-200, -165], [-230, -190], [-285, -218],
-      [-330, -238], [-385, -228], [-430, -205], [-475, -192],
-      [-520, -178],
+      [268, -252], [190, -244], [120, -213], [60, -200], [-20, -194],
+      [-90, -182], [-160, -172], [-205, -176], [-230, -190],
+      [-262, -178], [-294, -170], [-318, -160], [-338, -146],
+      [-360, -139], [-420, -137], [-480, -137], [-540, -139],
+      [-580, -139], [-615, -138], [-640, -148], [-630, -166],
+      [-595, -172], [-560, -168], [-520, -178],
     ],
   },
   {
@@ -281,8 +288,10 @@ export const BETA_WAIST_CROSSINGS: BetaWaistCrossing[] = [
     // The west fork's final approach to the Pier pad, over the
     // channel's south bend — road deck, distinct from the Pier HQ
     // boardwalk kit, which fronts the SOUND channel off the pad's
-    // west edge.
-    id: 'pier_crossing', road: 'nc12_west_fork', deckY: 1.6,
+    // west edge. Deck height sits just under the pad's surveyed
+    // 2.2 m so the road profile ramps the last metres onto the pad
+    // instead of stepping at its edge.
+    id: 'pier_crossing', road: 'nc12_west_fork', deckY: 2.0,
     a: [-396, 183], b: [-443, 208],
   },
 ];
