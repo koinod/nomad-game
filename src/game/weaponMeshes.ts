@@ -52,6 +52,19 @@ const MAT = {
   blue: () => new THREE.MeshStandardMaterial({ color: 0x3a6ea5, roughness: 0.4 }),
 };
 
+/** Ids with a dedicated case in buildGroundMesh below (everything else
+ *  falls to the default tan box). Kept in sync by items-buildout.test.ts,
+ *  which verifies each listed id's mesh differs from the default box. */
+export const GROUND_MODEL_IDS = new Set([
+  'pipe', 'machete', 'hatchet', 'pistol', 'flare', 'bandage', 'ammo_9mm',
+  'shells', 'ammo_rifle', 'chemicals', 'fuel_can', 'baseball_bat',
+  'combat_knife', 'sledgehammer', 'shotgun', 'hunting_rifle', 'flare_gun',
+  'revolver', 'crossbow', 'smg', 'carbine', 'dmr', 'canned_food',
+  'water_bottle', 'scrap', 'wire', 'cloth', 'medkit', 'torch', 'phone',
+  'frag', 'molotov', 'flashbang', 'crowbar', 'fire_axe', 'spear',
+  'riot_baton', 'smoke', 'rock', 'boombox',
+]);
+
 /** Ground mesh lying flat — distinct silhouette per itemId. */
 export function buildGroundMesh(itemId: string, qty = 1): THREE.Group {
   const g = new THREE.Group();

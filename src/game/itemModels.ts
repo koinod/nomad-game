@@ -52,6 +52,7 @@ export const ITEM_MODEL_IDS = new Set([
   'finish_matte', 'finish_camo', 'finish_rust', 'finish_worn',
   'armored_vest', 'riot_helmet', 'plate_carrier', 'shin_guards',
   'circuit_board', 'gunpowder', 'brass', 'lead', 'bp_turret', 'turret',
+  'field_jacket', 'cargo_pants', 'hard_case', 'ammo_can',
 ]);
 
 export function buildItemModel(itemId: string, qty = 1): THREE.Group | null {
@@ -304,6 +305,67 @@ export function buildItemModel(itemId: string, qty = 1): THREE.Group | null {
     case 'lead': {
       add(box(0.2, 0.05, 0.09), new THREE.MeshStandardMaterial({ color: 0x6a7076, roughness: 0.5, metalness: 0.6 }), 0, 0.025, 0);
       add(box(0.18, 0.05, 0.08), new THREE.MeshStandardMaterial({ color: 0x767c82, roughness: 0.5, metalness: 0.6 }), 0.01, 0.075, 0.01).rotation.y = 0.3;
+      break;
+    }
+    case 'field_jacket': {
+      // worn field jacket, laid out like the vest models: back + front
+      // panels in weathered field green, collar, folded sleeves, and the
+      // four pocket flaps that make its grid real
+      const fabric = new THREE.MeshStandardMaterial({ color: 0x59613f, roughness: 0.95 });
+      const fabricDark = new THREE.MeshStandardMaterial({ color: 0x48502f, roughness: 0.95 });
+      add(box(0.42, 0.52, 0.07), fabricDark, 0, 0.06, -0.09); // back panel
+      add(box(0.42, 0.52, 0.07), fabric, 0, 0.06, 0.1); // front panel
+      add(box(0.3, 0.07, 0.2), fabricDark, 0, 0.34, 0); // collar roll
+      for (const s of [-1, 1]) {
+        add(box(0.1, 0.05, 0.3), fabric, s * 0.16, 0.3, 0); // shoulders
+        const sleeve = add(box(0.09, 0.34, 0.09), fabricDark, s * 0.27, 0.1, 0.05);
+        sleeve.rotation.z = s * 0.12; // folded sleeves
+        for (const py of [0.02, 0.2]) add(box(0.13, 0.1, 0.02), fabricDark, s * 0.1, py, 0.145); // pocket flaps
+      }
+      break;
+    }
+    case 'cargo_pants': {
+      // cargo trousers laid flat: waistband, two tapered legs, and the
+      // thigh cargo pockets the pants grid lives in
+      const fabric = new THREE.MeshStandardMaterial({ color: 0x6a6248, roughness: 0.95 });
+      const fabricDark = new THREE.MeshStandardMaterial({ color: 0x59503a, roughness: 0.95 });
+      add(box(0.4, 0.09, 0.24), fabricDark, 0, 0.3, 0); // waistband + seat
+      for (const s of [-1, 1]) {
+        const leg = add(cyl(0.075, 0.055, 0.52, 10), fabric, s * 0.1, 0.0, 0);
+        leg.rotation.x = 0; leg.scale.z = 0.55; // flattened tube reads as cloth, not pipe
+        leg.position.y = 0.045;
+        add(box(0.13, 0.16, 0.03), fabricDark, s * 0.1, 0.05, 0.075); // cargo pocket
+        add(box(0.13, 0.04, 0.032), M.black(), s * 0.1, 0.14, 0.075); // pocket flap strap
+      }
+      break;
+    }
+    case 'hard_case': {
+      // rugged equipment case (Pelican idiom): shell, lid seam, corner
+      // rails, twin latches, carry handle — charcoal + safety-orange
+      const shell = new THREE.MeshStandardMaterial({ color: 0x2c2f33, roughness: 0.55 });
+      const accent = new THREE.MeshStandardMaterial({ color: 0xd86a20, roughness: 0.5 });
+      add(box(0.52, 0.2, 0.34), shell, 0, 0.1, 0); // body
+      add(box(0.54, 0.05, 0.36), shell, 0, 0.215, 0); // lid
+      add(box(0.545, 0.018, 0.365), M.black(), 0, 0.185, 0); // lid seam gasket
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+        add(box(0.05, 0.24, 0.05), M.black(), sx * 0.245, 0.11, sz * 0.155); // corner rails
+      }
+      for (const sx of [-1, 1]) add(box(0.07, 0.09, 0.02), accent, sx * 0.13, 0.15, 0.18); // latches
+      const handle = add(cyl(0.014, 0.014, 0.2, 8), M.black(), 0, 0.26, 0.1);
+      handle.rotation.z = Math.PI / 2; // carry handle, lying along the lid
+      break;
+    }
+    case 'ammo_can': {
+      // classic steel ammo can: olive drab body, ridged lid, swing
+      // handle, front latch — the can its 3×2 grid lives in
+      const canMat = new THREE.MeshStandardMaterial({ color: 0x4c5638, roughness: 0.6, metalness: 0.35 });
+      add(box(0.3, 0.17, 0.16), canMat, 0, 0.085, 0); // body
+      add(box(0.31, 0.035, 0.17), canMat, 0, 0.185, 0); // lid
+      add(box(0.2, 0.02, 0.1), canMat, 0, 0.21, 0); // lid ridge
+      const handle = add(new THREE.TorusGeometry(0.055, 0.011, 6, 12, Math.PI), M.darkSteel(), 0, 0.22, 0);
+      handle.rotation.y = Math.PI / 2; // swing handle, folded up
+      add(box(0.05, 0.09, 0.015), M.darkSteel(), 0, 0.11, 0.085); // front latch
+      add(box(0.16, 0.07, 0.005), new THREE.MeshStandardMaterial({ color: 0xc9b458, roughness: 0.7 }), 0, 0.09, 0.082); // stencil plate
       break;
     }
     case 'bp_turret': {

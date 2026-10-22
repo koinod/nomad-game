@@ -1,9 +1,9 @@
 // Station tiers & facility hosts — SYSTEMS_SPEC §4.1 (Lane 7, crafting).
 //
 // Two ways to reach a station:
-//  - WORLD stations: physical props placed by World.buildStations(). Their
-//    placements are mirrored here as data so systems/UI/tests share one
-//    source of truth (World.ts still owns the meshes).
+//  - WORLD stations: physical props placed by World.buildStations() from
+//    WORLD_STATION_PLACEMENTS below — this data is the single source of
+//    truth shared by systems/UI/tests (World.ts owns the meshes).
 //  - FACILITY hosts: base facilities (src/data/base.ts) that host a station
 //    at a tier. Workbench/Workshop/Machine Shop facilities are forward-
 //    declared for Lane 10's base pass; Infirmary + Garage Bay already ship.
@@ -58,10 +58,16 @@ export const STATION_DEFS: Record<CraftStationId, StationDef> = {
 /** Proximity radius (m) at which a world station is usable — matches Game.ts. */
 export const STATION_RADIUS_M = 4.5;
 
-/** Mirror of World.buildStations() placements (poi anchor + offset). */
+/**
+ * World station placements — the single source of truth: World.buildStations()
+ * consumes this array (anchor + offset). Anchors are POI placements
+ * (`poiId`, from BETA_POI_PLACEMENTS) or sector pads (`sectorId`, from
+ * BETA_SECTORS) for sites that have no POI entry (the Refuge).
+ */
 export interface WorldStationPlacement {
   station: StationId;
-  poiId: string;
+  poiId?: string;
+  sectorId?: string;
   dx: number;
   dz: number;
   kind: 'bench' | 'chem' | 'shop';
@@ -75,6 +81,16 @@ export const WORLD_STATION_PLACEMENTS: WorldStationPlacement[] = [
   // (closes GAP §C #4 — the shipped `industrial` recipes were unreachable
   // before this placement landed in World.buildStations()).
   { station: 'industrial', poiId: 'marina', dx: 8, dz: -4, kind: 'shop' },
+  // Order #4 required sites: the airbase depot (fleet home — bench work and
+  // fabrication where the trucks live), the Citadel yard at the warehouse
+  // POI (Tollkeeper truck lifts: a full shop + a bench), and the Refuge
+  // (chapel infirmary chemistry + a workbench, sector-anchored).
+  { station: 'workbench', poiId: 'airbase', dx: -30, dz: 22, kind: 'bench' },
+  { station: 'industrial', poiId: 'airbase', dx: -38, dz: 32, kind: 'shop' },
+  { station: 'industrial', poiId: 'warehouse', dx: 6, dz: 6, kind: 'shop' },
+  { station: 'workbench', poiId: 'warehouse', dx: -6, dz: 10, kind: 'bench' },
+  { station: 'chemistry', sectorId: 'refuge', dx: 8, dz: 6, kind: 'chem' },
+  { station: 'workbench', sectorId: 'refuge', dx: -10, dz: 12, kind: 'bench' },
 ];
 
 /** A base facility that hosts a station at a tier (§4.1 facility column). */

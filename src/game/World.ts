@@ -14,6 +14,7 @@ import { decalPlane } from './modelKit';
 import type { KitBuilding, KitResult } from './kit';
 import type { BiomeId } from './Game';
 import type { StationId } from '../data/items';
+import { WORLD_STATION_PLACEMENTS } from '../data/stations';
 import type { Collider } from './Colliders';
 import { LightShafts, tightenFog } from './PostFX';
 import { BETA_POI_PLACEMENTS, BETA_ROADS, BETA_DAYMARKERS, BETA_SECTORS, BETA_EXTRA_PADS } from '../data/betaLayout';
@@ -989,8 +990,10 @@ export class World {
     }
   }
 
-  /** Physical crafting stations: a Weapons Bench at Jonah's camp and in town,
-   *  a Chemistry Station at the relay. Machine Shops come with claimed bases. */
+  /** Physical crafting stations, placed from WORLD_STATION_PLACEMENTS
+   *  (data/stations.ts): benches, chemistry, and Machine Shops at camps,
+   *  town, the relay, the marina, the airbase depot, the Citadel yard,
+   *  and the Refuge. Base facilities host more (data/stations hosts). */
   private buildStations(): void {
     const mk = (w: number, h: number, d: number, c: number) => {
       const m = new THREE.Mesh(
@@ -1060,14 +1063,20 @@ export class World {
       this.stations.push({ station, x, z });
       this.stationColliders.push({ x0: x - 0.95, z0: z - 0.5, x1: x + 0.95, z1: z + 0.5 });
     };
-    const [jx, jz] = this.poi('jonah_camp');
-    place('workbench', jx + 4, jz + 3, 'bench');
-    const [tx, tz] = this.poi('town');
-    place('workbench', tx - 15, tz + 2, 'bench');
-    const [rx, rz] = this.poi('relay_station');
-    place('chemistry', rx + 5, rz + 6, 'chem');
-    const [mx, mz] = this.poi('marina');
-    place('industrial', mx + 8, mz - 4, 'shop');
+    // Placements are data (data/stations.ts WORLD_STATION_PLACEMENTS is
+    // the single source of truth — edit there, never here). Anchors
+    // resolve POI-first, then sector pads (the Refuge has no POI entry).
+    for (const p of WORLD_STATION_PLACEMENTS) {
+      let ax: number; let az: number;
+      if (p.poiId) {
+        [ax, az] = this.poi(p.poiId);
+      } else {
+        const sector = BETA_SECTORS.find((s) => s.id === p.sectorId);
+        if (!sector) continue;
+        ax = sector.x; az = sector.z;
+      }
+      place(p.station, ax + p.dx, az + p.dz, p.kind);
+    }
   }
 
   /** The revamped airbase: portable kit structures + ground works at
