@@ -156,8 +156,11 @@ describe('stage params (PRD §2 through the performance law)', () => {
     const tune = suspTuneFor('dark_horse');
     const r = darkHorseParams([], 0).wheelRadiusM;
     expect(2 * r + tune.archTravelM).toBeLessThanOrEqual(tune.archTopM + 1e-9);
-    // a car, not a truck: Rapier's default suspension-force cap stands
-    expect(tune.maxForceN).toBeUndefined();
+    // suspension-force cap sized ~3x the static corner load
+    // (vehicle-physics lane 2026-10-22: Rapier's DEFAULT cap
+    // saturates under a full brake stop — the front suspension
+    // sank until the chassis collider grounded out; probed)
+    expect(tune.maxForceN).toBe(18500);
   });
 });
 

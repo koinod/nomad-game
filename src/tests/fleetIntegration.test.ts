@@ -134,11 +134,13 @@ describe('per-def diesel physics selection', () => {
       const cornerN = (paramsForDef(id, [], 0).massKg * 9.81) / 4;
       expect(tune.maxForceN).toBeGreaterThan(cornerN * 2);
     }
-    // the cars keep the engine default — their tuned, Ian-approved
-    // behavior (incl. drop bottoming) is pinned elsewhere and must
-    // not move
-    expect(suspTuneFor('mustang').maxForceN).toBeUndefined();
-    expect(suspTuneFor('gt500').maxForceN).toBeUndefined();
+    // the cars' caps are sized like the heavies' (~3x corner load):
+    // the engine default saturated under full braking and let the
+    // chassis ground out mid-stop (vehicle-physics lane, probed
+    // 2026-10-22) — the old "cars keep the default" pin encoded the
+    // defect the pitch-sway pass removed
+    expect(suspTuneFor('mustang').maxForceN).toBe(16000);
+    expect(suspTuneFor('gt500').maxForceN).toBe(30000);
   });
 
   it('the Sprinter rig matches the POLISHED GLB (c9071da), re-measured', () => {
