@@ -188,6 +188,19 @@ export const TRADERS: TraderDef[] = [
   },
 ];
 
+/** sc_appraiser (Order #5): your goods count barterMult× more, so the
+ *  give side of every offer shrinks — qty' = max(1, floor(qty / 1.2))
+ *  per stack (integer stacks round in the trader's favor on 1s, yours
+ *  on larger stacks). The get side never changes; the discount is
+ *  computed from the same offer the panel displays and executes. */
+export function appraisedOffer(offer: BarterOffer, perks: readonly string[]): BarterOffer {
+  if (!perks.includes('sc_appraiser')) return offer;
+  return {
+    ...offer,
+    give: offer.give.map((g) => ({ ...g, qty: Math.max(1, Math.floor(g.qty / 1.2)) })),
+  };
+}
+
 export function traderById(id: string): TraderDef | undefined {
   return TRADERS.find((t) => t.id === id);
 }

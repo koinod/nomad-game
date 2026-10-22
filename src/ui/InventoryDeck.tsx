@@ -116,7 +116,7 @@ export default function InventoryDeck({ compact = false }: { compact?: boolean }
     return { currentList: list, currentDest: dest, crumbs: labels };
   }, [inventory, rootDest, trail, root]);
 
-  const currentSpec = specForDest(inventory, currentDest) ?? { cols: 4, rows: 2, kg: 0 };
+  const currentSpec = specForDest(inventory, currentDest, perks) ?? { cols: 4, rows: 2, kg: 0 };
   const selected = selectedUid ? currentList.find((i) => i.uid === selectedUid) ?? null : null;
   const selectedDef = selected ? ITEMS[selected.itemId] : undefined;
 

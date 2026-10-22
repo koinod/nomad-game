@@ -1,6 +1,6 @@
 import { useGameStore } from '../store/gameStore';
 import { ITEMS } from '../data/items';
-import { traderById, traderAccess, type BarterOffer } from '../data/traders';
+import { traderById, traderAccess, appraisedOffer, type BarterOffer } from '../data/traders';
 import { sfx } from '../systems/audio';
 
 // TraderPanel — barter UI for data/traders.ts. No currency: every offer is
@@ -49,6 +49,7 @@ function executeTrade(offer: BarterOffer): boolean {
 export default function TraderPanel({ traderId, onClose }: { traderId: string; onClose: () => void }) {
   const rep = useGameStore((s) => s.rep);
   const flags = useGameStore((s) => s.flags);
+  const perks = useGameStore((s) => s.perks);
   const inventory = useGameStore((s) => s.inventory);
   void inventory; // re-render on inventory change so affordability updates
 
@@ -74,7 +75,11 @@ export default function TraderPanel({ traderId, onClose }: { traderId: string; o
           <>
             <p className="mb-4 text-[14px] italic leading-relaxed text-[#9aa6b2]">{trader.greeting}</p>
             <div className="nomad-scroll max-h-80 space-y-2 overflow-y-auto">
-              {trader.offers.map((offer, i) => {
+              {trader.offers.map((rawOffer, i) => {
+                // sc_appraiser: the discounted offer is what displays,
+                // what affordability checks, and what executes.
+                const offer = appraisedOffer(rawOffer, perks);
+                const discounted = offer.give.some((g, gi) => g.qty !== rawOffer.give[gi].qty);
                 const afford = canAfford(offer);
                 return (
                   <div
@@ -86,6 +91,9 @@ export default function TraderPanel({ traderId, onClose }: { traderId: string; o
                       {offer.give.map((g) => stackLabel(g.itemId, g.qty)).join(' + ')}
                       <span className="text-[#9aa6b2]"> → </span>
                       {stackLabel(offer.get.itemId, offer.get.qty)}
+                      {discounted ? (
+                        <div className="text-[12px] text-[#5aa469]">Appraiser — your goods count for more here.</div>
+                      ) : null}
                       {offer.note ? (
                         <div className="text-[12px] italic text-[#9aa6b2]">{offer.note}</div>
                       ) : null}

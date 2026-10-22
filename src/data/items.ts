@@ -1083,12 +1083,22 @@ export function weightedChance(entry: HuskLootEntry, biome: LootBiome): number {
 export function rollLoot(
   entries: HuskLootEntry[],
   rng: () => number,
-  opts?: { resourceMult?: number; biome?: LootBiome },
+  opts?: {
+    resourceMult?: number;
+    biome?: LootBiome;
+    /** Order #5: flat multiplier on every entry's chance (Keen Eye,
+     *  Night Harvest) — applied after the biome weighting. */
+    chanceMult?: number;
+    /** Order #5: per-entry multiplier (The Island Remembers pays its
+     *  bonus only on a table's rare entries). */
+    entryMult?: (entry: HuskLootEntry) => number;
+  },
 ): { itemId: string; qty: number }[] {
   const out: { itemId: string; qty: number }[] = [];
   const mult = opts?.resourceMult ?? 1;
   for (const e of entries) {
-    const chance = opts?.biome ? weightedChance(e, opts.biome) : e.chance;
+    const base = opts?.biome ? weightedChance(e, opts.biome) : e.chance;
+    const chance = Math.min(1, base * (opts?.chanceMult ?? 1) * (opts?.entryMult ? opts.entryMult(e) : 1));
     if (rng() > chance) continue;
     const qty = Math.max(1, Math.round((e.min + rng() * (e.max - e.min)) * mult));
     out.push({ itemId: e.id, qty });

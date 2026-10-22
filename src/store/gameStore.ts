@@ -36,7 +36,7 @@ import {
 } from './containers';
 import { arrangeItems as arrangeGridItems } from './gridUtils';
 import { applyXp, canBuyPerk, XP_EVENTS } from '../systems/skills';
-import { blockThroughFactor } from '../systems/perkEffects';
+import { blockThroughFactor, disassemblyYields } from '../systems/perkEffects';
 import { deleteSaveSlot, listSaveSlots, loadGameFromSlot, saveGameToSlot } from '../systems/save';
 import { sfx } from '../systems/audio';
 import { getGame } from '../game/instance';
@@ -1010,7 +1010,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         if (opts?.found && (def.category === 'weapon-ranged' || def.category === 'weapon-melee')) {
           fresh.condition = 35 + Math.floor(Math.random() * 51);
         }
-        const placed = addToCarried(inv, s.equipped, fresh);
+        const placed = addToCarried(inv, s.equipped, fresh, s.perks);
         if (!placed) {
           if (!quiet) s.addToast('No room — every grid is full.');
           break;
@@ -1100,7 +1100,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         }
         let placedInv: InvItem[] | null = null;
         for (const d of candidates) {
-          if (fitInDest(base, d, r2.removed, eq)) { placedInv = insertIntoDest(base, d, r2.removed, eq); break; }
+          if (fitInDest(base, d, r2.removed, eq, s.perks)) { placedInv = insertIntoDest(base, d, r2.removed, eq, s.perks); break; }
         }
         if (!placedInv) {
           s.addToast(`No room to swap the ${ITEMS[r2.removed.itemId]?.name ?? 'item'} out.`);
@@ -1195,7 +1195,9 @@ export const useGameStore = create<GameState>()((set, get) => {
       if ((w.loaded ?? 0) > 0 && def.ammoId) get().addItem(def.ammoId, w.loaded!, true);
       get().removeItem(uid, 1);
       const got: string[] = [];
-      for (const y of def.disassembly) {
+      // Order #5: Salvager (+1 first material) and Scrounger (+1 gun
+      // part) ride the one derivation — yields are computed, not verbatim.
+      for (const y of disassemblyYields(def.disassembly, s.perks)) {
         if (get().addItem(y.itemId, y.qty, true)) got.push(`${y.qty}× ${ITEMS[y.itemId]?.name ?? y.itemId}`);
       }
       s.addToast(`Stripped the ${def.name}: ${got.join(', ') || 'nothing salvageable'}.`);
@@ -1316,8 +1318,8 @@ export const useGameStore = create<GameState>()((set, get) => {
       if (!removed.ok) return;
       let placed: InvItem[] | null = null;
       for (const d of receiveDests(removed.inventory, eqNext)) {
-        if (fitInDest(removed.inventory, d, removed.removed, eqNext)) {
-          placed = insertIntoDest(removed.inventory, d, removed.removed, eqNext);
+        if (fitInDest(removed.inventory, d, removed.removed, eqNext, s.perks)) {
+          placed = insertIntoDest(removed.inventory, d, removed.removed, eqNext, s.perks);
           break;
         }
       }
@@ -1336,7 +1338,7 @@ export const useGameStore = create<GameState>()((set, get) => {
 
     transferItem: (uid, dest) => {
       const s = get();
-      const res = transferCarried(s.inventory, s.equipped, uid, dest);
+      const res = transferCarried(s.inventory, s.equipped, uid, dest, s.perks);
       if (!res.ok) {
         const msgs: Record<string, string> = {
           'cycle': 'A container can’t go inside itself.',
@@ -2087,7 +2089,7 @@ export const useGameStore = create<GameState>()((set, get) => {
 
     arrangeContainer: (dest, order) => {
       const s = get();
-      const spec = specForDest(s.inventory, dest);
+      const spec = specForDest(s.inventory, dest, s.perks);
       if (!spec) return;
       const items = listInDest(s.inventory, dest, s.equipped);
       const { placed } = arrangeGridItems(items, spec.cols, spec.rows, order);

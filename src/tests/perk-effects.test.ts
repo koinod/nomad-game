@@ -32,6 +32,9 @@ import {
   vehicleRepairCost,
 } from '../systems/perkEffects';
 import { perkRowState } from '../systems/skills';
+import { rollLoot } from '../data/items';
+import { pocketsSpec } from '../store/containers';
+import { appraisedOffer, type BarterOffer } from '../data/traders';
 
 const calm = { hpFrac: 1, targetStunned: false, behindOrUnaware: false };
 
@@ -208,6 +211,65 @@ describe('ghost derivations', () => {
   it('gh_backstab: ×3 from behind / unaware (via the shared melee derivation)', () => {
     expect(meleeDamageMult(['gh_backstab'], { ...calm, behindOrUnaware: true })).toBe(3);
     expect(meleeDamageMult(['gh_backstab'], calm)).toBe(1);
+  });
+});
+
+describe('loot roll integration (rollLoot)', () => {
+  const entries = [{ id: 'scrap', min: 1, max: 1, chance: 0.5 }];
+  // rng scripted: first call is the chance check
+  const roll = (chanceRoll: number, mults: Parameters<typeof rollLoot>[2]) =>
+    rollLoot(entries, () => chanceRoll, mults);
+
+  it('sc_keen via chanceMult: a 0.52 roll misses at base 0.5 but lands at ×1.1 (0.55)', () => {
+    expect(roll(0.52, undefined)).toEqual([]);
+    expect(roll(0.52, { chanceMult: lootChanceMult(['sc_keen'], false) })).toHaveLength(1);
+  });
+
+  it('sc_nightharvest stacks at night only', () => {
+    // 0.56 beats nothing at 0.5 base; at night 0.5 × 1.15 = 0.575 it lands
+    expect(roll(0.56, { chanceMult: lootChanceMult(['sc_nightharvest'], false) })).toEqual([]);
+    expect(roll(0.56, { chanceMult: lootChanceMult(['sc_nightharvest'], true) })).toHaveLength(1);
+  });
+
+  it('sc_remembers via entryMult: rare entries gain, common entries do not', () => {
+    const rare = [{ id: 'scrap', min: 1, max: 1, chance: 0.3 }];
+    const common = [{ id: 'scrap', min: 1, max: 1, chance: 0.9 }];
+    const em = (perks: string[]) => (e: { chance: number }) => rareLootMult(perks, e.chance);
+    expect(rollLoot(rare, () => 0.32, { entryMult: em(['sc_remembers']) })).toHaveLength(1); // 0.33
+    expect(rollLoot(rare, () => 0.32, { entryMult: em([]) })).toEqual([]);
+    expect(rollLoot(common, () => 0.95, { entryMult: em(['sc_remembers']) })).toEqual([]);
+  });
+});
+
+describe('sc_pockets (containers pocketsSpec)', () => {
+  it('pockets are 2×2 without the perk and 4×2 (+4 slots) with it', () => {
+    expect(pocketsSpec()).toEqual({ cols: 2, rows: 2, kg: 5 });
+    expect(pocketsSpec([])).toEqual({ cols: 2, rows: 2, kg: 5 });
+    const spec = pocketsSpec(['sc_pockets']);
+    expect(spec.cols * spec.rows).toBe(8);
+  });
+});
+
+describe('sc_appraiser (appraisedOffer)', () => {
+  const offer: BarterOffer = {
+    give: [{ itemId: 'valuables', qty: 5 }, { itemId: 'gun_parts', qty: 2 }, { itemId: 'scrap', qty: 1 }],
+    get: { itemId: 'ammo_rifle', qty: 20 },
+  };
+
+  it('without the perk the offer is untouched', () => {
+    expect(appraisedOffer(offer, [])).toBe(offer);
+  });
+
+  it('with the perk every give stack shrinks by the 1.2 value factor (min 1), the get side is unchanged', () => {
+    const out = appraisedOffer(offer, ['sc_appraiser']);
+    expect(out.give).toEqual([
+      { itemId: 'valuables', qty: 4 }, // floor(5/1.2)
+      { itemId: 'gun_parts', qty: 1 }, // floor(2/1.2)
+      { itemId: 'scrap', qty: 1 }, // min 1
+    ]);
+    expect(out.get).toEqual({ itemId: 'ammo_rifle', qty: 20 });
+    // original not mutated
+    expect(offer.give[0].qty).toBe(5);
   });
 });
 
