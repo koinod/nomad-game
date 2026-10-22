@@ -22,6 +22,7 @@ import {
 import type { Collider } from './Colliders';
 import type { KitResult } from './kit';
 import { decalPlane } from './modelKit';
+import { mergeStaticMeshes, excludeNamedSubtrees } from './staticMerge';
 
 type GroundY = (x: number, z: number) => number;
 
@@ -152,5 +153,10 @@ function buildGroundWorks(site: AirbaseSite, groundY: GroundY): { group: THREE.G
 export function buildAirbaseSite(groundY: GroundY, site: AirbaseSite = AIRBASE_SITE): AirbaseBuild {
   const af = buildAirfield(groundY, site);
   const { group, colliders } = buildGroundWorks(site, groundY);
+  // Perf (2026-10-22): the ground works are ~100 one-part meshes
+  // (runway dashes, pad outlines, markers) — fold the statics into
+  // one merged mesh per material. Named pad_marker blocks and the
+  // per-label decal planes (unique materials) survive untouched.
+  mergeStaticMeshes(group, { mergedName: 'airbase-ground-merged', exclude: excludeNamedSubtrees });
   return { kits: af.results, groundGroup: group, propColliders: colliders, pads: AIRBASE_PADS };
 }

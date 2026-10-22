@@ -15,6 +15,7 @@
 // - local frame: building center at (0,0), front face toward +Z
 
 import * as THREE from 'three';
+import { mergeStaticMeshes, excludeNamedSubtrees } from './staticMerge';
 import type { Collider, FloorRect } from './Colliders';
 import type { ContainerDef } from './Interact';
 import { FURNITURE_HALF, FURNITURE_LABEL, type FurnitureKind } from './furnitureMeshes';
@@ -1110,6 +1111,15 @@ export class Kit {
 
   /** Bake everything into world space. Call exactly once. */
   finalize(scene?: THREE.Scene): KitResult {
+    // Perf (2026-10-22): collapse the kit's static piece meshes into
+    // one merged mesh per material before the group is transformed.
+    // A kit emits a Mesh per box — hundreds per building, each a draw
+    // call in the main AND shadow passes, forever. Merging is
+    // triangle-exact (the greeble budget counts tris through this
+    // group) and skips named fixtures + anything under a named or
+    // disturbed ancestor (see staticMerge.ts).
+    mergeStaticMeshes(this.local, { mergedName: 'kit-merged', exclude: excludeNamedSubtrees });
+    mergeStaticMeshes(this.roofLocal, { mergedName: 'kit-roof-merged', exclude: excludeNamedSubtrees });
     this.local.position.set(this.cx, this.baseY, this.cz);
     this.local.rotation.y = (this.rotQ * Math.PI) / 2;
     this.roofLocal.position.copy(this.local.position);
