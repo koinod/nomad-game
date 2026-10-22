@@ -24,8 +24,11 @@ import InventoryDeck from './InventoryDeck';
 import SkillsPanel from './SkillsPanel';
 import { CraftPanel } from './CraftPanel';
 import DispatchPanel from './DispatchPanel';
-import { DIFFICULTIES, HAIR_COLORS, SKIN_TONES } from '../store/types';
-import type { BuildType, HairStyle } from '../store/types';
+import { DIFFICULTIES, HAIR_COLORS, SKIN_TONES, defaultSurvivorRuntime } from '../store/types';
+import type { BuildType, HairStyle, SurvivorOrder } from '../store/types';
+import { SKILLS, xpToNext } from '../data/skills';
+import { slotOfUid } from '../store/equipment';
+import { FLAGGING_FATIGUE, FLAGGING_HUNGER } from '../game/companionMath';
 import type { PhoneTab } from '../store/types';
 import { getGame } from '../game/instance';
 import { sfx } from '../systems/audio';
@@ -697,10 +700,35 @@ const JOBS: SurvivorJob[] = ['Idle', 'Builder', 'Mechanic', 'Medic', 'Farmer', '
 
 /* ---------------- CREW (Team app) ---------------- */
 
+const CREW_ORDERS: { id: SurvivorOrder; label: string; hint: string }[] = [
+  { id: 'follow', label: 'Follow', hint: 'Walks with you — and takes a seat when you drive.' },
+  { id: 'hold', label: 'Hold', hint: 'Stays where they stand and guards the ground.' },
+  { id: 'base', label: 'Base', hint: 'Lives at the home base — rests, eats from the stockpile, guards it.' },
+];
+
 function CrewSection() {
   const survivors = useGameStore((s) => s.survivors);
   const assignJob = useGameStore((s) => s.assignJob);
   const dispatches = useGameStore((s) => s.dispatches);
+  // ORDER #6: orders / needs / carried weapon / grown skill maps
+  const runtime = useGameStore((s) => s.survivorRuntime);
+  const survivorSkills = useGameStore((s) => s.survivorSkills);
+  const setSurvivorOrder = useGameStore((s) => s.setSurvivorOrder);
+  const equipSurvivorWeapon = useGameStore((s) => s.equipSurvivorWeapon);
+  const unequipSurvivorWeapon = useGameStore((s) => s.unequipSurvivorWeapon);
+  const inventory = useGameStore((s) => s.inventory);
+  const equipped = useGameStore((s) => s.equipped);
+  const hotbar = useGameStore((s) => s.hotbar);
+  // weapons that can change hands right now: single damage-dealing
+  // instances in the pack, not in the player's grip or on the hotbar
+  const armory = walkCarried(inventory).filter(
+    (i) => i.qty === 1 && (ITEMS[i.itemId]?.damage ?? 0) > 0 && !slotOfUid(equipped, i.uid) && !hotbar.includes(i.uid),
+  );
+  const meter = (v: number, ok: string, bad: string, isBad: boolean) => (
+    <div className="h-1.5 flex-1 overflow-hidden rounded bg-[#232b36]">
+      <div className={`h-full ${isBad ? bad : ok}`} style={{ width: `${Math.max(0, Math.min(100, v))}%` }} />
+    </div>
+  );
   return (
       <section>
         <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Crew ({survivors.length})</h3>
@@ -709,6 +737,8 @@ function CrewSection() {
         )}
         {survivors.map((sv) => {
           const out = dispatches.find((d) => d.survivorId === sv.id);
+          const rt = runtime[sv.id] ?? defaultSurvivorRuntime();
+          const skillMap = survivorSkills[sv.id];
           return (
           <div key={sv.id} className="mb-2 rounded border border-[#232b36] bg-[#0b0e12] p-2.5">
             <div className="flex items-center justify-between">
@@ -723,14 +753,40 @@ function CrewSection() {
             <div className="mt-0.5 text-[11px] text-[#8a94a3]">
               {sv.traits.map(traitName).join(' · ') || 'No notable traits'} · HP {Math.round(sv.hp)}
               {sv.status !== 'healthy' ? ` · ${sv.status}` : ''}
+              {!out && <> · {rt.order === 'follow' ? 'Following you' : rt.order === 'hold' ? 'Holding position' : 'At base'}</>}
             </div>
             <div className="mt-1 flex items-center gap-2">
-              <span className="text-[11px] text-[#8a94a3]">Morale {sv.morale} ({moraleBand(sv.morale)})</span>
-              <div className="h-1.5 flex-1 overflow-hidden rounded bg-[#232b36]">
-                <div className={`h-full ${sv.morale >= 40 ? 'bg-[#5aa469]' : 'bg-[#d9534f]'}`} style={{ width: `${sv.morale}%` }} />
-              </div>
+              <span className="w-14 text-[11px] text-[#8a94a3]">Morale {sv.morale}</span>
+              {meter(sv.morale, 'bg-[#5aa469]', 'bg-[#d9534f]', sv.morale < 40)}
+              <span className="w-12 text-right text-[10px] text-[#5a6472]">{moraleBand(sv.morale)}</span>
             </div>
-            <div className="mt-1.5 flex flex-wrap gap-1">
+            <div className="mt-0.5 flex items-center gap-2">
+              <span className="w-14 text-[11px] text-[#8a94a3]">Food {Math.round(rt.hunger)}</span>
+              {meter(rt.hunger, 'bg-[#c9a227]', 'bg-[#d9534f]', rt.hunger < FLAGGING_HUNGER)}
+              <span className="w-12 text-right text-[10px] text-[#5a6472]">{rt.hunger < FLAGGING_HUNGER ? 'hungry' : ''}</span>
+            </div>
+            <div className="mt-0.5 flex items-center gap-2">
+              <span className="w-14 text-[11px] text-[#8a94a3]">Rest {Math.round(rt.fatigue)}</span>
+              {meter(rt.fatigue, 'bg-[#5a7a9e]', 'bg-[#d9534f]', rt.fatigue < FLAGGING_FATIGUE)}
+              <span className="w-12 text-right text-[10px] text-[#5a6472]">{rt.fatigue < FLAGGING_FATIGUE ? 'exhausted' : ''}</span>
+            </div>
+            {/* orders — where their body goes (jobs below stay the base-economy role) */}
+            <div className="mt-1.5 flex flex-wrap items-center gap-1">
+              <span className="mr-0.5 text-[10px] uppercase tracking-wide text-[#5a6472]">Orders</span>
+              {CREW_ORDERS.map((o) => (
+                <button
+                  key={o.id}
+                  disabled={!!out}
+                  title={o.hint}
+                  onClick={() => { sfx.play('ui'); setSurvivorOrder(sv.id, o.id); }}
+                  className={`rounded border px-1.5 py-0.5 text-[10px] disabled:cursor-not-allowed disabled:opacity-40 ${rt.order === o.id ? 'border-[#e8b34b] text-[#e8b34b]' : 'border-[#232b36] text-[#8a94a3]'}`}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-1">
+              <span className="mr-0.5 text-[10px] uppercase tracking-wide text-[#5a6472]">Job</span>
               {JOBS.map((j) => (
                 <button
                   key={j}
@@ -742,8 +798,52 @@ function CrewSection() {
                 </button>
               ))}
             </div>
-            <div className="mt-1 text-[10px] text-[#8a94a3]">
-              Best: {Object.entries(sv.skills).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${k} ${v}`).join(' · ')}
+            {/* the weapon in their hands — the instance itself, not a copy */}
+            <div className="mt-1.5 flex items-center gap-2 text-[11px]">
+              <span className="text-[#8a94a3]">Weapon</span>
+              {rt.weapon ? (
+                <>
+                  <span className="text-[#d7dde5]">{ITEMS[rt.weapon.itemId]?.name ?? rt.weapon.itemId}</span>
+                  <button
+                    onClick={() => { sfx.play('ui'); unequipSurvivorWeapon(sv.id); }}
+                    className="rounded border border-[#232b36] px-1.5 py-0.5 text-[10px] text-[#8a94a3] hover:border-[#e8b34b]"
+                  >
+                    Take back
+                  </button>
+                </>
+              ) : armory.length > 0 ? (
+                <select
+                  value=""
+                  disabled={!!out}
+                  onChange={(e) => { if (e.target.value) { sfx.play('ui'); equipSurvivorWeapon(sv.id, e.target.value); } }}
+                  className="rounded border border-[#232b36] bg-[#0b0e12] px-1.5 py-0.5 text-[11px] text-[#d7dde5] disabled:opacity-40"
+                >
+                  <option value="">Arm with…</option>
+                  {armory.map((i) => (
+                    <option key={i.uid} value={i.uid}>{ITEMS[i.itemId]?.name ?? i.itemId}</option>
+                  ))}
+                </select>
+              ) : (
+                <span className="text-[#5a6472]">Unarmed — no spare weapon in the pack</span>
+              )}
+            </div>
+            {/* full skill readout — levels from the def, XP progress
+                from the survivor's own grown map (order #5 hooks, #6 feed) */}
+            <div className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-0.5">
+              {SKILLS.map((sk) => {
+                const st = skillMap?.[sk.id];
+                const level = st?.level ?? sv.skills[sk.id] ?? 0;
+                const pct = level >= 10 ? 100 : Math.min(100, ((st?.xp ?? 0) / Math.max(1, xpToNext(level))) * 100);
+                return (
+                  <div key={sk.id} className="flex items-center gap-1.5 text-[10px]">
+                    <span className="w-16 shrink-0 capitalize text-[#8a94a3]">{sk.name}</span>
+                    <span className="w-4 font-mono text-[#d7dde5]">{level}</span>
+                    <div className="h-1 flex-1 overflow-hidden rounded bg-[#232b36]">
+                      <div className="h-full bg-[#5a7a9e]" style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
           );

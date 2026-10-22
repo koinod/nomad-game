@@ -200,6 +200,24 @@ describe('survivor store actions', () => {
     expect(st.survivors.find((x) => x.id === 'elena')!.skills.combat).toBe(st.survivorSkills.elena!.combat.level);
   });
 
+  it('a returned dispatch pays the runner survivor XP in the task skill', () => {
+    const s = useGameStore.getState();
+    s.recruitSurvivor({ ...DESIGNED_RECRUITS.mateo }); // scavenging 4
+    useGameStore.setState({
+      daysElapsed: 1, timeMinutes: 0,
+      dispatches: [{
+        id: 'd9', survivorId: 'mateo', vehicleDefId: 'gt500', trailerDefId: null,
+        task: 'scavenge', destPoiId: 'town', departMin: 0, etaMin: 10, distM: 300, status: 'out',
+      }],
+    });
+    s.advanceTime(20); // ETA passes — the run resolves
+    const st = useGameStore.getState();
+    expect(st.dispatches).toHaveLength(0);
+    // container_looted pays 4 scavenging XP -> 2 at the survivor rate
+    expect(st.survivorSkills.mateo?.scavenging.xp).toBe(2);
+    expect(st.survivorSkills.mateo?.scavenging.level).toBe(4); // seeded from the def
+  });
+
   it('orders stick and re-ordering is a no-op the second time', () => {
     const s = useGameStore.getState();
     s.recruitSurvivor({ ...DESIGNED_RECRUITS.elena });

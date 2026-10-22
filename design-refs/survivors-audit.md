@@ -271,3 +271,52 @@ resolves outcomes in the store, a natural accrual point).
 - **Survivor pathfinding** — companions use husk-style steering
   (moveToward + collision resolve, the proven in-game pattern), not a
   navmesh; the island has none and husks already ship without one.
+
+---
+
+## PHASE B OUTCOME (same lane, after the audit above)
+
+**B1 — movement animations** (`figureAnim.ts`, commit 8adebb6). Shared
+distance-clocked gait driver (phase = ∫ metres; per-kind tables). Husks:
+fixed-rate limp swing deleted; crawler scuttles in diagonal pairs;
+melee is a wind-up→chop arc with damage at the crossing (dodgeable,
+stagger-cancellable); flinch composes over the gait. Placed people
+(recruits/NPCs) breathe and look around via the idle driver, and a
+recruited survivor's statue retires itself.
+
+**B2 — survivor AI** (`Companions.ts` + `companionMath.ts`, commit
+9a503f6). Store: `SurvivorRuntime` (order / hunger / fatigue / weapon
+instance) + `survivorSkills` on the v3 snapshot; weapon handover is
+multiset-conserving; eating from pack or stockpile; `awardSurvivorEvent`
+feeds §6.1 at half rate and writes levels back into `SurvivorDef.skills`.
+World: one figure per recruited, non-dispatched survivor — formation
+follow (walk/run/snap catch-up), passenger seats via the player's own
+`carSeatPose` solve, hold/base anchors, guard leashes, trait-scaled
+combat through `Husk.damage`, kills paying survivor XP. Dispatch-return
+XP landed in B3 (task → skill: scavenge→container_looted, scout→
+search_undetected, escort→husk_kill_ranged).
+
+**B3 — Team UI** (Phone.tsx CrewSection). Roster cards now carry:
+order controls (Follow/Hold/Base, distinct from base-economy Jobs),
+Food/Rest meters beside Morale with flagging states, the carried
+weapon with Arm-with…/Take-back (only free pack instances are offered),
+and the full 7-skill readout with per-skill XP progress bars.
+
+**B4 — authored figures everywhere.** Verified by sweep: every human
+in the world is a figureKit figure (player / Interact placements /
+companions) and every one animates. No interim human meshes exist.
+
+**Known limits (honest residuals).**
+- Husks hunt the player only — companions fight but are not yet
+  targets; retargeting is a Husk FSM change, flagged for a future lane.
+- Companion gunfire does not consume player ammo; their weapon's
+  condition/mods ride along visually but wear is not simulated.
+- Companion needs tick in-world; the day-scale upkeep abstraction
+  still also runs at rollover (both feed from real stocks; the in-world
+  meters are the field truth, upkeep is the base truth).
+- Player avatar hit-flinch: CUT. No damage-signal channel exists from
+  the store to the avatar, and a new one risks the IK grip composition
+  for a third-person cosmetic. Player death stays the DeathOverlay.
+- 'Hold' anchors are captured by the companion entity when the order
+  lands; they are session state (a reload re-anchors at spawn), by
+  design — SurvivorDef/runtime carry no world positions anywhere.

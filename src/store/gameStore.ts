@@ -565,6 +565,13 @@ export const useGameStore = create<GameState>()((set, get) => {
       get().addJournal(`${taskName} — ${poiName(d.destPoiId)}`, lines);
       get().addToast(`${sv.name} is back from ${poiName(d.destPoiId)}. Report in the Log.`);
       get().addSkillXp('leadership', 4);
+      // ORDER #6: the run itself taught the runner — scavenge pays
+      // scavenging, scout pays stealth, escort pays combat (convoys
+      // get hunted; coming back IS the fight story).
+      get().awardSurvivorEvent(
+        sv.id,
+        d.task === 'scavenge' ? 'container_looted' : d.task === 'scout' ? 'search_undetected' : 'husk_kill_ranged',
+      );
     }
   };
 
