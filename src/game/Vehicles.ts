@@ -16,6 +16,7 @@ import {
   darkHorseModStage, darkHorseStage,
 } from './darkhorseDef';
 import { padWorld } from './airbaseSite';
+import { mergeStaticMeshes } from './staticMerge';
 
 export { glassTint } from './modelKit';
 export { GT500_DEF, GT500_SPAWN } from './gt500Def';
@@ -415,6 +416,35 @@ export function attachMustangGlb(v: Vehicle): void {
  * spotlights seated at the lenses — light only, no glow shells.
  * Loads async; the procedural stand-in stays if the load fails.
  */
+/**
+ * Perf (2026-10-22): fold a loaded GLB's static body meshes into one
+ * merged mesh per material (staticMerge.ts). The hero GLBs carry
+ * hundreds of nodes (Dark Horse 788, Sprinter 496) — every one a draw
+ * call in the main pass AND the shadow pass while the fleet sits in
+ * view. Kept unmerged, by name anywhere in the ancestor chain:
+ *  - MOD_* subtrees (Dark Horse stage toggles flip their visibility),
+ *  - Wheel* subtrees (the suspension/steer/spin rig re-parents them),
+ *  - anchor markers other systems read by name (driver_seat,
+ *    headlight_* projectors, the Prime's kingpin/hitch points),
+ *  - DoorPivot subtrees (the Seahawk's documented door pivots).
+ * Runs AFTER the rig + seat + headlight extraction + onRigged, so
+ * every name lookup has already happened against the original graph;
+ * the stored pivot/mod object references stay valid because their
+ * subtrees are never absorbed.
+ */
+export function mergeVehicleStatics(model: THREE.Object3D): void {
+  mergeStaticMeshes(model, {
+    mergedName: 'glb-merged',
+    exclude: (_mesh, ancestors) => ancestors.some((a) => {
+      const n = a.name;
+      return n.startsWith('MOD_') || n.startsWith('Wheel')
+        || n === 'driver_seat' || n.startsWith('headlight_')
+        || n.startsWith('fifth_wheel') || n.startsWith('trailer_hitch')
+        || n.includes('DoorPivot');
+    }),
+  });
+}
+
 interface GlbAttachCfg {
   path: string;
   logName: string;
@@ -486,6 +516,9 @@ function attachVehicleGlb(v: Vehicle, cfg: GlbAttachCfg): void {
         v.seatAnchor = { lx: local.x, lz: local.z };
       }
       if (cfg.onRigged) cfg.onRigged(model, v);
+      // Perf: collapse the static body into merged meshes now that
+      // every name-based consumer has extracted what it needs.
+      mergeVehicleStatics(model);
       v.glb = { wrapper, steerPivots, spinPivots, suspPivots, headLights };
     })
     .catch((err) => {
@@ -626,6 +659,9 @@ export function placeSeahawk(scene: THREE.Scene, groundY: (x: number, z: number)
           o.receiveShadow = true;
         }
       });
+      // Perf: the Seahawk is a static landmark — fold its 220 nodes
+      // into merged meshes (its DoorPivot subtrees stay intact).
+      mergeVehicleStatics(model);
       scene.add(group);
     })
     .catch((err) => {

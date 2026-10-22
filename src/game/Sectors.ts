@@ -22,6 +22,7 @@ import * as THREE from 'three';
 import { FURNITURE_LOOT } from '../data/items';
 import { BETA_EXTRA_PADS, BETA_WAIST_CROSSINGS } from '../data/betaLayout';
 import { Kit, type KitResult } from './kit';
+import { mergeStaticMeshes, excludeNamedSubtrees } from './staticMerge';
 import type { Collider } from './Colliders';
 import { decalPlane } from './modelKit';
 import { SECTOR_BUILDINGS, resolveSpotWorld, type SectorBuildingSpot } from './sectorSites';
@@ -1242,6 +1243,16 @@ class GroundWorks {
     this.group.add(logs);
     this.group.add(tips);
   }
+
+  /** Perf (2026-10-22): fold every static ground-work mesh (container
+   *  ribs, deck slabs, rails, drums…) into one merged mesh per
+   *  material. The ground works emit a Mesh per box/cylinder — over a
+   *  thousand draw calls across the sectors, in both passes. Named
+   *  fixtures (lanterns, fenders, nets) are kept by the merger's name
+   *  rule; the palisade InstancedMeshes are excluded by type. */
+  bakeMerged(): void {
+    mergeStaticMeshes(this.group, { mergedName: 'ground-merged', exclude: excludeNamedSubtrees });
+  }
 }
 
 function ridgeGround(gw: GroundWorks): void {
@@ -1729,5 +1740,6 @@ export function buildSectors(groundY: GroundY): SectorsBuild {
   pierGround(gw);
   buildCrossingDecks(gw);
   gw.bakePalisadeLogs();
+  gw.bakeMerged();
   return { kits, groundGroup: gw.group, propColliders: gw.colliders, features: gw.features };
 }

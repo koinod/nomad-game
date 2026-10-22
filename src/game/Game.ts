@@ -170,8 +170,14 @@ export class Game {
     // (The terrain needs no seed-init anymore: the Beta grid is
     // authored data — betaTerrain.ts — identical for every run.)
 
-    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance' });
+    // Perf (2026-10-22): pixel ratio capped at 1.5, not 2. On a
+    // retina/4K display DPR 2 renders 78% more fragments than 1.5 for
+    // a difference that vanishes under the grade pass + AA at play
+    // distance; fragment cost is the one multiplier that hits EVERY
+    // pass (main, shadow sampling, PostFX chain). The PostFX composer
+    // inherits this ratio at construction (it reads the renderer's).
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     this.renderer.setSize(this.canvas.clientWidth || window.innerWidth, this.canvas.clientHeight || window.innerHeight);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
