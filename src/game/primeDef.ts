@@ -1,26 +1,39 @@
 /**
- * primeDef — the Western Star 5700 XE "Nomad Prime" heavy semi tractor
- * as pure data (fleet integration, 2026-10-21).
+ * primeDef — the "Nomad Prime" heavy semi tractor as pure data.
  *
- * Ian dropped the full spec (design-refs/fleet-specs/nomad-prime-semi.md,
- * the canon) and approved the model AS-IS ("send me as is but continue
- * polishing" — polish rounds continue on the asset lane; integration
- * does not wait for them). Same registration pattern as the GT500: a
- * VehicleDef here, a CarParams here, CarPhysics selects by def id.
+ * CLEAN-SHEET INTEGRATION (2026-10-22): the model is the Prime
+ * build lane's PRD v3.0 truck (design-refs/nomad-prime-prd.md,
+ * tools/prime/build_prime.py) — public/models/nomad-prime.glb,
+ * 6,032,016 B / 151,870 tris. It replaces the 2026-10-21 fleet-
+ * sheet model (tools/nomad_prime/, retired with its proof set) at
+ * the same loader path. Every number below is re-anchored to the
+ * finished model per the build report's anchor table
+ * (design-refs/proof-prime/BUILD_REPORT.md — measured FROM the
+ * GLB, not from build constants):
  *
- * Spec figures (Ian's sheet): 8,950 kg empty, Detroit diesel 600 hp
- * class with ~2,370 Nm, 950 L in dual saddle tanks, top speed 145 km/h,
- * 32 storage slots (sleeper lockers + diamond-plate tool compartments),
- * 50,000-lb fifth-wheel turntable (48,000 kg max tow), noise radius
- * 105 m. The model is public/models/nomad-prime.glb
- * (tools/nomad_prime/build_nomad_prime.py): real Class-8 dimensions
- * (~8.6 m long, 2.55 m wide, wheel radius 0.525 — 22.5" rubber), TEN
- * wheel pivots (steer pair + tandem duals), driver_seat /
- * headlight_*_projector / trailer_hitch_fifth_wheel markers.
+ *   overall 8,941 x 2,621 (3,140 over mirrors) x 4,120 (stack tips)
+ *   wheelbase 6,320: steer +3,800, drives -1,860 / -3,180
+ *   wheel pivots r 0.538 (315/80R22.5): steer +-1.100,
+ *     drive duals +-1.100 outer / +-0.765 inner
+ *   driver_seat (+1.300, +0.580, hip 1.550), passenger alongside
+ *   kingpin socket (-2,350, top 1,280)
  *
- * The upgrade tree's carSpec deltas are Stallion-build tuning and do
- * not transfer (same ruling as the GT500): paramsForDef returns this
- * fixed spec + cargo mass.
+ * AXES: the build's house axes are Blender (X nose+, Y left+,
+ * Z up). The glTF export maps them to (X nose+, Y up, Z = -Y), so
+ * house-left surfaces at glTF -Z — the anchor table below is in
+ * glTF space, the space the loader and tests read. The game's
+ * wrapper yaw (-90 deg about Y, Vehicles.ts) then puts the nose on
+ * +Z in vehicle-group space, exactly as for the Dark Horse.
+ *
+ * MASS: the PRD's armored datum — kerb 8,950 kg + 2,300 kg of
+ * armor / winch / tanks = 11,250 kg as built (the ram, winch and
+ * plate are IN this model, not a mod stage). Driver + fuel ride
+ * on top in the params, the fleet pattern.
+ *
+ * POWERTRAIN: the PRD's tuned DD16 — 600 hp / 2,780 Nm — and its
+ * 18-speed box [14.40 ... 0.73] on a 4.10 final drive at the PRD's
+ * 92% driveline efficiency. No upgrade tree restamps this spec
+ * (the fleet ruling); cargo is real mass on top.
  */
 import type { CarParams } from './carSpec';
 import { DRIVER_KG } from './carSpec';
@@ -33,22 +46,25 @@ export const PRIME_DEF: VehicleDef = {
   id: 'nomad_prime',
   name: 'Nomad Prime',
   kind: 'car',
-  length: 8.55,
-  width: 2.55,
-  fuelMax: 950,
+  length: 8.94, // build report: 8,941 mm (ram-wing corner to light bar)
+  width: 2.62, // build report: 2,621 mm body (3,140 over the mirrors)
+  fuelMax: 950, // PRD: 2 x 475 L saddle tanks
   burnClass: 1.6, // a loaded Class-8 diesel drinks like one
-  noiseDrive: 105, // spec noise_radius_m — the loudest thing on the island
-  color: 0x1b2a38, // gunmetal slate / dark cobalt (spec paint codes)
-  storageKg: 400, // 32 slots: sleeper lockers + chassis tool compartments
+  noiseDrive: 105, // the loudest thing on the island
+  color: 0x1b2a38, // PRD paint: gunmetal slate / dark cobalt
+  storageKg: 400, // sleeper lockers + diamond-plate tool compartments
   hitch: 'fifth_wheel',
   maxTowKg: 48000,
 };
 
 /**
  * Wheel rig in CarPhysics suspension order [FR, FL, RR, RL]. The
- * physics rig stays 4-corner (steer axle + tandem centroid); ALL TEN
- * visual wheels spin, the steer pair steers, and each tandem dual
- * follows its side's rear corner suspension travel.
+ * physics rig stays 4-corner (steer axle + tandem centroid); ALL
+ * TEN visual wheels spin, the steer pair steers, and each tandem
+ * dual follows its side's rear corner suspension travel. Node
+ * names are the GLB's own (verified against the shipped file by
+ * primeIntegration.test.ts — the clean-sheet build kept the
+ * fleet's node contract, so no loader mapping was needed).
  */
 export const PRIME_WHEEL_RIG: GlbWheelSpec[] = [
   { name: 'Wheel_Steer_Right', wheelIdx: 0, steer: true },
@@ -63,42 +79,77 @@ export const PRIME_WHEEL_RIG: GlbWheelSpec[] = [
   { name: 'Wheel_Drive_Axle2_Left_Inner', wheelIdx: 3 },
 ];
 
-export const PRIME_BASE_MASS_KG = 8950; // spec weight_empty_kg
+/**
+ * Measured anchors from the finished model, in glTF space
+ * (x = length nose+, y = up, z = -house-left). The kingpin is the
+ * trailer socket the P4 trailer work keys off; the gladhands and
+ * 7-pin are the umbilical points on the cab's rear bulkhead; the
+ * saddle tanks flank the rails at (-0.200, +-0.940, centre height
+ * 0.620). Interaction/storage gameplay still resolves by def radii
+ * today — these are the model's own points, pinned against the
+ * GLB by the integration tests so consumers can adopt them
+ * without re-measuring.
+ */
+export const PRIME_ANCHORS = {
+  kingpin: [-2.35, 1.28, 0],
+  fifthWheelPlateTop: 1.28,
+  driverSeat: [1.3, 1.55, -0.58],
+  passengerSeat: [1.3, 1.55, 0.58],
+  driverEye: [1.38, 2.32, -0.58],
+  gladhandService: [-0.92, 1.48, 0.1],
+  gladhandEmergency: [-0.92, 1.48, 0.22],
+  electrical7Pin: [-0.92, 1.48, -0.12],
+  headlightLeft: [4.33, 0.98, -0.88],
+  headlightRight: [4.33, 0.98, 0.88],
+  winchFairlead: [4.44, 0.58, 0],
+  sleeperBunk: [-0.42, 1.7, 0],
+} as const;
+
+/** The kingpin in vehicle-group space (nose +Z): the P4 socket. */
+export const PRIME_KINGPIN_GROUP = { lx: 0, lz: -2.35, y: 1.28 } as const;
+
+export const PRIME_BASE_MASS_KG = 11250; // PRD armored datum (kerb 8,950 + 2,300)
 export const PRIME_FUEL_KG = 808; // 950 L diesel at 0.85 kg/L
 
-/** Detroit DD-class torque: peak 2,370 Nm low, power still climbing
- *  to the 2,100 rpm governor — 600 hp class at the top of the band. */
+/** Tuned DD16 torque (PRD): the 2,780 Nm plateau across the
+ *  working band, and 2,373 Nm at 1,800 rpm — 447 kW, the 600 hp
+ *  mark — with the governor at 2,100. */
 export const PRIME_TORQUE: [number, number][] = [
-  [600, 1050], [800, 1750], [1000, 2250], [1100, 2370], [1300, 2370],
-  [1500, 2320], [1700, 2260], [1900, 2200], [2100, 2050],
+  [650, 1350], [800, 2050], [975, 2560], [1100, 2780], [1300, 2780],
+  [1500, 2690], [1700, 2480], [1800, 2373], [1900, 2240], [2000, 2130],
+  [2100, 1980],
 ];
 
 export const PRIME_PARAMS: CarParams = {
   massKg: PRIME_BASE_MASS_KG + DRIVER_KG + PRIME_FUEL_KG,
   torqueCurve: PRIME_TORQUE,
-  idleRpm: 600,
+  idleRpm: 650,
   redlineRpm: 2100,
-  // 10-speed automated box; with the 2.87 axle the top gear runs out
-  // of revs at ~145 km/h — the spec's top speed is a gearing fact.
-  gears: [11.0, 8.2, 6.1, 4.6, 3.5, 2.7, 2.1, 1.65, 1.3, 1.0],
-  finalDrive: 2.87,
+  // The PRD's 18-speed box, geometric between its published end
+  // ratios [14.40 ... 0.73]; with the 4.10 axle the top gear runs
+  // out of revs at ~142 km/h — a Class-8 top speed is a gearing
+  // fact, and this one is stately by construction.
+  gears: [
+    14.4, 12.08, 10.14, 8.51, 7.14, 5.99, 5.03, 4.22, 3.54, 2.97,
+    2.49, 2.09, 1.75, 1.47, 1.24, 1.04, 0.87, 0.73,
+  ],
+  finalDrive: 4.1,
   tireMu: 0.85, // commercial drive rubber, not a sport compound
   rearLoadFrac: 0.6, // bobtail tractor: the tandem carries most of it
-  wheelRadiusM: 0.525,
+  wheelRadiusM: 0.538, // 315/80R22.5 carcass radius (build anchor table)
   dragK: 5.2, // lumped term for a barn-door cab (Ian's sanctioned
-  // model) — sized so the drag balance lands on the spec's 145 km/h
+  // model) — under the gearing cap, so the cap sets the top speed
   rollingCoef: 0.012,
-  drivetrainEff: 0.85,
+  drivetrainEff: 0.92, // PRD driveline efficiency
   lifted: false,
 };
 
 /**
  * Spawn: the Prime's marked pad on the airbase apron, east of the
- * Seahawk pad on the same graded line — (516,-120) on the 2.7 plateau
- * grade, clear of the hangar footprint and the Seahawk's rotor disc.
- * Nose east, parked parallel to the apron. The pad (airbaseSite.ts)
- * formalizes the spot the integration wave chose: same numbers, now
- * painted, with swing room. Fleet respawn, Ian 2026-10-21.
+ * Seahawk pad on the same graded line. The pad (airbaseSite.ts,
+ * 13 x 6.8 m) swallows the clean-sheet truck's 8.94 x 2.62 m
+ * footprint (3.14 over mirrors) with swing room to spare, and its
+ * neighbours are unchanged — the spawn does not move.
  */
 export const PRIME_SPAWN: SpawnDef = {
   id: 'nomad_prime',

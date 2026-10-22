@@ -542,9 +542,12 @@ export function attachDarkHorseGlb(v: Vehicle): void {
 }
 
 /**
- * The Nomad Prime semi (public/models/nomad-prime.glb). Ten visual
- * wheels on the 4-corner physics rig (PRIME_WHEEL_RIG); headlights
- * seat on the GLB's own headlight_*_projector markers.
+ * The Nomad Prime semi (public/models/nomad-prime.glb — the
+ * clean-sheet PRD v3.0 build since 2026-10-22, primeDef.ts carries
+ * the anchor table). Ten visual wheels on the 4-corner physics
+ * rig (PRIME_WHEEL_RIG); headlights seat on the GLB's own
+ * headlight_*_projector markers; the driver_seat marker feeds the
+ * seat-fit anchor like the other GLB cars.
  */
 export function attachPrimeGlb(v: Vehicle): void {
   attachVehicleGlb(v, {

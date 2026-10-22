@@ -149,10 +149,14 @@ const CHASSIS_GEOM: Record<string, ChassisGeom> = {
   mustang: { half: [0.82, 0.3, 2.22], wheelX: WHEEL_X, wheelZ: WHEEL_Z },
   // S197: 1.88 m wide, 4.77 m long, 2.71 m wheelbase, ~1.58 m track
   gt500: { half: [0.94, 0.32, 2.39], wheelX: 0.79, wheelZ: 1.355 },
-  // Class-8 tractor: 2.55 m wide, ~8.6 m long. Physics stays 4-corner:
-  // steer axle at +2.60 and the tandem centroid at -2.98 in model
-  // space -> symmetric half-wheelbase 2.79 about the group origin.
-  nomad_prime: { half: [1.27, 0.45, 4.3], wheelX: 0.97, wheelZ: 2.79 },
+  // Class-8 tractor (clean-sheet, 2026-10-22): 2.62 m wide, 8.94 m
+  // long, 6.32 m wheelbase. Physics stays 4-corner: steer axle at
+  // +3.80 and the tandem centroid at -2.52 in model space ->
+  // symmetric half-wheelbase 3.16 about the group origin. The one
+  // physics track averages the steer's 1.100 half-track and the
+  // dual pair's centroid (1.100 + 0.765) / 2 = 0.93 -> 1.02, the
+  // Dark Horse averaging pattern.
+  nomad_prime: { half: [1.31, 0.45, 4.47], wheelX: 1.02, wheelZ: 3.16 },
   // Sprinter 170": 2.02 m wide, 6.97 m long, 4.32 m wheelbase
   sprinter_van: { half: [1.01, 0.35, 3.49], wheelX: 0.86, wheelZ: 2.16 },
   // S650 Dark Horse: 1.92 m wide, 4.82 m long, 2.718 m wheelbase
@@ -235,11 +239,14 @@ export interface SuspTune {
 export const SUSP_TUNES: Record<string, SuspTune> = {
   mustang: { stiffness: 32, travel: 0.28, archTravelM: 0.18, archTopM: 0.87 },
   gt500: { stiffness: 46, compression: 4.5, relaxation: 6.5, travel: 0.24, archTravelM: 0.17, archTopM: 0.86 },
-  // Class-8 air-ride class tune for ~9.8 t: springs an order stiffer
-  // than the cars', travel long, but the arch clamp stays tight —
-  // the steer arch lip (measured from the GLB) sits at 1.17 m and a
-  // 1.05 m wheel may rise only 0.11 m before its top would pass it.
-  nomad_prime: { stiffness: 110, compression: 7, relaxation: 9, travel: 0.3, archTravelM: 0.11, archTopM: 1.17, maxForceN: 72000 },
+  // Class-8 air-ride class tune, scaled to the clean-sheet truck's
+  // 12.1 t crewed mass (stiffness and force cap x 12,133/9,833 off
+  // the retired 9.8 t tune, so the laden stance does not move).
+  // Travel long, but the arch clamp stays tight — the steer arch
+  // lip (ArchLip nodes, measured from the new GLB) tops at 1.17 m
+  // and a 1.076 m wheel may rise only 0.09 m before its top would
+  // pass it.
+  nomad_prime: { stiffness: 136, compression: 7, relaxation: 9, travel: 0.3, archTravelM: 0.09, archTopM: 1.17, maxForceN: 88000 },
   // Lifted 4x4 van: softer, longer travel; flare lip re-measured at
   // 1.020 m on the polished GLB (c9071da) over a 0.88 m wheel
   // (0.44R tires) -> 0.14 m of visual tuck.
