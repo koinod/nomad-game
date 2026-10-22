@@ -53,7 +53,7 @@ describe('boot smoke — the live world Game.init wires against', () => {
     // the fleet spawn Game performs: every vehicle on its pad, on land
     const vm = new VehicleManager();
     vm.spawn(new THREE.Scene(), world.poiPositions, (x, z) => heightAt(x, z));
-    expect(vm.vehicles).toHaveLength(3);
+    expect(vm.vehicles).toHaveLength(4); // + the Dark Horse (integration, 2026-10-21)
     for (const v of vm.vehicles) {
       const { x, z } = v.group.position;
       expect(heightAt(x, z), v.def.id).toBeGreaterThan(2);

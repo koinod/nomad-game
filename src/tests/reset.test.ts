@@ -41,11 +41,14 @@ import type { VehicleSave } from '../store/types';
  * FLEET (2026-10-21, later): the Nomad Prime + V-04 Sprinter joined
  * the roster from Ian's dropped specs (approved as-is) — defs and
  * spawns below pin the four-def / three-spawn roster.
+ *
+ * DARK HORSE (2026-10-21, integration): the hero car lands on its
+ * painted pad — five defs / four spawns below.
  */
 
 describe('the reset fleet', () => {
   it('defs: the Stallion data, the GT500 return, and the spec fleet', () => {
-    expect(VEHICLE_DEFS).toHaveLength(4);
+    expect(VEHICLE_DEFS).toHaveLength(5);
     expect(VEHICLE_DEFS[0].id).toBe('mustang');
     expect(VEHICLE_DEFS[0].kind).toBe('car');
     expect(VEHICLE_DEFS[1].id).toBe('gt500');
@@ -54,16 +57,20 @@ describe('the reset fleet', () => {
     expect(VEHICLE_DEFS[2].kind).toBe('car');
     expect(VEHICLE_DEFS[3].id).toBe('sprinter_van');
     expect(VEHICLE_DEFS[3].kind).toBe('car');
+    expect(VEHICLE_DEFS[4].id).toBe('dark_horse');
+    expect(VEHICLE_DEFS[4].kind).toBe('car');
   });
 
   it('spawns: the whole fleet at the revamped airbase (Ian 2026-10-21 — a reset puts every vehicle on its pad)', () => {
-    expect(VEHICLE_SPAWNS).toHaveLength(3);
+    expect(VEHICLE_SPAWNS).toHaveLength(4);
     expect(VEHICLE_SPAWNS[0].id).toBe('gt500');
     expect(VEHICLE_SPAWNS[0].poi).toBe('airbase');
     expect(VEHICLE_SPAWNS[1].id).toBe('nomad_prime');
     expect(VEHICLE_SPAWNS[1].poi).toBe('airbase');
     expect(VEHICLE_SPAWNS[2].id).toBe('sprinter_van');
     expect(VEHICLE_SPAWNS[2].poi).toBe('airbase');
+    expect(VEHICLE_SPAWNS[3].id).toBe('dark_horse');
+    expect(VEHICLE_SPAWNS[3].poi).toBe('airbase');
     expect(DELETED_VEHICLE_IDS).toContain('mustang');
   });
 

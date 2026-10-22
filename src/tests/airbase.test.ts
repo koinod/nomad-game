@@ -246,7 +246,7 @@ describe('fleet respawn — the pads (Ian, 2026-10-21)', () => {
   });
 
   it('every spawn is an airbase pad: fresh starts put the fleet on its marks', () => {
-    expect(VEHICLE_SPAWNS).toHaveLength(3);
+    expect(VEHICLE_SPAWNS).toHaveLength(4); // + the Dark Horse (integration, 2026-10-21)
     for (const s of VEHICLE_SPAWNS) {
       expect(s.poi, s.id).toBe('airbase');
       const pad = AIRBASE_PADS.find((p) => p.vehicleId === s.id)!;
@@ -260,9 +260,11 @@ describe('fleet respawn — the pads (Ian, 2026-10-21)', () => {
     }
   });
 
-  it('the Dark Horse pad is marked and honestly empty', () => {
+  it('the Dark Horse pad is marked and occupied (integration, 2026-10-21)', () => {
+    // was "marked and honestly empty" while the car was unbuilt —
+    // the Stallion lane's build landed, so the pad carries its car
     const dh = padById('pad_dark_horse');
-    expect(dh.vehicleId).toBeUndefined();
-    expect(VEHICLE_SPAWNS.some((s) => s.id === 'dark_horse')).toBe(false);
+    expect(dh.vehicleId).toBe('dark_horse');
+    expect(VEHICLE_SPAWNS.some((s) => s.id === 'dark_horse')).toBe(true);
   });
 });

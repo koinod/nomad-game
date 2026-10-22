@@ -15,10 +15,11 @@ import {
 import { FURNITURE_LOOT, HUSK_LOOT, ITEMS, STATION_RECIPES } from '../data/items';
 
 describe('UPGRADES data', () => {
-  it('has 10 unique ids (VEHICLE RESET + physics-native engine tree)', () => {
-    expect(UPGRADES).toHaveLength(10);
+  it('has 12 unique ids (VEHICLE RESET + physics-native engine tree + Dark Horse stages)', () => {
+    // 10 + dh_stage1 / dh_stage2 (Dark Horse integration, 2026-10-21)
+    expect(UPGRADES).toHaveLength(12);
     const ids = UPGRADES.map((u) => u.id);
-    expect(new Set(ids).size).toBe(10);
+    expect(new Set(ids).size).toBe(12);
   });
 
   it('every cost itemId exists as a key in ITEMS', () => {
