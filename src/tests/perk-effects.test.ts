@@ -34,6 +34,7 @@ import {
 import { perkRowState } from '../systems/skills';
 import { rollLoot } from '../data/items';
 import { pocketsSpec } from '../store/containers';
+import { encumbranceTier } from '../store/inventoryUtils';
 import { appraisedOffer, type BarterOffer } from '../data/traders';
 
 const calm = { hpFrac: 1, targetStunned: false, behindOrUnaware: false };
@@ -238,6 +239,17 @@ describe('loot roll integration (rollLoot)', () => {
     expect(rollLoot(rare, () => 0.32, { entryMult: em(['sc_remembers']) })).toHaveLength(1); // 0.33
     expect(rollLoot(rare, () => 0.32, { entryMult: em([]) })).toEqual([]);
     expect(rollLoot(common, () => 0.95, { entryMult: em(['sc_remembers']) })).toEqual([]);
+  });
+});
+
+describe('sc_packmule heavy shift (encumbranceTier)', () => {
+  it('at limit+5kg you are heavy without the perk, fine with it; overloaded stays ratio-based', () => {
+    const limit = 20;
+    expect(encumbranceTier(25, limit, heavyShiftKg([]))).toBe('heavy');
+    expect(encumbranceTier(25, limit, heavyShiftKg(['sc_packmule']))).toBe('ok');
+    expect(encumbranceTier(30, limit, heavyShiftKg(['sc_packmule']))).toBe('heavy'); // shift spent at +10
+    expect(encumbranceTier(27, limit, heavyShiftKg(['sc_packmule']))).toBe('overloaded'); // r = 1.35 > 1.3
+    expect(encumbranceTier(25, limit, 0)).toBe('heavy'); // default unchanged
   });
 });
 

@@ -32,6 +32,7 @@ import { containerGridDims } from '../store/gridUtils';
 import GridInventory from './GridInventory';
 import { getGame } from '../game/instance';
 import { sfx } from '../systems/audio';
+import { carryBonusKg } from '../systems/perkEffects';
 
 const WEAPON_LABEL: Record<WeaponSlotId, string> = {
   primary: 'Primary', secondary: 'Secondary', tertiary: 'Tertiary',
@@ -121,7 +122,7 @@ export default function InventoryDeck({ compact = false }: { compact?: boolean }
   const selectedDef = selected ? ITEMS[selected.itemId] : undefined;
 
   const weight = totalWeightKg(inventory);
-  const limit = carryLimitKg(equipped, inventory, difficulty, perks.includes('sc_packmule') ? 8 : 0);
+  const limit = carryLimitKg(equipped, inventory, difficulty, carryBonusKg(perks));
 
   const openContainer = (uid: string) => {
     setTrail((t) => [...t, uid]);

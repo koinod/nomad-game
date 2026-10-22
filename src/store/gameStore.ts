@@ -36,7 +36,7 @@ import {
 } from './containers';
 import { arrangeItems as arrangeGridItems } from './gridUtils';
 import { applyXp, canBuyPerk, meetsSkillReq, skillReqLabel, XP_EVENTS } from '../systems/skills';
-import { blockThroughFactor, disassemblyYields, fieldRepairCap, modPartCost, vehicleRepairCost } from '../systems/perkEffects';
+import { blockThroughFactor, carryBonusKg, disassemblyYields, fieldRepairCap, heavyShiftKg, modPartCost, vehicleRepairCost } from '../systems/perkEffects';
 import { deleteSaveSlot, listSaveSlots, loadGameFromSlot, saveGameToSlot } from '../systems/save';
 import { sfx } from '../systems/audio';
 import { getGame } from '../game/instance';
@@ -792,8 +792,8 @@ export const useGameStore = create<GameState>()((set, get) => {
       // pack feasibility first (same gates addItem uses), so nothing vanishes
       const def = ITEMS[peek.itemId];
       if (!def) return;
-      const limit = carryLimitKg(s.equipped, s.inventory, s.difficulty, s.perks.includes('sc_packmule') ? 8 : 0);
-      if (encumbranceTier(totalWeightKg(s.inventory) + def.weight * peek.qty, limit) === 'immobile') {
+      const limit = carryLimitKg(s.equipped, s.inventory, s.difficulty, carryBonusKg(s.perks));
+      if (encumbranceTier(totalWeightKg(s.inventory) + def.weight * peek.qty, limit, heavyShiftKg(s.perks)) === 'immobile') {
         s.addToast('Too heavy — drop something first.');
         return;
       }
@@ -972,8 +972,8 @@ export const useGameStore = create<GameState>()((set, get) => {
       // weight gate: >160% of limit blocks pickup (unchanged rule;
       // the weight itself is the recursive forest weight now)
       const addedW = def.weight * qty;
-      const limit = carryLimitKg(s.equipped, s.inventory, s.difficulty, s.perks.includes('sc_packmule') ? 8 : 0);
-      if (encumbranceTier(totalWeightKg(s.inventory) + addedW, limit) === 'immobile') {
+      const limit = carryLimitKg(s.equipped, s.inventory, s.difficulty, carryBonusKg(s.perks));
+      if (encumbranceTier(totalWeightKg(s.inventory) + addedW, limit, heavyShiftKg(s.perks)) === 'immobile') {
         if (!quiet) s.addToast('Too heavy — drop something first.');
         return false;
       }

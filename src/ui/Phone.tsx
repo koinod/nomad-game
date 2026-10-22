@@ -19,6 +19,7 @@ import { UPGRADES, canInstallUpgrade } from '../data/upgrades';
 import { carParams, estimatePerformance, UPGRADE_MASS_KG } from '../game/carSpec';
 import { VEHICLE_DEFS } from '../game/Vehicles';
 import { carryLimitKg, encumbranceTier, totalWeightKg } from '../store/inventoryUtils';
+import { carryBonusKg, heavyShiftKg } from '../systems/perkEffects';
 import InventoryDeck from './InventoryDeck';
 import SkillsPanel from './SkillsPanel';
 import { CraftPanel } from './CraftPanel';
@@ -57,9 +58,10 @@ function LoadoutTab() {
   const equipped = useGameStore((s) => s.equipped);
   const difficulty = useGameStore((s) => s.difficulty);
   const battery = useGameStore((s) => s.battery);
+  const perks = useGameStore((s) => s.perks);
   const weight = totalWeightKg(inventory);
-  const limit = carryLimitKg(equipped, inventory, difficulty);
-  const tier = encumbranceTier(weight, limit);
+  const limit = carryLimitKg(equipped, inventory, difficulty, carryBonusKg(perks));
+  const tier = encumbranceTier(weight, limit, heavyShiftKg(perks));
   const tierLabel = { ok: 'Pack light', heavy: 'Heavy', overloaded: 'Overloaded', immobile: 'Immobile' }[tier];
   const tierColor = tier === 'ok' ? 'text-[#5aa469]' : tier === 'heavy' ? 'text-[#e8b34b]' : 'text-[#d9534f]';
 
@@ -837,8 +839,8 @@ function CharacterTab() {
   const useItemUid = useGameStore((s) => s.useItemUid);
   const treatSurvivor = useGameStore((s) => s.treatSurvivor);
   const weight = totalWeightKg(inventory);
-  const limit = carryLimitKg(equipped, inventory, difficulty, perks.includes('sc_packmule') ? 8 : 0);
-  const tier = encumbranceTier(weight, limit);
+  const limit = carryLimitKg(equipped, inventory, difficulty, carryBonusKg(perks));
+  const tier = encumbranceTier(weight, limit, heavyShiftKg(perks));
   const armorPct = Math.min(
     50,
     Math.round(100 * inventory.reduce((a, i) => a + (ITEMS[i.itemId]?.armor ?? 0) * i.qty, 0)) +
