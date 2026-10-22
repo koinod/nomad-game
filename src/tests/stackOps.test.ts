@@ -29,7 +29,7 @@ import type { InvItem } from '../store/types';
 const S = () => useGameStore.getState();
 const POIS: Record<string, [number, number]> = { shore_camp: [100, 200] };
 
-function reset(partial: Parameters<typeof useGameStore.setState>[0] = {}) {
+function reset(partial: Record<string, unknown> = {}) {
   useGameStore.setState({
     inventory: [], equipped: emptyEquipped(), hotbar: [null, null, null, null],
     storageOpen: null, storageItems: [], lootStash: {}, lootOpenId: null,
@@ -37,7 +37,7 @@ function reset(partial: Parameters<typeof useGameStore.setState>[0] = {}) {
     poiPositions: { ...POIS }, pos: [0, 0, 0],
     hp: 100, maxHp: 100, difficulty: 'survivor',
     ...partial,
-  });
+  } as never);
 }
 
 const PACK: CarriedDest = { type: 'container', uid: 'pk' };
