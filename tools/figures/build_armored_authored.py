@@ -109,9 +109,22 @@ visor = L.finish_part(L.box("visorMesh", (0, -0.140, SKULL_Y + 0.012), (0.092, 0
 
 # --------------------------------------------------------------- arms ----
 arm_l, hand_l, sleeve_l = L.build_arm(-1, -ARM_X, HIP_Y + SHOULDER_LOCAL, ARM_S, mats,
-                                      sleeve_len=0.50, rad=1.02, finger_len=1.0, sleeve_mat_key='shirt')
+                                      sleeve_len=0.50, rad=1.02, finger_len=1.0, sleeve_mat_key='shirt', elbow=0.14)
 arm_r, hand_r, sleeve_r = L.build_arm(1, ARM_X, HIP_Y + SHOULDER_LOCAL, ARM_S, mats,
-                                      sleeve_len=0.50, rad=1.02, finger_len=1.0, sleeve_mat_key='shirt')
+                                      sleeve_len=0.50, rad=1.02, finger_len=1.0, sleeve_mat_key='shirt', elbow=0.14)
+
+# Joint caps (continuity pass): the shirt covers the shoulder line
+# under the pads; hips ride in the pants material.
+shoulder_caps = L.joint_caps("shoulderCaps", [
+    ((-ARM_X, 0, HIP_Y + SHOULDER_LOCAL), (0.096, 0.094, 0.098), ARM_S * 1.02),
+    (( ARM_X, 0, HIP_Y + SHOULDER_LOCAL), (0.096, 0.094, 0.098), ARM_S * 1.02),
+], mats['shirt'])
+hip_caps = L.joint_caps("hipCaps", [
+    ((-HIP_X, 0, HIP_Y), (0.110, 0.104, 0.097), LEG_S * 1.02),
+    (( HIP_X, 0, HIP_Y), (0.110, 0.104, 0.097), LEG_S * 1.02),
+], mats['pants'])
+L.paint_grime(shoulder_caps)
+L.paint_grime(hip_caps)
 # Steel shoulder pads ride the arm pivots (they swing with the arms).
 pad_l = L.finish_part(L.box("padL", (-ARM_X, 0, HIP_Y + SHOULDER_LOCAL - 0.09), (0.105, 0.125, 0.048), bevel=0.014),
                       (-ARM_X, 0, HIP_Y + SHOULDER_LOCAL - 0.09), 0.012, mats['armor'], 400)
@@ -119,8 +132,8 @@ pad_r = L.finish_part(L.box("padR", (ARM_X, 0, HIP_Y + SHOULDER_LOCAL - 0.09), (
                       (ARM_X, 0, HIP_Y + SHOULDER_LOCAL - 0.09), 0.012, mats['armor'], 400)
 
 # --------------------------------------------------------------- legs ----
-leg_l, pants_l, boot_l = L.build_leg(-1, -HIP_X, HIP_Y, LEG_S, mats, pants_len=0.58, boot=True, rad=1.02)
-leg_r, pants_r, boot_r = L.build_leg(1, HIP_X, HIP_Y, LEG_S, mats, pants_len=0.58, boot=True, rad=1.02)
+leg_l, pants_l, boot_l = L.build_leg(-1, -HIP_X, HIP_Y, LEG_S, mats, pants_len=0.58, boot=True, rad=1.02, knee=0.16)
+leg_r, pants_r, boot_r = L.build_leg(1, HIP_X, HIP_Y, LEG_S, mats, pants_len=0.58, boot=True, rad=1.02, knee=0.16)
 knee_l = L.finish_part(L.box("kneeL", (-HIP_X, -0.068, HIP_Y - 0.464), (0.058, 0.022, 0.062), bevel=0.010),
                        (-HIP_X, -0.068, HIP_Y - 0.464), 0.012, mats['armor'], 300)
 knee_r = L.finish_part(L.box("kneeR", (HIP_X, -0.068, HIP_Y - 0.464), (0.058, 0.022, 0.062), bevel=0.010),
@@ -149,7 +162,7 @@ for b in (boot_l, boot_r): L.paint_grime(b)
 
 # ------------------------------------------------------------ assembly ---
 parts = {
-    'torso': [torso_skin, torso_mesh, pants_pelvis, plate_f, plate_b, band] + straps,
+    'torso': [torso_skin, torso_mesh, pants_pelvis, plate_f, plate_b, band, shoulder_caps, hip_caps] + straps,
     'head': [head['skull'], head['neck'], head['eyes'], helm, visor],
     'jaw': [head['jaw']],
     'armL': [arm_l, hand_l, sleeve_l, pad_l],
