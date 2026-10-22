@@ -9,7 +9,9 @@ import { DIFFICULTIES } from '../store/types';
 import { QUESTS } from '../data/quests';
 import { input, resetEdgeTriggers } from './input';
 import { ITEMS } from '../data/items';
-import { World, heightAt, biomeAt, initTerrainField, CAMPFIRE_SPOTS } from './World';
+import { World, heightAt, biomeAt, CAMPFIRE_SPOTS } from './World';
+import { buildBetaRapierHeightfield } from './betaTerrain';
+import { BETA_PLAYER_SPAWN } from '../data/betaLayout';
 import { Player } from './Player';
 import { Fx } from './Fx';
 import { ProjectileManager } from './Projectiles';
@@ -156,7 +158,8 @@ export class Game {
 
   async init(opts: { seed: number; difficulty: DifficultyId; snapshot?: SaveSnapshot | null }): Promise<void> {
     this.rng = mulberry32(opts.seed ^ 0x5eed);
-    initTerrainField(opts.seed);
+    // (The terrain needs no seed-init anymore: the Beta grid is
+    // authored data — betaTerrain.ts — identical for every run.)
 
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -234,16 +237,15 @@ export class Game {
     // player
     this.player = new Player(this.scene);
     const s0 = useGameStore.getState();
-    // New games start at the DEPOT MOTOR POOL (Ian's beta-test logic):
-    // TOTAL PURGE: you wake on the lighthouse grounds, the GT500
-    // parked beside you on open ground. The shore camp is a drive west —
-    // q_prologue step 2 ('Reach the shore camp') is earned on the road;
-    // Jonah and his camp don't move. Loaded games keep their saved
-    // position; only the fresh spawn and the default respawn point
-    // (lastSafe) live at the lighthouse.
-    const [ax, az] = this.world.poi('lighthouse_base');
-    const spawnX = ax - 9; // a few meters from the car (parked at -14, +16)
-    const spawnZ = az + 11;
+    // Fresh spawn: the lighthouse grounds — BETA_PLAYER_SPAWN is the
+    // layout's surveyed spot on the Collective's pad (map integration,
+    // 2026-10-21). The fleet waits at the airbase motor pool a short
+    // drive west (fleet respawn, Ian's order); the shore camp is the
+    // prologue's first road goal, east along the coast. Loaded games
+    // keep their saved position; only the fresh spawn and the default
+    // respawn point (lastSafe) live at the lighthouse.
+    const spawnX = BETA_PLAYER_SPAWN.x;
+    const spawnZ = BETA_PLAYER_SPAWN.z;
     this.lastSafe = [spawnX, spawnZ];
     if (snap) {
       const [px, , pz] = snap.player.pos;
@@ -252,8 +254,8 @@ export class Game {
       this.player.camYaw = Math.PI * 0.9;
     } else {
       this.player.setPosition(spawnX, heightAt(spawnX, spawnZ) + 0.5, spawnZ);
-      // face the tower and the car
-      this.player.camYaw = Math.PI * 0.75;
+      // face the tower and the island (the layout's spawn heading)
+      this.player.camYaw = BETA_PLAYER_SPAWN.heading;
     }
 
     // The GT500 GLB replaces its stand-in when it loads; the Rapier
@@ -278,7 +280,12 @@ export class Game {
     // the terrain field only — no building colliders, no impact
     // callback. The kit/station colliders above still serve the
     // PLAYER's collision (houseColliders), never the car's.
-    this.carPhysics = await CarPhysics.create((x, z) => heightAt(x, z));
+    // The heightfield is the Beta grid VERBATIM (buildBetaRapier-
+    // Heightfield) — physics rides the authored nodes, not a resample.
+    this.carPhysics = await CarPhysics.create(
+      (x, z) => heightAt(x, z),
+      buildBetaRapierHeightfield(),
+    );
     if (firstCar) {
       this.carPhysics.spawnCar(firstCar, firstCar.upgrades, itemsWeightKg(firstCar.storage));
       // settle the suspension before anyone sees it
@@ -286,13 +293,18 @@ export class Game {
       applyGlbVisuals(firstCar);
     }
 
-    // husks
+    // husks — zone centers ride their POIs (map integration,
+    // 2026-10-21: the old hard-coded centers were old-map ground)
     const [airbaseX, airbaseZ] = this.world.poi('airbase');
+    const [forestX, forestZ] = this.world.poi('forest_cache');
+    const [townX, townZ] = this.world.poi('town');
+    const [relayX, relayZ] = this.world.poi('relay_station');
+    const [duneX, duneZ] = this.world.poi('dune_cache');
     const zones: SpawnZone[] = [
-      { id: 'forest', x: 180, z: 40, radius: 55, count: 3, kinds: ['shambler', 'stalker', 'crawler'] },
-      { id: 'town', x: 40, z: 0, radius: 60, count: 4, kinds: ['shambler'] },
-      { id: 'relay', x: 330, z: -40, radius: 42, count: 5, kinds: ['shambler', 'stalker', 'spitter'] },
-      { id: 'dunes', x: 470, z: 150, radius: 55, count: 2, kinds: ['stalker', 'crawler'], nightOnly: true },
+      { id: 'forest', x: forestX, z: forestZ, radius: 55, count: 3, kinds: ['shambler', 'stalker', 'crawler'] },
+      { id: 'town', x: townX, z: townZ, radius: 60, count: 4, kinds: ['shambler'] },
+      { id: 'relay', x: relayX, z: relayZ, radius: 42, count: 5, kinds: ['shambler', 'stalker', 'spitter'] },
+      { id: 'dunes', x: duneX, z: duneZ, radius: 55, count: 2, kinds: ['stalker', 'crawler'], nightOnly: true },
       // TOTAL PURGE: the carrier is gone — its guard pack (the wave-4
       // specials) redeploys to the airbase grounds, where the brute
       // already walks. The island's hardest fight now guards open ground.

@@ -1,9 +1,13 @@
-// World.ts — deterministic terrain, biomes, scatter, structures, sky.
-// Pure height/biome functions are exported so Game.getHeightAt/getBiomeAt
-// (and the phone map) sample the exact same island the mesh was built from.
+// World.ts — the Beta Island world: terrain, zones, scatter,
+// structures, sky. The terrain itself lives in betaTerrain.ts — ONE
+// authored height grid (1.25 m) that the mesh, the Rapier heightfield
+// and every gameplay sampler read verbatim (map restart, Ian's order
+// 2026-10-21; integrated here the same day). The old analytic height
+// system (initTerrainField / analyticHeightAt / the baked 2 m ground
+// field) is RETIRED: there is no second surface left to disagree.
 
 import * as THREE from 'three';
-import { makeFbm, makeNoise2D, mulberry32, clamp, lerp, smoothstep } from './rng';
+import { mulberry32, clamp } from './rng';
 import { buildLighthouse } from './Lighthouse';
 import { buildAirbaseSite } from './airbase';
 import { decalPlane } from './modelKit';
@@ -12,7 +16,11 @@ import type { BiomeId } from './Game';
 import type { StationId } from '../data/items';
 import type { Collider } from './Colliders';
 import { LightShafts, tightenFog } from './PostFX';
-import { ROAD_GRAPH } from '../data/worldWiring';
+import { BETA_POI_PLACEMENTS, BETA_ROADS, BETA_DAYMARKERS, BETA_SECTORS, BETA_EXTRA_PADS } from '../data/betaLayout';
+import {
+  betaHeightAt, betaSlopeAt, betaZoneAt, betaRoadDistance, buildBetaTerrainChunks,
+  type BetaZone,
+} from './betaTerrain';
 import { applyWindSway } from './Clouds';
 
 export const WORLD = {
@@ -21,222 +29,48 @@ export const WORLD = {
   waterY: 0,
 };
 
-// ---- pure terrain field -------------------------------------------------
+// ---- terrain truth (betaTerrain.ts — the one grid) -----------------------
 
-let fbm: (x: number, z: number) => number = () => 0;
-let detail: (x: number, z: number) => number = () => 0;
-let ridgeN: (x: number, z: number) => number = () => 0;
-
-export function initTerrainField(seed: number): void {
-  fbm = makeFbm(seed ^ 0x9e3779b9, 4);
-  detail = makeNoise2D(seed ^ 0x51ed270b);
-  ridgeN = makeFbm(seed ^ 0xabcdef01, 3);
-}
-
-function townMask(x: number, z: number): number {
-  return (
-    smoothstep(130, 95, Math.abs(x - 40)) * smoothstep(130, 95, Math.abs(z))
-  );
-}
-
-function forestMask(x: number, z: number): number {
-  return (
-    smoothstep(440, 330, Math.abs(x)) * smoothstep(155, 100, Math.abs(z))
-  );
-}
-
-function duneBand(x: number, z: number): number {
-  void x;
-  const az = Math.abs(z);
-  return smoothstep(95, 150, az) * smoothstep(245, 195, az);
-}
-
-/** The airbase plateau (AIRBASE wave): a graded-flat military complex on
- *  the south-east plain, formula-leveled like the town pad so the whole
- *  site — depot, runway, hangar row — sits on one surveyed grade. */
-export const AIRBASE_CENTER: [number, number] = [480, -108];
-export const AIRBASE_GRADE = 2.7;
-function airbaseMask(x: number, z: number): number {
-  return (
-    smoothstep(168, 128, Math.abs(x - AIRBASE_CENTER[0])) *
-    smoothstep(118, 78, Math.abs(z - AIRBASE_CENTER[1]))
-  );
-}
-
-/** Terrain pads under houses: set by World after POIs resolve, before the
- *  terrain mesh is built — heightAt blends raw terrain to the pad height so
- *  floors never overlay terrain and walls never float. */
-interface TerrainPad {
-  cx: number;
-  cz: number;
-  hw: number;
-  hd: number;
-  y: number;
-}
-let terrainPads: TerrainPad[] = [];
-
-export function setTerrainPads(pads: TerrainPad[]): void {
-  terrainPads = pads;
-}
-
-/** Terrain slope magnitude at a point (finite difference of heightAt). */
-export function slopeAt(x: number, z: number): number {
-  const e = 1.5;
-  const dx = heightAt(x + e, z) - heightAt(x - e, z);
-  const dz = heightAt(x, z + e) - heightAt(x, z - e);
-  return Math.hypot(dx, dz) / (2 * e);
-}
-
-/** Deterministic island height — the ANALYTIC generator. Requires
- *  initTerrainField(seed) first. This function DEFINES the island, but
- *  nothing at runtime samples it directly once the ground field is
- *  baked (see below): it exists to generate the field and for tests
- *  that pin the island's surveyed properties. */
-export function analyticHeightAt(x: number, z: number): number {
-  const az = Math.abs(z);
-  const ax = Math.abs(x);
-  const shore = smoothstep(305, 205, az); // 1 inland, 0 at the waterline
-  const xFall = smoothstep(705, 615, ax); // island tapers at both ends
-
-  let h = 3.1 * shore;
-  h += 2.7 * forestMask(x, z) * shore; // maritime forest plateau
-  h = lerp(h, 2.4, townMask(x, z)); // ruined town: flattened pad
-  const r = 1 - Math.abs(ridgeN(x * 0.016, z * 0.016)); // dune ridging 0..1
-  h += r * r * 5.2 * duneBand(x, z) * shore;
-  h += fbm(x * 0.006 + 7.3, z * 0.006 - 3.1) * 2.3 * shore; // broad swell
-  h += detail(x * 0.045, z * 0.045) * 0.55 * shore; // detail
-  // TOPOGRAPHY PASS (environment wave): a second, offset relief swell
-  // inland + a micro octave so open ground has grain at foot scale.
-  // Both sit under the beach/airbase/pad overrides below — surveyed
-  // ground stays surveyed.
-  h += fbm(x * 0.0028 - 3.7, z * 0.0028 + 9.2) * 1.5 * shore * smoothstep(60, 190, az + 40);
-  h += detail(x * 0.16 + 11.7, z * 0.16 - 5.9) * 0.13 * shore; // micro grain
-  // beach edges pull toward low sand
-  const beach = smoothstep(205, 272, az);
-  h = lerp(h, 1.15 + detail(x * 0.03, z * 0.03) * 0.7, beach * shore);
-  // fall to water past the shoreline and past the island ends
-  const water = smoothstep(318, 288, az) * smoothstep(1, 0.35, 1 - xFall);
-  h = lerp(-1.6, h, clamp(water, 0, 1));
-  // the airbase grade is surveyed LAST: swell, ridging, and beach pull
-  // all blend out across its falloff ring, so the complex core is flat
-  h = lerp(h, AIRBASE_GRADE, airbaseMask(x, z));
-  // structure pads (cut/fill): full flatten across the footprint + a 1m
-  // apron, then a wide feathered ring — no cliff edges at the walls, no
-  // topo layers slicing through the air next to a foundation
-  for (const p of terrainPads) {
-    const m = Math.max(Math.abs(x - p.cx) - p.hw, Math.abs(z - p.cz) - p.hd);
-    if (m < 4.5) {
-      const t = clamp((m - 1.0) / 3.5, 0, 1);
-      h = lerp(p.y, h, smoothstep(0, 1, t));
-    }
-  }
-  return h;
-}
-
-// ---- THE GROUND FIELD: one source of truth (Ian playtest, 2026-10-21) ---
-//
-// The playtest verdict was brutal and specific: the car fell through the
-// floor in places and floated on thin air in others; feet fell through
-// the topo on foot. Root cause, measured: THREE different surfaces.
-// The visual mesh tessellated the analytic heightAt at 4.4x4 m, the
-// Rapier heightfield at 5x5 m, and gameplay sampled the analytic curve
-// itself — on the dune-ridge cusps those surfaces disagree by up to
-// 1.17 m, several times the suspension's whole travel.
-//
-// The fix is architectural: the island's ground IS a discrete field,
-// sampled once from the analytic generator at 2 m. The terrain mesh's
-// vertices are exactly the field nodes; the Rapier heightfield is fed
-// exactly the field nodes; heightAt() — the function every gameplay
-// system samples — bilinearly interpolates the field. All three agree
-// by construction; the only residual is the sub-cell triangle-split
-// difference (centimeters, pinned by groundTruth.test.ts).
-
-export const GROUND_COLS = 700; // 2 m cells across the 1400 m island
-export const GROUND_ROWS = 320; // 2 m cells across the 640 m island
-
-let groundField: Float32Array | null = null;
-
-/** Sample the analytic generator into the ground field. Called by
- *  World.build() after the terrain pads resolve (pads are part of the
- *  analytic definition) and before the terrain mesh is built. */
-export function bakeGroundField(): void {
-  const heights = new Float32Array((GROUND_COLS + 1) * (GROUND_ROWS + 1));
-  for (let j = 0; j <= GROUND_ROWS; j++) {
-    for (let i = 0; i <= GROUND_COLS; i++) {
-      const x = WORLD.xMin + (i / GROUND_COLS) * (WORLD.xMax - WORLD.xMin);
-      const z = WORLD.zMin + (j / GROUND_ROWS) * (WORLD.zMax - WORLD.zMin);
-      heights[j * (GROUND_COLS + 1) + i] = analyticHeightAt(x, z);
-    }
-  }
-  groundField = heights;
-}
-
-/** The baked field's node heights (null before bake) — the mesh, the
- *  physics heightfield, and the tests all read THIS array. */
-export function groundFieldHeights(): Float32Array | null {
-  return groundField;
-}
-
-/** Sample of the baked field; clamps to the island rect. NOT bilinear:
- *  each cell is two triangles split along the h10–h01 diagonal —
- *  probed 2026-10-21 to be the exact split BOTH Rapier's heightfield
- *  and PlaneGeometry's index buffer use, so this interpolation is the
- *  rendered surface and the physics surface, point for point. */
-export function sampleGroundField(x: number, z: number): number {
-  const f = groundField;
-  if (!f) return analyticHeightAt(x, z);
-  const fx = clamp(((x - WORLD.xMin) / (WORLD.xMax - WORLD.xMin)) * GROUND_COLS, 0, GROUND_COLS - 1e-4);
-  const fz = clamp(((z - WORLD.zMin) / (WORLD.zMax - WORLD.zMin)) * GROUND_ROWS, 0, GROUND_ROWS - 1e-4);
-  const i = Math.floor(fx);
-  const j = Math.floor(fz);
-  const tx = fx - i;
-  const tz = fz - j;
-  const w = GROUND_COLS + 1;
-  const h00 = f[j * w + i];
-  const h10 = f[j * w + i + 1];
-  const h01 = f[(j + 1) * w + i];
-  const h11 = f[(j + 1) * w + i + 1];
-  if (tx + tz <= 1) {
-    return h00 + (h10 - h00) * tx + (h01 - h00) * tz;
-  }
-  return (h10 + h01 - h11) + (h11 - h01) * tx + (h11 - h10) * tz;
-}
-
-/** THE ground truth every system samples. Before the field is baked
- *  (tests, pre-build queries) it is the analytic generator; once
- *  World.build() bakes the field, it is the field itself — the same
- *  surface the mesh renders and the physics body rides on. */
+/** THE ground truth every system samples: the Beta grid's own
+ *  triangle-split read — the same surface the terrain mesh renders
+ *  and the Rapier heightfield collides (identity proven in
+ *  betaTerrain.test.ts against the module and in groundTruth.test.ts
+ *  against these live bindings). */
 export function heightAt(x: number, z: number): number {
-  return groundField ? sampleGroundField(x, z) : analyticHeightAt(x, z);
+  return betaHeightAt(x, z);
 }
 
-export function biomeAt(x: number, z: number): BiomeId {
-  const h = heightAt(x, z);
-  if (h < 0.45) return 'water';
-  const az = Math.abs(z);
-  if (townMask(x, z) > 0.4) return 'town';
-  if (forestMask(x, z) > 0.45 && h >= 2.4) return 'forest';
-  if (az > 215) return 'beach';
-  if (h < 1.9) return 'marsh';
-  return 'dune';
+/** Terrain slope magnitude at a point (finite difference of the grid). */
+export function slopeAt(x: number, z: number): number {
+  return betaSlopeAt(x, z);
 }
 
-export const BIOME_COLORS: Record<BiomeId, [number, number, number]> = {
-  beach: [0.82, 0.74, 0.55],
-  dune: [0.62, 0.58, 0.38],
-  forest: [0.22, 0.38, 0.2],
-  town: [0.38, 0.38, 0.4],
-  marsh: [0.3, 0.42, 0.3],
-  water: [0.1, 0.23, 0.33],
+/** The physical material zone at a point (spec §1.1 palette) — terrain
+ *  coloring and scatter key off this; gameplay reads biomeAt below. */
+export function zoneAt(x: number, z: number): BetaZone {
+  return betaZoneAt(x, z);
+}
+
+/** Gameplay biome (the loot-weighting / phone-map vocabulary) derived
+ *  from the physical zone: the zone set is the terrain truth, this is
+ *  its gameplay read — seabed is open water, sand is beach, open
+ *  grass and bare granite are the old 'dune' country, and the graded
+ *  road corridor reads as traveled (town-class) ground. */
+const ZONE_TO_BIOME: Record<BetaZone, BiomeId> = {
+  seabed: 'water',
+  sand: 'beach',
+  marsh: 'marsh',
+  forest: 'forest',
+  grass: 'dune',
+  granite: 'dune',
+  road: 'town',
 };
 
-// ---- POI placement --------------------------------------------------------
-
-export interface PoiDef {
-  id: string;
-  x: number;
-  zGuess: number;
+export function biomeAt(x: number, z: number): BiomeId {
+  return ZONE_TO_BIOME[betaZoneAt(x, z)];
 }
+
+// ---- POI placement --------------------------------------------------------
 
 /**
  * Campfire offsets from their POI points, shared by the World (fire
@@ -248,46 +82,13 @@ export const CAMPFIRE_SPOTS: Record<string, [number, number]> = {
   lighthouse_base: [8, 5],
 };
 
-/** Suggested x per INTERFACES.md; z resolved against real terrain. */
-export const POI_DEFS: PoiDef[] = [
-  { id: 'shore_camp', x: -560, zGuess: 250 },
-  { id: 'marina', x: -605, zGuess: 80 },
-  { id: 'jonah_camp', x: -380, zGuess: 60 },
-  { id: 'wreck', x: -220, zGuess: 150 },
-  { id: 'town', x: 40, zGuess: 0 },
-  { id: 'forest_cache', x: 180, zGuess: 40 },
-  { id: 'relay_station', x: 330, zGuess: -40 },
-  { id: 'relay_switch', x: 338, zGuess: -34 },
-  { id: 'dune_cache', x: 470, zGuess: 150 },
-  { id: 'lighthouse_base', x: 600, zGuess: 40 },
-  { id: 'lighthouse_top', x: 600, zGuess: 40 },
-  // AIRBASE wave: the depot/airbase complex (on the plateau — resolves at
-  // the nominal spot) and the beached Heavy Logistics Carrier off the
-  // marina shore (open water: findLandZ falls back to the exact guess)
-  { id: 'airbase', x: AIRBASE_CENTER[0], zGuess: AIRBASE_CENTER[1] },
-  { id: 'carrier', x: -688, zGuess: 48 },
-  // W1 (stage 7): Lane 9's six faction sites — named ground (ownership,
-  // markers, NPCs, loot) until the parked buildings return. Coordinates
-  // per worldWiring WORLD_WIRING_STEPS W1; z resolves via findLandZ.
-  { id: 'tollgate', x: 672, zGuess: 60 },
-  { id: 'raider_fort', x: 500, zGuess: 150 },
-  { id: 'barn', x: -40, zGuess: 120 },
-  { id: 'warehouse', x: 140, zGuess: -90 },
-  { id: 'gas_station', x: -160, zGuess: -30 },
-  { id: 'strip_mall', x: -60, zGuess: -120 },
-];
-
-/** Find a walkable z near the guess (height in a sane band). */
-export function findLandZ(x: number, zGuess: number): number {
-  for (let dz = 0; dz <= 60; dz += 5) {
-    for (const s of [1, -1]) {
-      const z = zGuess + dz * s;
-      const h = heightAt(x, z);
-      if (h > 1.1 && h < 9) return z;
-    }
-  }
-  return zGuess;
-}
+// POI positions ARE data/betaLayout.ts BETA_POI_PLACEMENTS (map
+// integration, 2026-10-21): every POI id placed exactly once against
+// the Beta Island spec + aerial, on ground the grid itself surveyed
+// (sector pads / knolls / the dredged channel). The old POI_DEFS
+// (x + zGuess, z resolved by a findLandZ land scan over the retired
+// analytic terrain) is deleted with the terrain it scanned — a
+// placement is now a surveyed fact, not a search result.
 
 // ---- world builder --------------------------------------------------------
 
@@ -497,8 +298,8 @@ export class World {
   lampRoomY = 0;
   /** The REVAMPED AIRBASE (Ian, 2026-10-21 — un-parked for the airbase
    *  only): the portable kit sited at AIRBASE_SITE (airbaseSite.ts —
-   *  today the plateau; the Beta Island map wave re-sites it in one
-   *  move). Game merges these like the lighthouse's. */
+   *  re-sited onto the Beta airbase pad in the map integration,
+   *  2026-10-21). Game merges these like the lighthouse's. */
   airfieldKits: KitResult[] = [];
   /** Apron prop colliders (floodlight poles, windsock). */
   airfieldPropColliders: Collider[] = [];
@@ -546,7 +347,8 @@ export class World {
     this.scene = scene;
     this.seed = seed;
     this.rng = mulberry32(seed ^ 0x12345678);
-    initTerrainField(seed);
+    // No terrain field to initialize: the Beta grid is authored data,
+    // built once by betaTerrain and shared by every World instance.
   }
 
   /** One-time IBL setup (Game calls this once the renderer exists): a
@@ -597,12 +399,9 @@ export class World {
 
   build(): void {
     this.resolvePois();
-    this.setupHousePads();
-    // the ground field bakes AFTER the pads resolve (they are part of
-    // the analytic definition) and BEFORE anything samples heightAt
-    // for placement — from here on, heightAt IS the field the mesh
-    // renders and the physics rides on
-    bakeGroundField();
+    // No bake step: heightAt reads the Beta grid directly, so every
+    // placement below samples the same surface the mesh renders and
+    // the physics rides on — from the first call, not after a bake.
     this.buildTerrain();
     this.buildWater();
     this.buildLights();
@@ -623,47 +422,50 @@ export class World {
     this.buildAirbase();
     this.buildRelayRuin();
     this.buildRoads();
+    this.buildDaymarkers();
     this.buildDressing();
   }
 
   /**
-   * W5 (stage 7): Lane 9's ROAD_GRAPH drawn as dirt ribbons over the
-   * terrain — one merged strip mesh, sampled every ~5m, hugging the
-   * ground. 'road' edges only: the bridge/ferry doors lead off-island
-   * to OBX nodes that don't exist yet, so they draw nothing.
+   * The road network drawn as dirt ribbons (map integration,
+   * 2026-10-21): BETA_ROADS polylines — the same centerlines the grid
+   * graded into itself, so the visible track and the drivable
+   * corridor are one line, not two drawings of it. One merged strip
+   * mesh, sampled every ~4 m along each polyline, hugging the ground.
+   * (Lane 9's ROAD_GRAPH remains the travel/faction graph data; it no
+   * longer draws the roads — its POI-to-POI straight lines were a
+   * second, disagreeing road system.)
    */
   private buildRoads(): void {
     const positions: number[] = [];
     const indices: number[] = [];
-    let base = 0;
-    const HALF_W = 1.9;
-    for (const e of ROAD_GRAPH.edges) {
-      if (e.mode !== 'road') continue;
-      const a = this.poiPositions[e.from];
-      const b = this.poiPositions[e.to];
-      if (!a || !b) continue;
-      const dx = b[0] - a[0];
-      const dz = b[1] - a[1];
-      const len = Math.hypot(dx, dz);
-      if (len < 1) continue;
-      const pxn = -dz / len;
-      const pzn = dx / len;
-      const steps = Math.max(2, Math.ceil(len / 5));
-      for (let i = 0; i <= steps; i++) {
-        const t = i / steps;
-        const cx = a[0] + dx * t;
-        const cz = a[1] + dz * t;
-        for (const s of [-1, 1]) {
-          const x = cx + pxn * HALF_W * s;
-          const z = cz + pzn * HALF_W * s;
-          positions.push(x, this.groundY(x, z) + 0.07, z);
-        }
-        if (i > 0) {
-          const l0 = base + (i - 1) * 2;
-          indices.push(l0, l0 + 1, l0 + 2, l0 + 1, l0 + 3, l0 + 2);
+    for (const road of BETA_ROADS) {
+      const halfW = road.halfWidth;
+      let prevRow = -1; // vertex index of this road's previous ribbon row
+      for (let s = 0; s + 1 < road.points.length; s++) {
+        const [ax, az] = road.points[s];
+        const [bx, bz] = road.points[s + 1];
+        const len = Math.hypot(bx - ax, bz - az);
+        if (len < 1) continue;
+        const pxn = -(bz - az) / len;
+        const pzn = (bx - ax) / len;
+        const steps = Math.max(1, Math.ceil(len / 4));
+        for (let i = s === 0 ? 0 : 1; i <= steps; i++) {
+          const t = i / steps;
+          const cx = ax + (bx - ax) * t;
+          const cz = az + (bz - az) * t;
+          const row = positions.length / 3;
+          for (const sd of [-1, 1]) {
+            const x = cx + pxn * halfW * sd;
+            const z = cz + pzn * halfW * sd;
+            positions.push(x, this.groundY(x, z) + 0.07, z);
+          }
+          if (prevRow >= 0) {
+            indices.push(prevRow, prevRow + 1, row, prevRow + 1, row + 1, row);
+          }
+          prevRow = row;
         }
       }
-      base += (steps + 1) * 2;
     }
     if (positions.length === 0) return;
     const geo = new THREE.BufferGeometry();
@@ -675,6 +477,44 @@ export class World {
     mesh.name = 'roads';
     mesh.receiveShadow = true;
     this.scene.add(mesh);
+  }
+
+  /** Channel daymarkers (spec §3.3): post + colored topmark on each
+   *  bank of the dredged cut, from BETA_DAYMARKERS — generated from
+   *  the channel line itself, so marker and water can never disagree.
+   *  Port = red, starboard = green (the data's bank names). Each post
+   *  stands on the seabed and clears the waterline by ~2 m. */
+  private buildDaymarkers(): void {
+    const marks = BETA_DAYMARKERS;
+    if (marks.length === 0) return;
+    const poleGeo = new THREE.CylinderGeometry(0.09, 0.11, 1, 6);
+    poleGeo.translate(0, 0.5, 0); // unit height, base at origin — scaled per post
+    const poleMat = new THREE.MeshStandardMaterial({ color: 0x3d3a35, roughness: 0.9 });
+    const poles = new THREE.InstancedMesh(poleGeo, poleMat, marks.length);
+    const capGeo = new THREE.BoxGeometry(0.42, 0.3, 0.42);
+    const capMat = new THREE.MeshStandardMaterial({ roughness: 0.7 });
+    const caps = new THREE.InstancedMesh(capGeo, capMat, marks.length);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const sc = new THREE.Vector3();
+    const col = new THREE.Color();
+    marks.forEach((mk, i) => {
+      const bed = this.groundY(mk.x, mk.z);
+      const top = Math.max(bed, WORLD.waterY) + 2.0;
+      const h = top - bed;
+      m.compose(new THREE.Vector3(mk.x, bed, mk.z), q.identity(), sc.set(1, h, 1));
+      poles.setMatrixAt(i, m);
+      m.compose(new THREE.Vector3(mk.x, top + 0.15, mk.z), q, sc.set(1, 1, 1));
+      caps.setMatrixAt(i, m);
+      caps.setColorAt(i, col.setHex(mk.side === 'port' ? 0xb03024 : 0x2a7a3a));
+    });
+    poles.instanceMatrix.needsUpdate = true;
+    caps.instanceMatrix.needsUpdate = true;
+    if (caps.instanceColor) caps.instanceColor.needsUpdate = true;
+    poles.name = 'daymarkers';
+    caps.name = 'daymarkers:caps';
+    this.scene.add(poles);
+    this.scene.add(caps);
   }
 
   /**
@@ -694,46 +534,22 @@ export class World {
   // -- terrain mesh ---------------------------------------------------------
 
   private buildTerrain(): void {
-    const w = WORLD.xMax - WORLD.xMin;
-    const d = WORLD.zMax - WORLD.zMin;
-    // the mesh tessellates EXACTLY the ground field's nodes — one
-    // vertex per node, so the rendered surface and the physics
-    // heightfield are the same surface by construction
-    const segX = GROUND_COLS;
-    const segZ = GROUND_ROWS;
-    const geo = new THREE.PlaneGeometry(w, d, segX, segZ);
-    geo.rotateX(-Math.PI / 2);
-    const pos = geo.attributes.position as THREE.BufferAttribute;
-    const colors = new Float32Array(pos.count * 3);
-    const n = makeNoise2D(this.seed ^ 0x77aa);
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i) + (WORLD.xMin + WORLD.xMax) / 2;
-      const z = pos.getZ(i) + (WORLD.zMin + WORLD.zMax) / 2;
-      const h = heightAt(x, z);
-      pos.setXYZ(i, x, h, z);
-      const b = biomeAt(x, z);
-      let [r, g, bl] = BIOME_COLORS[b];
-      const v = 1 + n(x * 0.05, z * 0.05) * 0.09 + n(x * 0.23, z * 0.23) * 0.05;
-      // steep faces read as rock/dirt, not lawn: blend by slope
-      const rock = clamp((slopeAt(x, z) - 0.32) * 1.5, 0, 0.65);
-      r = lerp(r, 0.44, rock);
-      g = lerp(g, 0.41, rock);
-      bl = lerp(bl, 0.38, rock);
-      colors[i * 3] = clamp(r * v, 0, 1);
-      colors[i * 3 + 1] = clamp(g * v, 0, 1);
-      colors[i * 3 + 2] = clamp(bl * v, 0, 1);
-    }
-    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    geo.computeVertexNormals();
+    // The mesh IS the Beta grid: chunked geometries whose vertices are
+    // the grid nodes verbatim, triangulated on the sampler's diagonal,
+    // colored per-vertex by material zone (betaTerrain builds them).
+    // One shared material across chunks so the wetness look (Item 3)
+    // still drives the whole island at once.
     this.terrainMat = new THREE.MeshStandardMaterial({
       vertexColors: true,
       roughness: 0.95,
       metalness: 0,
     });
-    const mesh = new THREE.Mesh(geo, this.terrainMat);
-    mesh.name = 'terrain';
-    mesh.receiveShadow = true;
-    this.scene.add(mesh);
+    for (const geo of buildBetaTerrainChunks()) {
+      const mesh = new THREE.Mesh(geo, this.terrainMat);
+      mesh.name = 'terrain';
+      mesh.receiveShadow = true;
+      this.scene.add(mesh);
+    }
   }
 
   private buildWater(): void {
@@ -867,26 +683,13 @@ export class World {
     this.scene.add(this.stars);
   }
 
-  /** Flatten a terrain pad under each house footprint (corners measured on
-   *  raw terrain before any pad exists). */
-  private setupHousePads(): void {
-    // TOTAL PURGE: the only building pad left is the lighthouse grounds.
-    const [cx, cz] = this.poiPositions['lighthouse_base'] ?? [0, 0];
-    const f = { cx, cz, hw: 9, hd: 9 };
-    const corners = [
-      heightAt(f.cx - f.hw, f.cz - f.hd),
-      heightAt(f.cx + f.hw, f.cz - f.hd),
-      heightAt(f.cx - f.hw, f.cz + f.hd),
-      heightAt(f.cx + f.hw, f.cz + f.hd),
-    ];
-    setTerrainPads([{ ...f, y: Math.min(...corners) - 0.08 }]);
-  }
-
   private resolvePois(): void {
+    // Surveyed placements, verbatim (betaLayout) — including the
+    // claim-only 'military_base' id, which IS the airbase ground, so
+    // the claim system's airbase fallback never has to fire.
     const map: Record<string, [number, number]> = {};
-    for (const p of POI_DEFS) {
-      const z = findLandZ(p.x, p.zGuess);
-      map[p.id] = [p.x, z];
+    for (const p of BETA_POI_PLACEMENTS) {
+      map[p.poiId] = [p.x, p.z];
     }
     // NPC positions ride on their POIs per the contract
     map['npc:jonah'] = map['jonah_camp'];
@@ -904,17 +707,42 @@ export class World {
   }
 
   // -- scatter ---------------------------------------------------------------
+  //
+  // Scatter is keyed to the Beta material zones (betaTerrain) and the
+  // layout's scatter table (BETA_SCATTER): trees in the forest zone,
+  // tufts on sand/marsh/grass, rocks on open ground. Two vetoes keep
+  // the surveyed world clean: nothing sprouts on a sector/extra pad
+  // (the flats are built ground — lighthouse grounds, the airbase, the
+  // Refuge, the helipad) and nothing sprouts on a road corridor.
+
+  /** True when (x, z) stands on surveyed ground (a sector or extra
+   *  pad, plus margin) — scatter keeps off it entirely. */
+  private onSurveyedGround(x: number, z: number): boolean {
+    for (const s of BETA_SECTORS) {
+      if (Math.abs(x - s.x) < s.padHalf[0] + 3 && Math.abs(z - s.z) < s.padHalf[1] + 3) return true;
+    }
+    for (const p of BETA_EXTRA_PADS) {
+      if (Math.abs(x - p.x) < p.half[0] + 3 && Math.abs(z - p.z) < p.half[1] + 3) return true;
+    }
+    return false;
+  }
+
+  private scatterVeto(x: number, z: number, roadClearance: number): boolean {
+    return this.onSurveyedGround(x, z) || betaRoadDistance(x, z) < roadClearance;
+  }
 
   private buildScatter(): void {
-    // Trees: maritime forest band. Three looks — tall pines (two-tier cones),
-    // broadleaf (blob crowns), and dead snags — so the woods have real depth.
+    // Trees: the maritime forest zone (the spine, the NW headland, the
+    // massif's gentler faces). Three looks — tall pines (two-tier
+    // cones), broadleaf (blob crowns), and dead snags — real depth.
     interface TreeSpot { x: number; z: number; kind: 'pine' | 'leaf' | 'snag'; s: number }
     const treeSpots: TreeSpot[] = [];
     let guard = 0;
-    while (treeSpots.length < 380 && guard++ < 12000) {
-      const x = -440 + this.rng() * 880;
-      const z = -150 + this.rng() * 300;
-      if (biomeAt(x, z) !== 'forest') continue;
+    while (treeSpots.length < 380 && guard++ < 60000) {
+      const x = -690 + this.rng() * 1380;
+      const z = -310 + this.rng() * 620;
+      if (zoneAt(x, z) !== 'forest') continue;
+      if (this.scatterVeto(x, z, 7)) continue;
       const r = this.rng();
       const kind = r < 0.68 ? 'pine' : r < 0.93 ? 'leaf' : 'snag';
       treeSpots.push({ x, z, kind, s: 0.9 + this.rng() * 0.85 });
@@ -993,7 +821,7 @@ export class World {
     this.lightShafts = new LightShafts(shaftAnchors);
     this.scene.add(this.lightShafts.group);
 
-    // Rocks: scattered, more on beach/dune.
+    // Rocks: open ground — sand, granite, grass, forest floor.
     const rockGeo = new THREE.IcosahedronGeometry(0.8, 0);
     const rockMat = new THREE.MeshStandardMaterial({ color: 0x6e6a63, roughness: 1 });
     const rockCount = 140;
@@ -1001,8 +829,8 @@ export class World {
     for (let i = 0; i < rockCount; i++) {
       const x = -680 + this.rng() * 1360;
       const z = -300 + this.rng() * 600;
-      const b = biomeAt(x, z);
-      if (b === 'water' || b === 'town') {
+      const zn = zoneAt(x, z);
+      if (zn === 'seabed' || zn === 'road' || this.scatterVeto(x, z, 5)) {
         m.compose(new THREE.Vector3(0, -50, 0), q.identity(), sc.set(0.001, 0.001, 0.001));
       } else {
         const s = 0.4 + this.rng() * 1.6;
@@ -1039,10 +867,12 @@ export class World {
     const bushes = new THREE.InstancedMesh(bushGeo, bushMat, bushCount);
     let placed = 0;
     let guard = 0;
-    while (placed < bushCount && guard++ < 8000) {
-      const x = -440 + this.rng() * 880;
-      const z = -150 + this.rng() * 300;
-      if (biomeAt(x, z) !== 'forest') continue;
+    while (placed < bushCount && guard++ < 30000) {
+      const x = -690 + this.rng() * 1380;
+      const z = -310 + this.rng() * 620;
+      const zn = zoneAt(x, z);
+      if (zn !== 'forest' && zn !== 'grass') continue;
+      if (this.scatterVeto(x, z, 6)) continue;
       const s = 0.7 + this.rng() * 1.1;
       e.set(0, this.rng() * 3, 0);
       q.setFromEuler(e);
@@ -1061,11 +891,12 @@ export class World {
     const logs = new THREE.InstancedMesh(logGeo, logMat, logCount);
     placed = 0;
     guard = 0;
-    while (placed < logCount && guard++ < 4000) {
-      const x = -440 + this.rng() * 880;
-      const z = -150 + this.rng() * 300;
-      const b = biomeAt(x, z);
-      if (b !== 'forest' && b !== 'marsh') continue;
+    while (placed < logCount && guard++ < 20000) {
+      const x = -690 + this.rng() * 1380;
+      const z = -310 + this.rng() * 620;
+      const zn = zoneAt(x, z);
+      if (zn !== 'forest' && zn !== 'marsh') continue;
+      if (this.scatterVeto(x, z, 6)) continue;
       e.set(Math.PI / 2, 0, (this.rng() - 0.5) * 0.3 + this.rng() * 3);
       q.setFromEuler(e);
       const s = 0.8 + this.rng() * 0.8;
@@ -1084,11 +915,12 @@ export class World {
   private buildGrass(): void {
     const spots: [number, number][] = [];
     let guard = 0;
-    while (spots.length < 1500 && guard++ < 22000) {
+    while (spots.length < 1500 && guard++ < 40000) {
       const x = -680 + this.rng() * 1360;
       const z = -300 + this.rng() * 600;
-      const b = biomeAt(x, z);
-      if (b !== 'dune' && b !== 'marsh' && b !== 'beach') continue;
+      const zn = zoneAt(x, z);
+      if (zn !== 'sand' && zn !== 'marsh' && zn !== 'grass') continue;
+      if (this.scatterVeto(x, z, 5.5)) continue;
       spots.push([x, z]);
     }
     if (spots.length === 0) return;
