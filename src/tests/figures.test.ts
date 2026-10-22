@@ -627,8 +627,9 @@ interface GlbFull {
 
 function pivotMetrics(path: string) {
   const buf = readFileSync(path);
-  const jlen = buf.readUInt32LE(12);
-  const g = JSON.parse(buf.subarray(20, 20 + jlen).toString('utf8')) as GlbFull;
+  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const jlen = dv.getUint32(12, true);
+  const g = JSON.parse(new TextDecoder().decode(buf.subarray(20, 20 + jlen))) as GlbFull;
   const binOff = 20 + jlen + 8;
   const parent = new Map<number, number>();
   g.nodes.forEach((n, i) => (n.children ?? []).forEach((c) => parent.set(c, i)));
@@ -687,9 +688,9 @@ function pivotMetrics(path: string) {
         const w = world(i);
         for (let k = 0; k < acc.count; k++) {
           out.push(xf(w, [
-            buf.readFloatLE(off + k * stride),
-            buf.readFloatLE(off + k * stride + 4),
-            buf.readFloatLE(off + k * stride + 8),
+            dv.getFloat32(off + k * stride, true),
+            dv.getFloat32(off + k * stride + 4, true),
+            dv.getFloat32(off + k * stride + 8, true),
           ]));
         }
       }
@@ -697,7 +698,7 @@ function pivotMetrics(path: string) {
     return out;
   };
   const sib: Record<string, string> = { armL: 'armR', armR: 'armL', legL: 'legR', legR: 'legL' };
-  const meshNodes = new Set(g.nodes.map((n, i) => i).filter((i) => g.nodes[i].mesh !== undefined));
+  const meshNodes = new Set(g.nodes.map((_n, i) => i).filter((i) => g.nodes[i].mesh !== undefined));
   const out: Record<string, { extUp: number; lowCz: number; near: number; octs: number }> = {};
   for (const piv of ['armL', 'armR', 'legL', 'legR']) {
     const pi = idx(piv);
