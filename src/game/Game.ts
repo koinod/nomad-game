@@ -20,7 +20,7 @@ import { HuskManager } from './Husks';
 import type { Husk, SpawnZone } from './Husks';
 import { InteractSystem, buildContainerDefs, INTERACT_RADIUS_M, STORAGE_RADIUS_M } from './Interact';
 import { AnimalManager } from './Animals';
-import { VehicleManager, applyUpgradeVisuals, attachGt500Glb, attachPrimeGlb, attachSprinterGlb, placeSeahawk, applyGlbVisuals, itemsWeightKg, type Vehicle } from './Vehicles';
+import { VehicleManager, applyUpgradeVisuals, attachGt500Glb, attachPrimeGlb, attachSprinterGlb, attachDarkHorseGlb, placeSeahawk, applyGlbVisuals, itemsWeightKg, type Vehicle } from './Vehicles';
 import { CarPhysics } from './CarPhysics';
 import { WeatherSystem } from './Weather';
 import { CloudLayer, updateWindUniforms } from './Clouds';
@@ -261,9 +261,9 @@ export class Game {
 
     // The GT500 GLB replaces its stand-in when it loads; the Rapier
     // rigid body is built at the car's final (possibly save-restored)
-    // position. (The Stallion's GLB attach is gone with its spawn —
-    // attachMustangGlb stays exported in Vehicles.ts for the Dark
-    // Horse wave, which will rig through the same contract.)
+    // position. (The Stallion FX's own GLB attach is gone with its
+    // spawn — attachMustangGlb stays exported in Vehicles.ts; the
+    // Dark Horse below rigs through the shared fleet contract.)
     const firstCar = this.vehicles.vehicles[0];
     const gt500 = this.vehicles.vehicles.find((v) => v.def.id === 'gt500');
     if (gt500) attachGt500Glb(gt500);
@@ -273,6 +273,11 @@ export class Game {
     if (prime) attachPrimeGlb(prime);
     const sprinter = this.vehicles.vehicles.find((v) => v.def.id === 'sprinter_van');
     if (sprinter) attachSprinterGlb(sprinter);
+    // The Dark Horse (integration, 2026-10-21): the Stallion lane's
+    // PRD build on its painted pad — the hero car, playable in Stage
+    // 0 with its Stage 1/2 mod ladder as upgrade tiers.
+    const darkHorse = this.vehicles.vehicles.find((v) => v.def.id === 'dark_horse');
+    if (darkHorse) attachDarkHorseGlb(darkHorse);
     // Lane 2 staged placement: the Seahawk sits on the airbase apron as
     // a static landmark — no flight model yet, and deliberately not a
     // Vehicle instance, so the save shape is untouched

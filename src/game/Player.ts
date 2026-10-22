@@ -94,6 +94,11 @@ export const CAR_SEATS: Record<string, CarSeatSpec> = {
   // V-04 Sprinter (measured from the GLB): seat base top 0.98, cab
   // floor top 0.63, inner roof 2.62.
   sprinter_van: { cushionY: 0.98, floorY: 0.63, roofY: 2.62 },
+  // S650 Dark Horse: the interior was BUILT to these numbers (build
+  // report: floor top 0.16, cushion top 0.55, contract roof line
+  // 1.35 inside the 1.40 shell) — the spec is the construction
+  // contract, same values as its FX sibling.
+  dark_horse: { cushionY: 0.55, floorY: 0.16, roofY: 1.35 },
 };
 
 export interface SeatPose {

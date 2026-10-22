@@ -11,12 +11,17 @@ import { buildStallion, applyStallionUpgrades } from './carModels';
 import { GT500_DEF, GT500_GLB_PATH, GT500_SPAWN, GT500_WHEEL_RIG } from './gt500Def';
 import { PRIME_DEF, PRIME_GLB_PATH, PRIME_SPAWN, PRIME_WHEEL_RIG } from './primeDef';
 import { SPRINTER_DEF, SPRINTER_GLB_PATH, SPRINTER_SPAWN, SPRINTER_WHEEL_RIG } from './sprinterDef';
+import {
+  DARKHORSE_DEF, DARKHORSE_GLB_PATH, DARKHORSE_SPAWN, DARKHORSE_WHEEL_RIG,
+  darkHorseModStage, darkHorseStage,
+} from './darkhorseDef';
 import { padWorld } from './airbaseSite';
 
 export { glassTint } from './modelKit';
 export { GT500_DEF, GT500_SPAWN } from './gt500Def';
 export { PRIME_DEF, PRIME_SPAWN } from './primeDef';
 export { SPRINTER_DEF, SPRINTER_SPAWN } from './sprinterDef';
+export { DARKHORSE_DEF, DARKHORSE_SPAWN } from './darkhorseDef';
 
 /**
  * One visual wheel of a GLB rig: the GLB object name, the CarPhysics
@@ -95,6 +100,11 @@ export const VEHICLE_DEFS: VehicleDef[] = [
   // sprinterDef.ts.
   PRIME_DEF,
   SPRINTER_DEF,
+  // THE HERO (Dark Horse integration, 2026-10-21): the Stallion
+  // lane's PRD build lands as the playable Dark Horse — Stage 0
+  // factory car with the Stage 1/2 mod ladder as upgrade tiers.
+  // Full def in darkhorseDef.ts.
+  DARKHORSE_DEF,
 ];
 
 /** Semi tractor paint rotation — the Stitch charcoal leads, fleets vary. */
@@ -155,6 +165,16 @@ export interface Vehicle {
    *  until the GLB lands — and for GLBs without the marker — where
    *  Player falls back to its length/width proportions. */
   seatAnchor?: { lx: number; lz: number };
+  /** Dark Horse only: the GLB's stage hardware, collected at attach
+   *  time (applyDarkHorseStageMods toggles visibility by the owned
+   *  stage tier). The MT/stock wheel sets are kept apart because the
+   *  stage swap exchanges the whole rolling set, not just trim. */
+  stageMods?: {
+    stage1: THREE.Object3D[];
+    stage2: THREE.Object3D[];
+    stockWheels: THREE.Object3D[];
+    mtWheels: THREE.Object3D[];
+  };
 }
 
 
@@ -203,10 +223,12 @@ export const VEHICLE_SPAWNS: SpawnDef[] = [
   // REVAMPED AIRBASE, on its own marked pad (airbaseSite.ts) — the
   // GT500 and the Sprinter join the Prime there. A fresh start or a
   // reset puts the fleet on the pads; saved positions still restore
-  // (vehicle persistence is law). The Dark Horse joins this roster
-  // when it lands — its pad is already painted.
+  // (vehicle persistence is law).
   PRIME_SPAWN,
   SPRINTER_SPAWN,
+  // The Dark Horse has landed (integration, 2026-10-21): it takes
+  // its painted pad west of the GT500's.
+  DARKHORSE_SPAWN,
 ];
 
 export class VehicleManager {
@@ -257,12 +279,60 @@ export function applyUpgradeVisuals(v: Vehicle): void {
     v.group.remove(v.upgradeGroup);
     v.upgradeGroup = undefined;
   }
+  // The Dark Horse's upgrades are its stage tiers, and the hardware
+  // is already IN its GLB as MOD_* meshes — toggle those, never the
+  // procedural Stallion morphs (that sheet-metal belongs to the FX).
+  if (v.def.id === 'dark_horse') {
+    applyDarkHorseStageMods(v);
+    return;
+  }
   if (v.upgrades.length === 0) return;
   const g = new THREE.Group();
   // Convoy Combat Edition: the upgrade tree made visible (carModels.ts)
   applyStallionUpgrades(v, g);
   v.group.add(g);
   v.upgradeGroup = g;
+}
+
+/**
+ * Collect a loaded Dark Horse GLB's stage hardware into the sets
+ * applyDarkHorseStageMods toggles. MOD_* nodes classify by name
+ * (darkHorseModStage); the two wheel sets are collected by their
+ * rig names. Pure scene-graph work — the tests drive it headless.
+ */
+export function collectDarkHorseMods(model: THREE.Object3D): NonNullable<Vehicle['stageMods']> {
+  const mods: NonNullable<Vehicle['stageMods']> = { stage1: [], stage2: [], stockWheels: [], mtWheels: [] };
+  model.traverse((o) => {
+    if (o.name.startsWith('MOD_WheelMT')) {
+      mods.mtWheels.push(o);
+      return;
+    }
+    if (o.name.startsWith('Wheel')) {
+      mods.stockWheels.push(o);
+      return;
+    }
+    const stage = darkHorseModStage(o.name);
+    if (stage === 1) mods.stage1.push(o);
+    else if (stage === 2) mods.stage2.push(o);
+  });
+  return mods;
+}
+
+/**
+ * The stage toggle: Stage 1 hardware shows at stage ≥ 1, Stage 2 at
+ * stage 2, and the rolling set swaps wholesale — stock split-5s
+ * below Stage 2, the beadlock MT set at Stage 2 (the rig keeps both
+ * sets' pivots live; only visibility changes). No-op until the GLB
+ * lands (stageMods unset) — the caller re-runs it at attach time.
+ */
+export function applyDarkHorseStageMods(v: Vehicle): void {
+  const mods = v.stageMods;
+  if (!mods) return;
+  const stage = darkHorseStage(v.upgrades);
+  for (const o of mods.stage1) o.visible = stage >= 1;
+  for (const o of mods.stage2) o.visible = stage >= 2;
+  for (const o of mods.stockWheels) o.visible = stage < 2;
+  for (const o of mods.mtWheels) o.visible = stage >= 2;
 }
 
 /**
@@ -351,6 +421,9 @@ interface GlbAttachCfg {
   wheels: GlbWheelSpec[];
   /** Spotlight seats in GLB space (they ride the wrapper's yaw). */
   headlights: (model: THREE.Object3D) => { pos: [number, number, number]; target: [number, number, number] }[];
+  /** Post-rig hook, run with the loaded model before v.glb is set —
+   *  the Dark Horse collects + applies its stage-mod sets here. */
+  onRigged?: (model: THREE.Object3D, v: Vehicle) => void;
 }
 
 function attachVehicleGlb(v: Vehicle, cfg: GlbAttachCfg): void {
@@ -412,6 +485,7 @@ function attachVehicleGlb(v: Vehicle, cfg: GlbAttachCfg): void {
         const local = v.group.worldToLocal(wp);
         v.seatAnchor = { lx: local.x, lz: local.z };
       }
+      if (cfg.onRigged) cfg.onRigged(model, v);
       v.glb = { wrapper, steerPivots, spinPivots, suspPivots, headLights };
     })
     .catch((err) => {
@@ -435,6 +509,35 @@ export function attachGt500Glb(v: Vehicle): void {
       pos: [2.38, 0.66, sz] as [number, number, number],
       target: [14, 0, sz * 1.25] as [number, number, number],
     })),
+  });
+}
+
+/**
+ * The Stallion Dark Horse (public/darkhorse.glb, the Stallion lane's
+ * PRD build — integrated 2026-10-21 on Ian's "if it works, fine").
+ * Eight visual wheels on the 4-corner rig: the stock split-5 set and
+ * the Stage 2 beadlock MT set, exchanged by the stage toggle. The
+ * stage hardware (MOD_* meshes) is collected at attach and toggled
+ * from the owned tier — onRigged applies the CURRENT tier, so a
+ * restored Stage 2 car wakes up wearing its turret. No driver_seat
+ * marker in this file: the seat fit runs on the CAR_SEATS spec the
+ * interior was built to (Player.ts).
+ */
+export function attachDarkHorseGlb(v: Vehicle): void {
+  attachVehicleGlb(v, {
+    path: DARKHORSE_GLB_PATH,
+    logName: 'darkhorse.glb',
+    wheels: DARKHORSE_WHEEL_RIG,
+    // spotlights at the projector globes (build report: x 2.408,
+    // height 0.628, lateral ±0.60 in GLB space)
+    headlights: () => [-0.6, 0.6].map((sz) => ({
+      pos: [2.408, 0.628, sz] as [number, number, number],
+      target: [14, 0, sz * 1.25] as [number, number, number],
+    })),
+    onRigged: (model, veh) => {
+      veh.stageMods = collectDarkHorseMods(model);
+      applyDarkHorseStageMods(veh);
+    },
   });
 }
 
