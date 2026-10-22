@@ -1,62 +1,113 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
+import { heightAt } from '../game/World';
+import { buildWorld } from './buildings.test';
 import {
-  initTerrainField, setTerrainPads, bakeGroundField, groundFieldHeights,
-  analyticHeightAt, heightAt, sampleGroundField,
-  GROUND_COLS, GROUND_ROWS, AIRBASE_CENTER, AIRBASE_GRADE,
-} from '../game/World';
+  BETA_COLS, BETA_ROWS, betaNodeX, betaNodeZ, buildBetaGrid, betaHeightAt,
+  buildBetaRapierHeightfield,
+} from '../game/betaTerrain';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { CarPhysics, buildRapierHeightfield } from '../game/CarPhysics';
 import { VEHICLE_DEFS, type Vehicle } from '../game/Vehicles';
 
 /**
- * GROUND TRUTH (Ian playtest, 2026-10-21): the car fell through the
- * floor and floated on thin air; feet fell through the topo. Measured
- * root cause: mesh (4.4x4 m chords), Rapier heightfield (5x5 m), and
- * gameplay (analytic heightAt) were three different surfaces — up to
- * 1.17 m apart on the dune ridges. Now ONE baked field (2 m nodes) is
- * the terrain for all three. These tests pin that unity.
+ * GROUND TRUTH, BETA EDITION (map integration, 2026-10-21).
+ *
+ * The original ground-truth suite (same day, earlier) pinned the fix
+ * for the playtest's falls-through-floor / floats-on-thin-air: mesh,
+ * physics and gameplay had been THREE surfaces disagreeing by up to
+ * 1.17 m. The Beta restart replaced the whole terrain with ONE
+ * authored grid — and this suite now proves the LIVE world runs on
+ * it: World's heightAt is the grid's sampler, the terrain meshes in
+ * a built World carry the grid nodes verbatim, the heightfield
+ * CarPhysics receives is the grid verbatim, and a rigid body settles
+ * and drives on that surface at the new map's real places. (The
+ * beta module's internal identity is proven in betaTerrain.test.ts;
+ * nothing here re-proves it in isolation.)
  */
 
-function nodeX(i: number): number { return -700 + (i / GROUND_COLS) * 1400; }
-function nodeZ(j: number): number { return -320 + (j / GROUND_ROWS) * 640; }
+const STRIDE = BETA_COLS + 1;
+const grid = buildBetaGrid();
 
-beforeAll(() => {
-  initTerrainField(1337);
-  setTerrainPads([]);
-  bakeGroundField();
-});
-
-describe('the baked field is the analytic island, sampled once', () => {
-  it('field nodes equal the analytic generator at the nodes', () => {
-    const f = groundFieldHeights()!;
-    expect(f).not.toBeNull();
-    expect(f.length).toBe((GROUND_COLS + 1) * (GROUND_ROWS + 1));
-    for (let i = 0; i <= GROUND_COLS; i += 37) {
-      for (let j = 0; j <= GROUND_ROWS; j += 23) {
-        expect(f[j * (GROUND_COLS + 1) + i]).toBeCloseTo(analyticHeightAt(nodeX(i), nodeZ(j)), 5);
-        // and heightAt at a node reads the node itself
-        expect(heightAt(nodeX(i), nodeZ(j))).toBeCloseTo(f[j * (GROUND_COLS + 1) + i], 4);
+describe('the live sampler is the beta grid', () => {
+  it('World.heightAt === betaHeightAt at nodes and between them', () => {
+    for (let i = 0; i <= BETA_COLS; i += 61) {
+      for (let j = 0; j <= BETA_ROWS; j += 47) {
+        expect(heightAt(betaNodeX(i), betaNodeZ(j))).toBe(grid[j * STRIDE + i]);
       }
+    }
+    const probes: [number, number][] = [
+      [123.37, -56.71], [-520.4, -184.6], [392.2, 167.8], [0.31, 0.57],
+      [-548.3, 198.9], [267.9, -251.7], [596.1, -192.2],
+    ];
+    for (const [x, z] of probes) {
+      expect(heightAt(x, z)).toBe(betaHeightAt(x, z));
     }
   });
 
-  it('the surveyed airbase grade survives the bake', () => {
-    const [cx, cz] = AIRBASE_CENTER;
-    expect(Math.abs(heightAt(cx, cz) - AIRBASE_GRADE)).toBeLessThan(0.05);
-  });
+  it('feet read the same two triangles the mesh renders (live sampler, cell by cell)', () => {
+    for (let i = 0; i < BETA_COLS; i += 7) {
+      for (let j = 0; j < BETA_ROWS; j += 7) {
+        const h00 = grid[j * STRIDE + i], h10 = grid[j * STRIDE + i + 1];
+        const h01 = grid[(j + 1) * STRIDE + i], h11 = grid[(j + 1) * STRIDE + i + 1];
+        for (const [tx, tz] of [[0.31, 0.57], [0.73, 0.19], [0.5, 0.5], [0.9, 0.9]] as const) {
+          const plane = tx + tz <= 1
+            ? h00 + (h10 - h00) * tx + (h01 - h00) * tz
+            : (h10 + h01 - h11) + (h11 - h01) * tx + (h11 - h10) * tz;
+          const x = betaNodeX(i) + tx * 1.25;
+          const z = betaNodeZ(j) + tz * 1.25;
+          expect(Math.abs(heightAt(x, z) - plane)).toBeLessThan(1e-4);
+        }
+      }
+    }
+  }, 120000);
 });
 
-describe('physics and mesh consume the same field', () => {
-  it('the Rapier heightfield heights ARE the field nodes (in Rapier layout)', () => {
-    const hf = buildRapierHeightfield((x, z) => heightAt(x, z));
-    const f = groundFieldHeights()!;
-    expect(hf.heights.length).toBe(f.length);
-    expect(hf.nsubdivx).toBe(GROUND_ROWS);
-    expect(hf.nsubdivz).toBe(GROUND_COLS);
-    for (let i = 0; i <= GROUND_COLS; i += 41) {
-      for (let j = 0; j <= GROUND_ROWS; j += 29) {
-        expect(hf.heights[i * (GROUND_ROWS + 1) + j]).toBeCloseTo(f[j * (GROUND_COLS + 1) + i], 4);
+describe('the built world renders the grid', () => {
+  it('every terrain chunk in a live World carries grid nodes verbatim', () => {
+    const world = buildWorld();
+    const terrains: THREE.Mesh[] = [];
+    world.scene.traverse((o) => {
+      if ((o as THREE.Mesh).isMesh && o.name === 'terrain') terrains.push(o as THREE.Mesh);
+    });
+    expect(terrains.length).toBe(32); // 8x4 chunks over the grid
+    let checked = 0;
+    for (const mesh of terrains) {
+      const pos = mesh.geometry.getAttribute('position');
+      for (let v = 0; v < pos.count; v += 389) {
+        const x = pos.getX(v);
+        const y = pos.getY(v);
+        const z = pos.getZ(v);
+        const i = Math.round((x + 700) / 1.25);
+        const j = Math.round((z + 320) / 1.25);
+        expect(Math.abs(betaNodeX(i) - x)).toBeLessThan(1e-4);
+        expect(Math.abs(betaNodeZ(j) - z)).toBeLessThan(1e-4);
+        expect(y).toBe(grid[j * STRIDE + i]); // verbatim — not a resample
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThan(1000);
+  }, 120000);
+});
+
+describe('physics consumes the same grid', () => {
+  it('the heightfield the game hands CarPhysics IS the grid (Rapier layout)', () => {
+    const hf = buildBetaRapierHeightfield();
+    expect(hf.heights.length).toBe(grid.length);
+    expect(hf.nsubdivx).toBe(BETA_ROWS);
+    expect(hf.nsubdivz).toBe(BETA_COLS);
+    for (let ix = 0; ix <= BETA_COLS; ix += 41) {
+      for (let iz = 0; iz <= BETA_ROWS; iz += 29) {
+        expect(hf.heights[ix * (BETA_ROWS + 1) + iz]).toBe(grid[iz * STRIDE + ix]);
+      }
+    }
+    // and CarPhysics' generic builder, sampling the LIVE heightAt at
+    // the nodes, lands on the same nodes (fp-exact at nodes by the
+    // sampler's construction; 1e-4 leaves room for the index math)
+    const sampled = buildRapierHeightfield((x, z) => heightAt(x, z));
+    for (let ix = 0; ix <= BETA_COLS; ix += 113) {
+      for (let iz = 0; iz <= BETA_ROWS; iz += 113) {
+        expect(Math.abs(sampled.heights[ix * (BETA_ROWS + 1) + iz] - grid[iz * STRIDE + ix])).toBeLessThan(1e-4);
       }
     }
   });
@@ -85,56 +136,18 @@ describe('physics and mesh consume the same field', () => {
     expect(rayAt(100, -50)).toBeCloseTo(0, 3); // same x, other z row
     expect(rayAt(50, 0)).toBeCloseTo(3.5, 2); // slope midpoint toward the bump
   });
-
-  it('a terrain mesh built like buildTerrain (one vertex per node) sits on the field', () => {
-    const geo = new THREE.PlaneGeometry(1400, 640, GROUND_COLS, GROUND_ROWS);
-    geo.rotateX(-Math.PI / 2);
-    const pos = geo.attributes.position as THREE.BufferAttribute;
-    expect(pos.count).toBe((GROUND_COLS + 1) * (GROUND_ROWS + 1));
-    for (let k = 0; k < pos.count; k += 997) {
-      const x = pos.getX(k);
-      const z = pos.getZ(k);
-      // buildTerrain sets each vertex Y from heightAt(x, z)
-      expect(heightAt(x, z)).toBeCloseTo(sampleGroundField(x, z), 5);
-      expect(Math.abs(heightAt(x, z) - analyticHeightAt(x, z))).toBeLessThan(0.65);
-    }
-  });
-
-  it('feet == rendered triangles == physics triangles, point for point', () => {
-    // heightAt interpolates each field cell as two triangles split
-    // along h10-h01 — the diagonal BOTH the mesh's index buffer and
-    // Rapier's heightfield use (probed). So the sampled ground, the
-    // rendered ground, and the ridden ground are the same surface;
-    // assert the identity numerically across the island.
-    const f = groundFieldHeights()!;
-    const W = GROUND_COLS + 1;
-    for (let i = 0; i < GROUND_COLS; i += 3) {
-      for (let j = 0; j < GROUND_ROWS; j += 3) {
-        const h00 = f[j * W + i], h10 = f[j * W + i + 1];
-        const h01 = f[(j + 1) * W + i], h11 = f[(j + 1) * W + i + 1];
-        for (const [tx, tz] of [[0.31, 0.57], [0.73, 0.19], [0.5, 0.5], [0.9, 0.9]] as const) {
-          const planeB = tx + tz <= 1
-            ? h00 + (h10 - h00) * tx + (h01 - h00) * tz
-            : (h10 + h01 - h11) + (h11 - h01) * tx + (h11 - h10) * tz;
-          const x = nodeX(i) + tx * 2;
-          const z = nodeZ(j) + tz * 2;
-          expect(Math.abs(heightAt(x, z) - planeB)).toBeLessThan(1e-4);
-        }
-      }
-    }
-  }, 120000);
 });
 
 // ------------------------------------------------------------ end to end
 
-function fakeVehicle(defId: string, x: number, z: number): Vehicle {
+function fakeVehicle(defId: string, x: number, z: number, heading = 0): Vehicle {
   const def = VEHICLE_DEFS.find((d) => d.id === defId)!;
   const group = new THREE.Group();
   // VehicleManager.spawn places the car on groundY — do the same, or
   // the car spawns inside the hill and no suspension can save it
   group.position.set(x, heightAt(x, z), z);
   return {
-    uid: def.id, def, group, heading: 0, speed: 0, fuel: 61, condition: 1,
+    uid: def.id, def, group, heading, speed: 0, fuel: 61, condition: 1,
     wheelSpin: [], wheelPivots: [], steerVis: 0, wheelSpinAngle: 0,
     suspension: [0.32, 0.32, 0.32, 0.32], suspRest: 0.32, bobT: 0, steerAngle: 0, wheelR: 0.343,
     storage: [], upgrades: [], tiresFlat: 0,
@@ -142,16 +155,22 @@ function fakeVehicle(defId: string, x: number, z: number): Vehicle {
   } as unknown as Vehicle;
 }
 
+async function livePhysics(): Promise<CarPhysics> {
+  // exactly Game's construction: live sampler + the verbatim beta field
+  return CarPhysics.create((x, z) => heightAt(x, z), buildBetaRapierHeightfield());
+}
+
 describe('the rigid body rides the same ground the player sees', () => {
   const sites: [string, number, number][] = [
-    ['airbase plateau edge', 332, -108],
-    ['dune ridge (the old 1.17 m divergence point)', 22, -174],
-    ['shoreline', 0, 296],
-    ['open dune field', -331, 161],
+    ['airbase pad (GT500 mark)', 475, -137],
+    ['lighthouse grounds (player spawn)', 596, -192],
+    ['Tern Rock town pad', 392, 168],
+    ['Refuge pad', -30, -10],
+    ['NC-12 corridor, Citadel leg', 282, -214],
   ];
   for (const [name, x, z] of sites) {
-    it(`settles on the field at ${name}`, async () => {
-      const cp = await CarPhysics.create((gx, gz) => heightAt(gx, gz));
+    it(`settles on the grid at ${name}`, async () => {
+      const cp = await livePhysics();
       const v = fakeVehicle('gt500', x, z);
       cp.spawnCar(v, [], 0);
       for (let i = 0; i < 240; i++) {
@@ -172,6 +191,30 @@ describe('the rigid body rides the same ground the player sees', () => {
         expect(s).toBeGreaterThan(0.0);
         expect(s).toBeLessThan(0.75);
       }
-    }, 60000);
+    }, 90000);
   }
+
+  it('drives the NC-12 Citadel leg in ground contact the whole way', async () => {
+    const cp = await livePhysics();
+    const sx = 268;
+    const sz = -252;
+    const heading = Math.atan2(296 - sx, -176 - sz);
+    const v = fakeVehicle('mustang', sx, sz, heading);
+    cp.spawnCar(v, [], 0);
+    const dt = 1 / 60;
+    let worstGap = 0;
+    for (let i = 0; i < 60 * 7.5; i++) {
+      const throttle = THREE.MathUtils.clamp((10 - cp.speed) * 0.25, 0, 0.7);
+      cp.step(dt, { throttle, steer: 0, handbrake: false, hasFuel: true }, v, (gx, gz) => heightAt(gx, gz));
+      if (i % 10 === 0) {
+        const gap = Math.abs(v.group.position.y - heightAt(v.group.position.x, v.group.position.z));
+        worstGap = Math.max(worstGap, gap);
+      }
+    }
+    const along = (v.group.position.x - sx) * Math.sin(heading) + (v.group.position.z - sz) * Math.cos(heading);
+    expect(along).toBeGreaterThan(45); // traveled the leg
+    // the body plane rides the suspension datum over the sampler —
+    // never sunk into the grid, never floating above it
+    expect(worstGap).toBeLessThan(0.6);
+  }, 90000);
 });

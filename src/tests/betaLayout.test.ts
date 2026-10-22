@@ -1,5 +1,4 @@
 import { describe, it, expect } from 'vitest';
-import { POI_DEFS } from '../game/World';
 import {
   BETA_SECTORS, BETA_EXTRA_PADS, BETA_ROADS, BETA_SOUND_CHANNEL,
   BETA_CHANNEL_DEPTH, BETA_DAYMARKERS, BETA_FLEET_HOMES, BETA_PLAYER_SPAWN,
@@ -40,12 +39,20 @@ const roadDist = (roadId: string, x: number, z: number): number => {
 };
 
 describe('POI census — nothing dropped, nothing doubled', () => {
-  it('every POI_DEFS id appears exactly once', () => {
+  it('the placement census is exactly the shipped POI set, each id once', () => {
+    // MAP INTEGRATION (2026-10-21): BETA_POI_PLACEMENTS is now the
+    // POI source of truth (World.POI_DEFS is deleted with the old
+    // map), so the census is pinned as an explicit set: the 19 POI
+    // ids the game shipped with + the claim-only 'military_base'.
+    const census = [
+      'shore_camp', 'marina', 'jonah_camp', 'wreck', 'town', 'forest_cache',
+      'relay_station', 'relay_switch', 'dune_cache', 'lighthouse_base',
+      'lighthouse_top', 'airbase', 'carrier', 'tollgate', 'raider_fort',
+      'barn', 'warehouse', 'gas_station', 'strip_mall', 'military_base',
+    ];
     const placed = BETA_POI_PLACEMENTS.map((p) => p.poiId);
     expect(new Set(placed).size).toBe(placed.length);
-    for (const def of POI_DEFS) {
-      expect(placed.filter((id) => id === def.id)).toHaveLength(1);
-    }
+    expect(new Set(placed)).toEqual(new Set(census));
   });
 
   it("the claim-only id 'military_base' is placed once, on the airbase", () => {

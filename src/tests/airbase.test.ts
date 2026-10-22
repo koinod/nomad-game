@@ -6,11 +6,11 @@
 // fleet's spawns derive from marked pads.
 //
 // The airbase is a PORTABLE kit: everything below runs off the site
-// data (airbaseSite.ts), sited on the old plateau as the demonstration
-// placement. The Beta Island map wave re-sites AIRBASE_SITE in one
-// move; these assertions are written against the site transform, not
-// hard-coded world numbers (the few world numbers asserted are the
-// standing contracts: the plateau grade and the Seahawk pad).
+// data (airbaseSite.ts), sited on the Beta Island airbase sector pad
+// (the map integration's one-edit re-site, 2026-10-21). These
+// assertions are written against the site transform, not hard-coded
+// world numbers (the few world numbers asserted are the standing
+// contracts: the sector pad grade and the Seahawk pad).
 
 import { describe, expect, it } from 'vitest';
 import { buildWorld, expectGate } from './buildings.test';
@@ -20,7 +20,12 @@ import {
   AIRBASE_PADS, AIRBASE_SITE, padById, padWorld,
 } from '../game/airbaseSite';
 import { auditDaylight, type QaFailure } from '../game/kitQa';
-import { heightAt, AIRBASE_CENTER, AIRBASE_GRADE } from '../game/World';
+import { heightAt } from '../game/World';
+import { BETA_POI_PLACEMENTS, betaSector } from '../data/betaLayout';
+
+/** The airbase sector pad's surveyed grade (betaLayout — the source
+ *  of truth since the map integration, 2026-10-21). */
+const AIRBASE_GRADE = betaSector('airbase').padY;
 import { SEAHAWK_PAD, VEHICLE_DEFS, VEHICLE_SPAWNS } from '../game/Vehicles';
 import { NPC_PLACEMENTS } from '../data/worldWiring';
 
@@ -35,7 +40,7 @@ function expectDaylight(buildings: Parameters<typeof auditDaylight>[0][]): void 
   expect(out, `daylight failures:\n${summary}`).toEqual([]);
 }
 
-describe('revamped airbase (portable kit, demonstration siting)', () => {
+describe('revamped airbase (portable kit, Beta siting)', () => {
   const world = buildWorld();
   const af = buildAirfield((x, z) => heightAt(x, z));
   const site = buildAirbaseSite((x, z) => heightAt(x, z));
@@ -56,13 +61,14 @@ describe('revamped airbase (portable kit, demonstration siting)', () => {
     expectDaylight(af.results.map((r) => r.building));
   });
 
-  it('the demonstration site IS the airbase POI on the plateau', () => {
-    expect(AIRBASE_SITE.origin).toEqual(AIRBASE_CENTER);
+  it('the site IS the Beta airbase POI, on its sector pad', () => {
+    const placement = BETA_POI_PLACEMENTS.find((p) => p.poiId === 'airbase')!;
+    expect(AIRBASE_SITE.origin).toEqual([placement.x, placement.z]);
     expect(world.poiPositions['airbase']).toEqual(AIRBASE_SITE.origin);
   });
 
-  it('every footprint sits on the plateau at grade', () => {
-    const [cx, cz] = AIRBASE_CENTER;
+  it('every footprint sits on the sector pad at grade', () => {
+    const [cx, cz] = AIRBASE_SITE.origin;
     for (const r of af.results) {
       const b = r.building;
       for (const [px, pz] of [
@@ -193,7 +199,7 @@ describe('revamped airbase (portable kit, demonstration siting)', () => {
 describe('fleet respawn — the pads (Ian, 2026-10-21)', () => {
   const world = buildWorld();
   void world;
-  const poi = AIRBASE_CENTER;
+  const poi = AIRBASE_SITE.origin;
 
   it('every pad sits on the grade, on the apron, clear of every building', () => {
     const af = buildAirfield((x, z) => heightAt(x, z));

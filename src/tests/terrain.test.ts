@@ -1,37 +1,43 @@
-import { describe, it, expect, beforeAll } from 'vitest';
-import { initTerrainField, heightAt, slopeAt, AIRBASE_CENTER, AIRBASE_GRADE, setTerrainPads } from '../game/World';
+import { describe, it, expect } from 'vitest';
+import { heightAt, slopeAt } from '../game/World';
+import { AIRBASE_SITE } from '../game/airbaseSite';
+import { betaSector } from '../data/betaLayout';
 
-// Environment wave topography: the surveyed ground must NOT move (the
-// airfield rebuild and every pad sit on it), while open ground gains
-// relief and grain.
-describe('terrain topography', () => {
-  beforeAll(() => {
-    initTerrainField(1337);
-    setTerrainPads([]);
-  });
-
-  it('the airbase plateau stays at grade in its core', () => {
-    const [cx, cz] = AIRBASE_CENTER;
-    expect(Math.abs(heightAt(cx, cz) - AIRBASE_GRADE)).toBeLessThan(0.05);
+// Beta Island terrain facts (map integration, 2026-10-21 — this file
+// pinned the OLD analytic island's topography; the deliberate changes
+// are the terrain itself: surveyed ground is now the layout's sector
+// pads read off the one authored grid, and open ground is the grid's
+// smooth authored landform, not seeded noise).
+describe('beta terrain topography', () => {
+  it('the airbase sector pad stays at grade in its core', () => {
+    const [cx, cz] = AIRBASE_SITE.origin;
+    expect(Math.abs(heightAt(cx, cz) - betaSector('airbase').padY)).toBeLessThan(0.05);
     expect(slopeAt(cx, cz)).toBeLessThan(0.02);
   });
 
-  it('open inland ground has micro grain (not billiard flat)', () => {
-    // sample a line through open dune country; heights must vary at
-    // meter scale by more than a smooth swell would allow
+  it('open dune country has real relief at driving scale', () => {
+    // a line through the SE dune field (raider_fort country): the
+    // authored landform rolls — over a meter of range across 90 m,
+    // with meter-scale steps a suspension can feel
     const hs: number[] = [];
-    for (let x = -320; x <= -260; x += 2) hs.push(heightAt(x, 150));
+    for (let x = 470; x <= 560; x += 2) hs.push(heightAt(x, 105));
+    const range = Math.max(...hs) - Math.min(...hs);
+    expect(range).toBeGreaterThan(0.8);
     const diffs = hs.slice(1).map((h, i) => Math.abs(h - hs[i]));
     const jitter = diffs.reduce((a, b) => a + b, 0) / diffs.length;
-    expect(jitter).toBeGreaterThan(0.005);
+    expect(jitter).toBeGreaterThan(0.01);
   });
 
-  it('the shoreline still meets the water (heights fall off)', () => {
-    expect(heightAt(0, 300)).toBeLessThan(0.6);
-    expect(heightAt(0, 318)).toBeLessThan(0.2);
+  it('the shorelines still meet the water (heights fall off)', () => {
+    // Atlantic side: dry sand at x 600, deep water by x 660
+    expect(heightAt(600, 40)).toBeGreaterThan(0.5);
+    expect(heightAt(660, 40)).toBeLessThan(-5);
+    // the south sound: marsh edge at z 240, open water by z 300
+    expect(heightAt(0, 240)).toBeGreaterThan(0);
+    expect(heightAt(0, 300)).toBeLessThan(-1);
   });
 
-  it('slope reads ~0 on flat pads and > 0 on dune ridges', () => {
+  it('slope reads ~0 on flat pads and > 0 on the massif faces', () => {
     let maxSlope = 0;
     for (let x = -500; x < 500; x += 25) {
       for (let z = -260; z < 260; z += 26) {

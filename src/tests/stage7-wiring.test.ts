@@ -12,7 +12,7 @@ import { NPC_DIALOGUES } from '../narrative/dialogue';
 import { NPC_LOOKS } from '../data/survivors';
 import { TRADERS } from '../data/traders';
 import { buildContainerDefs } from '../game/Interact';
-import { POI_DEFS } from '../game/World';
+import { BETA_POI_PLACEMENTS } from '../data/betaLayout';
 import { MAP_MARKERS, territoryAt } from '../data/territory';
 import { STARTING_REP } from '../data/factions';
 import { prefabDef } from '../data/base';
@@ -71,21 +71,25 @@ describe('stage 7 item 10 — legacy armor', () => {
 });
 
 describe('stage 7 item 1 — W1 POIs + W4 markers', () => {
-  it('POI_DEFS carries Lane 9\u2019s six sites at the W1 coordinates', () => {
+  it('BETA_POI_PLACEMENTS carries Lane 9\u2019s six sites at their Beta coordinates', () => {
+    // DELIBERATE UPDATE (map integration, 2026-10-21): the W1 sites'
+    // old-map coordinates (World.POI_DEFS, x + zGuess) are retired
+    // with the old terrain; the placements below are the Beta Island
+    // spec positions — the new source of truth.
     const want: Record<string, [number, number]> = {
-      tollgate: [672, 60], raider_fort: [500, 150], barn: [-40, 120],
-      warehouse: [140, -90], gas_station: [-160, -30], strip_mall: [-60, -120],
+      tollgate: [268, -288], raider_fort: [508, 84], barn: [-118, 38],
+      warehouse: [236, -208], gas_station: [252, 112], strip_mall: [348, 200],
     };
     for (const [id, [x, z]] of Object.entries(want)) {
-      const def = POI_DEFS.find((p) => p.id === id);
+      const def = BETA_POI_PLACEMENTS.find((p) => p.poiId === id);
       expect(def, id).toBeDefined();
       expect(def!.x).toBe(x);
-      expect(def!.zGuess).toBe(z);
+      expect(def!.z).toBe(z);
     }
   });
 
   it('every map marker resolves to a real POI, and territory knows its sites', () => {
-    const poiIds = new Set(POI_DEFS.map((p) => p.id));
+    const poiIds = new Set(BETA_POI_PLACEMENTS.map((p) => p.poiId));
     for (const m of MAP_MARKERS) {
       expect(m.poiId, m.id).toBeDefined();
       expect(poiIds.has(m.poiId!), m.id).toBe(true);
@@ -116,11 +120,12 @@ describe('stage 7 item 2 — W2 NPC placements', () => {
     }
   });
 
-  it('every placement anchor resolves: poiId, the tollgate, or an approx', () => {
-    const poiIds = new Set(POI_DEFS.map((d) => d.id));
+  it('every placement anchor resolves: poiId or a free-standing approx', () => {
+    // (map integration, 2026-10-21: wraith + the_accountant are
+    // POI-anchored in the data now — no special cases remain)
+    const poiIds = new Set(BETA_POI_PLACEMENTS.map((d) => d.poiId));
     for (const p of NPC_PLACEMENTS) {
       const ok = (p.poiId !== undefined && poiIds.has(p.poiId))
-        || (p.key === 'wraith' && poiIds.has('tollgate'))
         || p.approx !== undefined;
       expect(ok, p.key).toBe(true);
     }
@@ -129,7 +134,7 @@ describe('stage 7 item 2 — W2 NPC placements', () => {
 
 describe('stage 7 item 3 — W5 road graph', () => {
   it('every road-mode edge resolves to real POIs; the doors stay off-island', () => {
-    const poiIds = new Set(POI_DEFS.map((p) => p.id));
+    const poiIds = new Set(BETA_POI_PLACEMENTS.map((p) => p.poiId));
     for (const e of ROAD_GRAPH.edges) {
       if (e.mode === 'road') {
         expect(poiIds.has(e.from), `${e.from}->${e.to}`).toBe(true);
