@@ -17,6 +17,8 @@ import { sfx } from '../systems/audio';
 import type { SiegeWaveRequest } from '../systems/baseClaims';
 import { useGameStore } from '../store/gameStore';
 import { DIFFICULTIES } from '../store/types';
+import { input } from './input';
+import { HUSK_HIT_SHOVE_M, knockbackTakenMult, loseSightSec } from '../systems/perkEffects';
 
 export type HuskKind =
   | 'shambler' | 'stalker' | 'armored'
@@ -607,7 +609,7 @@ export class Husk {
       if (this.state !== 'attack') this.state = 'hunt';
     } else if (this.state === 'hunt' || this.state === 'attack') {
       this.lostSightT += dt;
-      if (this.lostSightT > 6) {
+      if (this.lostSightT > loseSightSec(ctx.playerPerks ?? [])) {
         this.state = 'investigate';
         this.target.set(pp.x, 0, pp.z);
         this.stateT = 0;
@@ -798,8 +800,25 @@ export class Husk {
         if (this.attackCd <= 0) {
           this.attackCd = 1.4;
           const s = useGameStore.getState();
-          s.damagePlayer(st.damage * DIFFICULTIES[s.difficulty].huskDamage, 'husk');
+          // br_juggernaut: a brute's hit BREAKS a normal block — only
+          // the capstone holds a guard against it (damagePlayer reads
+          // the flag; every other attacker blocks normally).
+          s.damagePlayer(
+            st.damage * DIFFICULTIES[s.difficulty].huskDamage,
+            'husk',
+            this.kind === 'brute' ? { blockBreak: true } : undefined,
+          );
           sfx.play('hurt', { volume: 0.7 });
+          // Order #5 knockback: an unblocked hit shoves the player —
+          // the system br_unstoppable halves. pp IS the player's live
+          // position (Game passes player.pos), so the offset persists
+          // through the controller's velocity integration.
+          if (!input.blocking) {
+            const kb = HUSK_HIT_SHOVE_M * knockbackTakenMult(ctx.playerPerks ?? []);
+            if (kb > 0 && distP > 0.01) {
+              pp.addScaledVector(_v2.copy(toPlayer).normalize(), kb);
+            }
+          }
           // lunge visual
           this.knock.addScaledVector(toPlayer.normalize(), 1.2);
         }
@@ -1198,7 +1217,13 @@ export class HuskManager {
   private resolveShriek(h: Husk, ctx: HuskCtx): void {
     const p = h.group.position;
     const radius = shriekAlertRadius(ctx.isNight);
-    _v1.set(ctx.playerPos.x, 0, ctx.playerPos.z);
+    // gh_coldblood: the horde-call MISSES the player — the horde
+    // converges on the screamer itself instead of the victim's spot.
+    if ((ctx.playerPerks ?? []).includes('gh_coldblood')) {
+      _v1.set(p.x, 0, p.z);
+    } else {
+      _v1.set(ctx.playerPos.x, 0, ctx.playerPos.z);
+    }
     for (const o of this.husks) {
       if (o === h || !o.alive) continue;
       const d = Math.hypot(o.group.position.x - p.x, o.group.position.z - p.z);

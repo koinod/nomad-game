@@ -13,6 +13,7 @@ import {
   applyWear, armorMult, conditionDamageMult, rollJam, WEAR_PER_SHOT, WEAR_PER_SWING,
 } from './gunMath';
 import { AMBIENT_SPECIALS } from './huskMath';
+import { cleaveBonus, meleeDamageMult } from '../systems/perkEffects';
 
 /** Special-class husks (Lane 8 §6.1: their kills pay the special_kill XP
  *  event instead of the standard melee/ranged award). */
@@ -146,19 +147,16 @@ export function tryMelee(h: CombatHooks): MeleeResult {
   sfx.play('swing', { volume: 0.8 });
   h.emitNoise(h.playerPos.x, h.playerPos.z, noiseClassRadius('melee_swing'));
 
+  const storeState = useGameStore.getState();
+  const perks = storeState.perks;
   const targets = h.husks.meleeSweep(
     h.playerPos,
     h.playerYaw,
     stats.range,
     stats.halfArcRad,
-    stats.cleave + (useGameStore.getState().perks.includes('br_cleaver') ? 1 : 0),
+    stats.cleave + cleaveBonus(perks),
   );
-  const perks = useGameStore.getState().perks;
-  const dmgMult =
-    (perks.includes('br_heavy') ? 1.15 : 1) *
-    (perks.includes('br_juggernaut') && useGameStore.getState().hp < useGameStore.getState().maxHp / 2 ? 1.3 : 1);
-  const execMult = perks.includes('br_executioner') ? 1.5 : 1;
-  const backstab = perks.includes('gh_backstab');
+  const hpFrac = storeState.maxHp > 0 ? storeState.hp / storeState.maxHp : 1;
   let kills = 0;
   let specialKills = 0;
   for (const t of targets) {
@@ -169,14 +167,17 @@ export function tryMelee(h: CombatHooks): MeleeResult {
     ).normalize();
     // edge hits do less — rewards centering the swing
     const falloff = t.centered ? 1 : 0.7;
-    let mult = dmgMult * falloff;
-    if (t.husk.stunT > 0) mult *= execMult; // Executioner: the helpless take double
-    if (backstab) {
-      const fwd = new THREE.Vector3(Math.sin(t.husk.group.rotation.y), 0, Math.cos(t.husk.group.rotation.y));
-      const behind = fwd.dot(dir) > 0.5; // player is behind the husk's facing
-      const unaware = t.husk.state === 'idle' || t.husk.state === 'wander' || t.husk.state === 'investigate';
-      if (behind || unaware) mult *= 3;
-    }
+    // every melee perk reads through the one derivation (perkEffects):
+    // Heavy Swings, Juggernaut low-hp, Executioner vs the stunned,
+    // Backstab from behind / against the unaware.
+    const fwd = new THREE.Vector3(Math.sin(t.husk.group.rotation.y), 0, Math.cos(t.husk.group.rotation.y));
+    const behind = fwd.dot(dir) > 0.5; // player is behind the husk's facing
+    const unaware = t.husk.state === 'idle' || t.husk.state === 'wander' || t.husk.state === 'investigate';
+    const mult = falloff * meleeDamageMult(perks, {
+      hpFrac,
+      targetStunned: t.husk.stunT > 0,
+      behindOrUnaware: behind || unaware,
+    });
     // plate carriers eat light melee too: only a heavy head of steel
     // (25+ base damage) counts as pen 1 against the armored kind
     const meleePen = stats.damage >= 25 ? 1 : 0;

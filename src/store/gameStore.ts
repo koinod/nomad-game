@@ -36,6 +36,7 @@ import {
 } from './containers';
 import { arrangeItems as arrangeGridItems } from './gridUtils';
 import { applyXp, canBuyPerk, XP_EVENTS } from '../systems/skills';
+import { blockThroughFactor } from '../systems/perkEffects';
 import { deleteSaveSlot, listSaveSlots, loadGameFromSlot, saveGameToSlot } from '../systems/save';
 import { sfx } from '../systems/audio';
 import { getGame } from '../game/instance';
@@ -141,6 +142,7 @@ interface GameState {
   skills: Record<import('../data/skills').SkillId, { level: number; xp: number }>;
   perkPoints: number;
   perks: string[];
+  secondWindDay: number;
   addSkillXp: (skill: import('../data/skills').SkillId, amt: number) => void;
   buyPerk: (perkId: string) => void;
   hasPerk: (perkId: string) => boolean;
@@ -253,7 +255,7 @@ interface GameState {
   setPaused: (p: boolean) => void;
 
   syncPlayer: (pos: [number, number, number], hp: number, stamina: number) => void;
-  damagePlayer: (amount: number, cause: string) => void;
+  damagePlayer: (amount: number, cause: string, opts?: { blockBreak?: boolean }) => void;
   vehicle: {
     uid: string; name: string; speedKmh: number; fuelPct: number; condPct: number;
     storageUsedKg: number; storageCapKg: number; tiresFlat: number; upgrades: string[];
@@ -706,6 +708,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         },
         perkPoints: 0,
         perks: [],
+        secondWindDay: -1,
         survivors: [],
         base: null,
         dispatches: [], journal: [], scouted: {}, baseQueue: [],
@@ -875,7 +878,7 @@ export const useGameStore = create<GameState>()((set, get) => {
       return false;
     },
 
-    damagePlayer: (amount, cause) => {
+    damagePlayer: (amount, cause, opts) => {
       const s = get();
       if (s.dead || s.screen !== 'game') return;
       const mult = DIFFICULTIES[s.difficulty].playerDamageTaken;
@@ -884,9 +887,13 @@ export const useGameStore = create<GameState>()((set, get) => {
       if (cause === 'husk' && s.vehicle) {
         dealt *= 0.3;
       }
-      // blocking with a melee weapon out: 75% reduction on husk hits
+      // blocking with a melee weapon out: 75% reduction on husk hits —
+      // br_blocker deepens it to 85% (blockThroughFactor). A brute's
+      // hit (blockBreak) ignores the guard entirely unless the
+      // br_juggernaut capstone holds it.
       if (cause === 'husk' && input.blocking) {
-        dealt *= 0.25;
+        const broken = opts?.blockBreak && !s.perks.includes('br_juggernaut');
+        if (!broken) dealt *= blockThroughFactor(s.perks);
       }
       // armor carried still protects (plates in a vest you own) —
       // inventory v2: counted across the whole carried forest
@@ -900,6 +907,13 @@ export const useGameStore = create<GameState>()((set, get) => {
         dealt *= Math.max(0.5, 1 - Math.min(prot, 0.5));
       }
       const hp = Math.max(0, s.hp - dealt);
+      // br_secondwind: once per day, a lethal hit leaves you at 1 HP.
+      if (hp <= 0 && s.perks.includes('br_secondwind') && (s.secondWindDay ?? -1) !== s.daysElapsed) {
+        set({ hp: 1, secondWindDay: s.daysElapsed });
+        s.addToast('Second wind — you refuse to fall. (Once today.)');
+        sfx.play('quest', { volume: 0.7 });
+        return;
+      }
       set({ hp });
       if (hp <= 0) s.die(cause);
     },
@@ -939,6 +953,11 @@ export const useGameStore = create<GameState>()((set, get) => {
         set({ journal: [entry, ...s.journal].slice(0, 60) });
       }
       set({ daysElapsed: s.daysElapsed + 1, dayStats: { kills: 0, crafts: 0, pickups: 0 } });
+      // Order #5 day_survived: survival time itself teaches scavenging —
+      // one award per day rollover (the §6.1 table has no such row; this
+      // is the lane's documented addition, see skills-audit.md).
+      const ev = XP_EVENTS.day_survived;
+      get().addSkillXp(ev.skill, ev.xp);
     },
 
     addItem: (itemId, qty, quiet, opts) => {
@@ -1542,6 +1561,7 @@ export const useGameStore = create<GameState>()((set, get) => {
     },
     perkPoints: 0,
     perks: [],
+    secondWindDay: -1,
     addSkillXp: (skill, amt) => {
       // Lane 8 engine adoption: level math lives in systems/skills.applyXp
       // (semantically identical to the old inline copy — cap 10, overflow
@@ -2285,6 +2305,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         skills: s.skills,
         perkPoints: s.perkPoints,
         perks: s.perks,
+        secondWindDay: s.secondWindDay ?? -1,
         survivors: s.survivors,
         base: s.base,
         vehicles: eng ? eng.getVehicleStates() : [],
@@ -2352,6 +2373,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         skills: snap.skills as GameState['skills'],
         perkPoints: snap.perkPoints,
         perks: snap.perks,
+        secondWindDay: snap.secondWindDay ?? -1,
         survivors: snap.survivors,
         base: cleanBase,
         // wave 3 fields: absent on older v3 saves — default them here.
