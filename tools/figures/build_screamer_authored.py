@@ -109,13 +109,26 @@ head = L.build_head(SKULL_Y, HS, mats, gaunt=0.6, elongate=0.55, mouth=0.85,
 
 # --------------------------------------------------------------- arms ----
 arm_l, hand_l, sleeve_l = L.build_arm(-1, -ARM_X, HIP_Y + SHOULDER_LOCAL, ARM_S, mats,
-                                      sleeve_len=0.42, rad=0.78, finger_len=1.35)
+                                      sleeve_len=0.42, rad=0.78, finger_len=1.35, elbow=0.22)
 arm_r, hand_r, sleeve_r = L.build_arm(1, ARM_X, HIP_Y + SHOULDER_LOCAL, ARM_S, mats,
-                                      sleeve_len=0.42, rad=0.78, finger_len=1.35)
+                                      sleeve_len=0.42, rad=0.78, finger_len=1.35, elbow=0.22)
 
 # --------------------------------------------------------------- legs ----
-leg_l, pants_l, _ = L.build_leg(-1, -HIP_X, HIP_Y, LEG_S, mats, pants_len=0.55, boot=False, rad=0.85)
-leg_r, pants_r, _ = L.build_leg(1, HIP_X, HIP_Y, LEG_S, mats, pants_len=0.55, boot=False, rad=0.85)
+leg_l, pants_l, _ = L.build_leg(-1, -HIP_X, HIP_Y, LEG_S, mats, pants_len=0.55, boot=False, rad=0.85, knee=0.12)
+leg_r, pants_r, _ = L.build_leg(1, HIP_X, HIP_Y, LEG_S, mats, pants_len=0.55, boot=False, rad=0.85, knee=0.12)
+
+# Joint caps (continuity pass): the shirt covers the shoulder line;
+# hips ride in the pants material.
+shoulder_caps = L.joint_caps("shoulderCaps", [
+    ((-ARM_X, 0, HIP_Y + SHOULDER_LOCAL), (0.096, 0.094, 0.098), ARM_S * 0.78),
+    (( ARM_X, 0, HIP_Y + SHOULDER_LOCAL), (0.096, 0.094, 0.098), ARM_S * 0.78),
+], mats['shirt'])
+hip_caps = L.joint_caps("hipCaps", [
+    ((-HIP_X, 0, HIP_Y), (0.110, 0.104, 0.097), LEG_S * 0.85),
+    (( HIP_X, 0, HIP_Y), (0.110, 0.104, 0.097), LEG_S * 0.85),
+], mats['pants'])
+L.paint_grime(shoulder_caps)
+L.paint_grime(hip_caps)
 
 # -------------------------------------------------------------- grime ----
 L.paint_grime(torso_skin, stains=[
@@ -139,7 +152,7 @@ for p in (pants_l, pants_r): L.paint_grime(p)
 
 # ------------------------------------------------------------ assembly ---
 parts = {
-    'torso': [torso_skin, torso_mesh, pants_pelvis] + ribs,
+    'torso': [torso_skin, torso_mesh, pants_pelvis, shoulder_caps, hip_caps] + ribs,
     'head': [head['skull'], head['neck'], head['eyes']],
     'jaw': [head['jaw']],
     'armL': [arm_l, hand_l, sleeve_l],
