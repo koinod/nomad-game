@@ -32,6 +32,7 @@ import { captureVehicleSave, restoreVehicleFleet } from './saveMigration';
 import { sfx, ambience } from '../systems/audio';
 import { useCraftQueue } from '../systems/crafting';
 import { XP_EVENTS } from '../systems/skills';
+import { carryBonusKg, flashRadiusBonus, forcedEntryNoiseRadius, heavyShiftKg, searchDurationMult, searchNoiseRadius } from '../systems/perkEffects';
 import { isSpecialKind } from './Combat';
 import { computeVisibility } from './visibility';
 import { meterLevel, noiseClassRadius } from './noise';
@@ -89,7 +90,7 @@ export class Game {
   // hold-to-search state (container / corpse / safe); `alerted` tracks
   // whether any husk hunted/attacked during the search — Lane 8's
   // search_undetected award only pays when it stays false
-  private searching: { id: string; label: string; t: number; dur: number; x: number; z: number; hp: number; alerted: boolean } | null = null;
+  private searching: { id: string; label: string; t: number; dur: number; x: number; z: number; hp: number; alerted: boolean; forced?: boolean } | null = null;
   vehicles!: VehicleManager;
   private carPhysics: CarPhysics | null = null;
   private weather = new WeatherSystem({ seed: 987654321 });
@@ -881,10 +882,12 @@ export class Game {
       }
     }
 
-    // encumbrance gates sprint + slows movement
+    // encumbrance gates sprint + slows movement (Pack Mule: +8kg of
+    // limit, and the heavy tier starts 10kg later — perkEffects)
     const tier = encumbranceTier(
       totalWeightKg(s.inventory),
-      carryLimitKg(s.equipped, s.inventory, s.difficulty, s.perks.includes('sc_packmule') ? 8 : 0),
+      carryLimitKg(s.equipped, s.inventory, s.difficulty, carryBonusKg(s.perks)),
+      heavyShiftKg(s.perks),
     );
     const speedMul = tier === 'ok' ? 1 : tier === 'heavy' ? 0.75 : 0.55;
 
@@ -1142,6 +1145,21 @@ export class Game {
         if (q.t >= q.dur) {
           this.interact!.markSearched(q.id);
           const def = this.interact!.containerDef(q.id);
+          // Order #5 search noise: a completed search rustles at the
+          // radius the search perks shape (Light Fingers / Patient /
+          // Loot Ghost — playerCtx.emitNoise applies Soft Steps). A
+          // FORCED entry instead bangs the forced_entry class and
+          // marks the container so its alarm trip reports the smash.
+          if (q.forced) {
+            this.interact!.markForced(q.id);
+            playerCtx.emitNoise(
+              player.pos.x, player.pos.z,
+              forcedEntryNoiseRadius(s.perks, noiseClassRadius('forced_entry')),
+            );
+          } else {
+            const r = searchNoiseRadius(s.perks, !!def);
+            if (r > 0) playerCtx.emitNoise(player.pos.x, player.pos.z, r);
+          }
           if (def?.locked) {
             const lp = walkCarried(s.inventory).find((i) => i.itemId === 'lockpick');
             if (lp && !s.perks.includes('sc_locksmith')) {
@@ -1591,12 +1609,18 @@ export class Game {
     if (this.interact!.isSearched(near.id)) return false;
     const s = useGameStore.getState();
     const def = this.interact!.containerDef(near.id);
-    if (def?.locked && !s.inventory.some((i) => i.itemId === 'lockpick')) {
-      s.addToast('Locked. You need a lockpick.');
-      return true;
+    // Order #5 forced entry: a locked container with no pick anywhere
+    // in the carried forest can be SMASHED open — twice the time, and
+    // the forced_entry noise class (45m, halved by Locksmith) when it
+    // gives. (The pick check walks the forest: a pick nested in a pack
+    // counts, same as the completion path always assumed.)
+    const hasPick = walkCarried(s.inventory).some((i) => i.itemId === 'lockpick');
+    const forced = !!def?.locked && !hasPick;
+    if (forced) {
+      s.addToast('Locked, and no pick — forcing it. This will be loud.');
     }
     const baseDur = def?.searchTime ?? (near.kind === 'corpse' ? 1 : 2);
-    const dur = s.perks.includes('sc_fingers') ? baseDur * 0.75 : baseDur;
+    const dur = baseDur * searchDurationMult(s.perks) * (forced ? 2 : 1);
     this.searching = {
       id: near.id,
       label: near.label,
@@ -1606,6 +1630,7 @@ export class Game {
       z: this.player!.pos.z,
       hp: s.hp,
       alerted: (this.husks?.husks ?? []).some((h) => h.state === 'hunt' || h.state === 'attack'),
+      forced,
     };
     return true;
   }
@@ -1976,24 +2001,31 @@ export class Game {
     return { ...taken };
   }
 
-  applyRepair(uid: string, kind: 'tire' | 'engine' | 'battery' | 'scrap'): string {
+  /** Repair one vehicle system. `capFrac` is the condition ceiling for
+   *  this repair (Order #5 me_juryrig: field repairs cap at 0.6, 0.8
+   *  with the perk; the store passes 1 at a workshop/garage). */
+  applyRepair(uid: string, kind: 'tire' | 'engine' | 'battery' | 'scrap', capFrac = 1): string {
     const v = this.vehicles.byId(uid);
     if (!v) return 'Vehicle not found.';
+    const capped = (msg: string) =>
+      capFrac < 1 && v.condition >= capFrac - 1e-9
+        ? `${msg} (Field repair limit — a workshop can finish her.)`
+        : msg;
     if (kind === 'tire') {
       v.tiresFlat = Math.max(0, v.tiresFlat - 1);
-      v.condition = Math.min(1, v.condition + 0.03);
+      v.condition = Math.min(capFrac, v.condition + 0.03);
       return v.tiresFlat > 0 ? `One flat swapped — ${v.tiresFlat} to go.` : 'Fresh rubber all round. She rolls true again.';
     }
     if (kind === 'engine') {
-      v.condition = Math.min(1, v.condition + 0.35);
-      return 'Engine work done — timing, seals, the lot.';
+      v.condition = Math.min(capFrac, v.condition + 0.35);
+      return capped('Engine work done — timing, seals, the lot.');
     }
     if (kind === 'battery') {
-      v.condition = Math.min(1, v.condition + 0.25);
-      return 'Fresh battery in. She cranks strong.';
+      v.condition = Math.min(capFrac, v.condition + 0.25);
+      return capped('Fresh battery in. She cranks strong.');
     }
-    v.condition = Math.min(1, v.condition + 0.12);
-    return 'Patched with scrap. It holds.';
+    v.condition = Math.min(capFrac, v.condition + 0.12);
+    return capped('Patched with scrap. It holds.');
   }
 
   canTakeUpgrade(uid: string, upgradeId: string): boolean {
@@ -2133,7 +2165,8 @@ export class Game {
       return;
     }
     if (th.blind && !th.smoke) {
-      husks.stunInRadius(p.x, p.z, th.aoe, th.blind);
+      // gh_vanish: flashbangs blind in a +4m wider radius
+      husks.stunInRadius(p.x, p.z, th.aoe + flashRadiusBonus(s.perks), th.blind);
       const flash = new THREE.PointLight(0xffffff, 60, 24);
       flash.position.set(p.x, p.y + 1, p.z);
       this.scene!.add(flash);

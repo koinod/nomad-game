@@ -651,6 +651,14 @@ export const STATION_RECIPES: Record<string, FieldRecipe> = {
     resultId: 'carbine', resultQty: 1,
     skillReq: { skill: 'mechanics', level: 3 },
   },
+  r_gun_parts: {
+    // Order #5 / §6.2 me_masterfab capstone: a Master Fabricator mills
+    // gun_parts at any Weapons Bench. The PERK gate lives in
+    // RECIPE_META (systems/crafting) — enforced by checkCraft.
+    id: 'r_gun_parts', name: 'Gun parts (mill)', station: 'workbench',
+    components: [{ itemId: 'scrap', qty: 3 }, { itemId: 'wire', qty: 1 }],
+    resultId: 'gun_parts', resultQty: 1,
+  },
   r_reload_shells_t2: {
     // Lane 7's proposed T2 shell load, same component ladder as 9mm
     id: 'r_reload_shells_t2', name: 'Reload shells (components)', station: 'workbench',
@@ -1083,12 +1091,22 @@ export function weightedChance(entry: HuskLootEntry, biome: LootBiome): number {
 export function rollLoot(
   entries: HuskLootEntry[],
   rng: () => number,
-  opts?: { resourceMult?: number; biome?: LootBiome },
+  opts?: {
+    resourceMult?: number;
+    biome?: LootBiome;
+    /** Order #5: flat multiplier on every entry's chance (Keen Eye,
+     *  Night Harvest) — applied after the biome weighting. */
+    chanceMult?: number;
+    /** Order #5: per-entry multiplier (The Island Remembers pays its
+     *  bonus only on a table's rare entries). */
+    entryMult?: (entry: HuskLootEntry) => number;
+  },
 ): { itemId: string; qty: number }[] {
   const out: { itemId: string; qty: number }[] = [];
   const mult = opts?.resourceMult ?? 1;
   for (const e of entries) {
-    const chance = opts?.biome ? weightedChance(e, opts.biome) : e.chance;
+    const base = opts?.biome ? weightedChance(e, opts.biome) : e.chance;
+    const chance = Math.min(1, base * (opts?.chanceMult ?? 1) * (opts?.entryMult ? opts.entryMult(e) : 1));
     if (rng() > chance) continue;
     const qty = Math.max(1, Math.round((e.min + rng() * (e.max - e.min)) * mult));
     out.push({ itemId: e.id, qty });

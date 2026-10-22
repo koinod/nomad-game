@@ -35,7 +35,8 @@ import {
   type CarriedDest,
 } from './containers';
 import { arrangeItems as arrangeGridItems } from './gridUtils';
-import { applyXp, canBuyPerk, XP_EVENTS } from '../systems/skills';
+import { applyXp, canBuyPerk, meetsSkillReq, skillReqLabel, XP_EVENTS } from '../systems/skills';
+import { blockThroughFactor, carryBonusKg, disassemblyYields, fieldRepairCap, heavyShiftKg, modPartCost, vehicleRepairCost } from '../systems/perkEffects';
 import { deleteSaveSlot, listSaveSlots, loadGameFromSlot, saveGameToSlot } from '../systems/save';
 import { sfx } from '../systems/audio';
 import { getGame } from '../game/instance';
@@ -141,6 +142,7 @@ interface GameState {
   skills: Record<import('../data/skills').SkillId, { level: number; xp: number }>;
   perkPoints: number;
   perks: string[];
+  secondWindDay: number;
   addSkillXp: (skill: import('../data/skills').SkillId, amt: number) => void;
   buyPerk: (perkId: string) => void;
   hasPerk: (perkId: string) => boolean;
@@ -253,7 +255,7 @@ interface GameState {
   setPaused: (p: boolean) => void;
 
   syncPlayer: (pos: [number, number, number], hp: number, stamina: number) => void;
-  damagePlayer: (amount: number, cause: string) => void;
+  damagePlayer: (amount: number, cause: string, opts?: { blockBreak?: boolean }) => void;
   vehicle: {
     uid: string; name: string; speedKmh: number; fuelPct: number; condPct: number;
     storageUsedKg: number; storageCapKg: number; tiresFlat: number; upgrades: string[];
@@ -706,6 +708,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         },
         perkPoints: 0,
         perks: [],
+        secondWindDay: -1,
         survivors: [],
         base: null,
         dispatches: [], journal: [], scouted: {}, baseQueue: [],
@@ -789,8 +792,8 @@ export const useGameStore = create<GameState>()((set, get) => {
       // pack feasibility first (same gates addItem uses), so nothing vanishes
       const def = ITEMS[peek.itemId];
       if (!def) return;
-      const limit = carryLimitKg(s.equipped, s.inventory, s.difficulty, s.perks.includes('sc_packmule') ? 8 : 0);
-      if (encumbranceTier(totalWeightKg(s.inventory) + def.weight * peek.qty, limit) === 'immobile') {
+      const limit = carryLimitKg(s.equipped, s.inventory, s.difficulty, carryBonusKg(s.perks));
+      if (encumbranceTier(totalWeightKg(s.inventory) + def.weight * peek.qty, limit, heavyShiftKg(s.perks)) === 'immobile') {
         s.addToast('Too heavy — drop something first.');
         return;
       }
@@ -813,11 +816,13 @@ export const useGameStore = create<GameState>()((set, get) => {
       if (!row || row.dist > 9) { s.addToast('Get closer to the vehicle to work on it.'); return; }
       // garage bay discount: scrap patch costs 1 at your own base garage
       const atGarage = s.atWorkshop();
-      const cost: { itemId: string; qty: number } =
+      const baseCost: { itemId: string; qty: number } =
         kind === 'tire' ? { itemId: 'tire', qty: 1 }
         : kind === 'engine' ? { itemId: 'engine_part', qty: 1 }
         : kind === 'battery' ? { itemId: 'car_battery', qty: 1 }
         : { itemId: 'scrap', qty: atGarage ? 1 : 2 };
+      // me_grease: vehicle repairs cost 1 fewer part (min 1)
+      const cost = { ...baseCost, qty: vehicleRepairCost(baseCost.qty, s.perks) };
       if (kind === 'tire' && row.tiresFlat <= 0) { s.addToast('No flat tires on it.'); return; }
       if (kind !== 'tire' && row.condPct >= 99) { s.addToast('It\u2019s already in fine shape.'); return; }
       if (s.countItem(cost.itemId) < cost.qty) {
@@ -827,7 +832,10 @@ export const useGameStore = create<GameState>()((set, get) => {
       const it = walkCarried(s.inventory).find((i) => i.itemId === cost.itemId);
       if (!it || !s.removeItem(it.uid, cost.qty)) return;
       const condBefore = row.condPct;
-      const msg = eng.applyRepair(uid, kind);
+      // me_juryrig: field repairs (away from a workshop/garage) cap at
+      // 60% condition — 80% with Jury-Rig. At a workshop the cap is 1.
+      const cap = atGarage ? 1 : fieldRepairCap(s.perks);
+      const msg = eng.applyRepair(uid, kind, cap);
       // Lane 8 vehicle_repaired_full: a repair that tops the vehicle off
       // at 100% condition pays the driver award
       const condAfter = eng.getVehicleStates().find((v) => v.defId === uid)?.condition;
@@ -875,7 +883,7 @@ export const useGameStore = create<GameState>()((set, get) => {
       return false;
     },
 
-    damagePlayer: (amount, cause) => {
+    damagePlayer: (amount, cause, opts) => {
       const s = get();
       if (s.dead || s.screen !== 'game') return;
       const mult = DIFFICULTIES[s.difficulty].playerDamageTaken;
@@ -884,9 +892,13 @@ export const useGameStore = create<GameState>()((set, get) => {
       if (cause === 'husk' && s.vehicle) {
         dealt *= 0.3;
       }
-      // blocking with a melee weapon out: 75% reduction on husk hits
+      // blocking with a melee weapon out: 75% reduction on husk hits —
+      // br_blocker deepens it to 85% (blockThroughFactor). A brute's
+      // hit (blockBreak) ignores the guard entirely unless the
+      // br_juggernaut capstone holds it.
       if (cause === 'husk' && input.blocking) {
-        dealt *= 0.25;
+        const broken = opts?.blockBreak && !s.perks.includes('br_juggernaut');
+        if (!broken) dealt *= blockThroughFactor(s.perks);
       }
       // armor carried still protects (plates in a vest you own) —
       // inventory v2: counted across the whole carried forest
@@ -900,6 +912,13 @@ export const useGameStore = create<GameState>()((set, get) => {
         dealt *= Math.max(0.5, 1 - Math.min(prot, 0.5));
       }
       const hp = Math.max(0, s.hp - dealt);
+      // br_secondwind: once per day, a lethal hit leaves you at 1 HP.
+      if (hp <= 0 && s.perks.includes('br_secondwind') && (s.secondWindDay ?? -1) !== s.daysElapsed) {
+        set({ hp: 1, secondWindDay: s.daysElapsed });
+        s.addToast('Second wind — you refuse to fall. (Once today.)');
+        sfx.play('quest', { volume: 0.7 });
+        return;
+      }
       set({ hp });
       if (hp <= 0) s.die(cause);
     },
@@ -939,6 +958,11 @@ export const useGameStore = create<GameState>()((set, get) => {
         set({ journal: [entry, ...s.journal].slice(0, 60) });
       }
       set({ daysElapsed: s.daysElapsed + 1, dayStats: { kills: 0, crafts: 0, pickups: 0 } });
+      // Order #5 day_survived: survival time itself teaches scavenging —
+      // one award per day rollover (the §6.1 table has no such row; this
+      // is the lane's documented addition, see skills-audit.md).
+      const ev = XP_EVENTS.day_survived;
+      get().addSkillXp(ev.skill, ev.xp);
     },
 
     addItem: (itemId, qty, quiet, opts) => {
@@ -948,8 +972,8 @@ export const useGameStore = create<GameState>()((set, get) => {
       // weight gate: >160% of limit blocks pickup (unchanged rule;
       // the weight itself is the recursive forest weight now)
       const addedW = def.weight * qty;
-      const limit = carryLimitKg(s.equipped, s.inventory, s.difficulty, s.perks.includes('sc_packmule') ? 8 : 0);
-      if (encumbranceTier(totalWeightKg(s.inventory) + addedW, limit) === 'immobile') {
+      const limit = carryLimitKg(s.equipped, s.inventory, s.difficulty, carryBonusKg(s.perks));
+      if (encumbranceTier(totalWeightKg(s.inventory) + addedW, limit, heavyShiftKg(s.perks)) === 'immobile') {
         if (!quiet) s.addToast('Too heavy — drop something first.');
         return false;
       }
@@ -991,7 +1015,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         if (opts?.found && (def.category === 'weapon-ranged' || def.category === 'weapon-melee')) {
           fresh.condition = 35 + Math.floor(Math.random() * 51);
         }
-        const placed = addToCarried(inv, s.equipped, fresh);
+        const placed = addToCarried(inv, s.equipped, fresh, s.perks);
         if (!placed) {
           if (!quiet) s.addToast('No room — every grid is full.');
           break;
@@ -1081,7 +1105,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         }
         let placedInv: InvItem[] | null = null;
         for (const d of candidates) {
-          if (fitInDest(base, d, r2.removed, eq)) { placedInv = insertIntoDest(base, d, r2.removed, eq); break; }
+          if (fitInDest(base, d, r2.removed, eq, s.perks)) { placedInv = insertIntoDest(base, d, r2.removed, eq, s.perks); break; }
         }
         if (!placedInv) {
           s.addToast(`No room to swap the ${ITEMS[r2.removed.itemId]?.name ?? 'item'} out.`);
@@ -1176,7 +1200,9 @@ export const useGameStore = create<GameState>()((set, get) => {
       if ((w.loaded ?? 0) > 0 && def.ammoId) get().addItem(def.ammoId, w.loaded!, true);
       get().removeItem(uid, 1);
       const got: string[] = [];
-      for (const y of def.disassembly) {
+      // Order #5: Salvager (+1 first material) and Scrounger (+1 gun
+      // part) ride the one derivation — yields are computed, not verbatim.
+      for (const y of disassemblyYields(def.disassembly, s.perks)) {
         if (get().addItem(y.itemId, y.qty, true)) got.push(`${y.qty}× ${ITEMS[y.itemId]?.name ?? y.itemId}`);
       }
       s.addToast(`Stripped the ${def.name}: ${got.join(', ') || 'nothing salvageable'}.`);
@@ -1202,8 +1228,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         s.addToast(`The ${mdef.slot} mount is taken — detach the current one first.`);
         return;
       }
-      let cost = mdef.gunPartsCost;
-      if (s.perks.includes('me_gunsmith')) cost = Math.max(1, Math.ceil(cost * 0.5));
+      const cost = modPartCost(mdef.gunPartsCost, s.perks);
       if (s.countItem('gun_parts') < cost) {
         s.addToast(`Fitting costs ${cost} gun parts.`);
         return;
@@ -1238,7 +1263,12 @@ export const useGameStore = create<GameState>()((set, get) => {
         inventory: updateCarried(s.inventory, weaponUid, (i) => ({ ...i, mods: (i.mods ?? []).filter((x) => x !== modId) })),
       });
       s.addItem(modId, 1, true);
-      s.addToast(`Removed the ${MODS_ALL[modId]?.name ?? modId}.`);
+      // me_gunsmith ("detach returns the cost too" — the spec's
+      // deliberate double-dip): the fitting cost comes back in gun
+      // parts, computed by the same formula attach charges.
+      const refund = modPartCost(MODS_ALL[modId]?.gunPartsCost ?? 0, s.perks);
+      if (refund > 0) s.addItem('gun_parts', refund, true);
+      s.addToast(`Removed the ${MODS_ALL[modId]?.name ?? modId}${refund > 0 ? ` — ${refund} gun parts back` : ''}.`);
       sfx.play('ui', { volume: 0.4 });
     },
 
@@ -1297,8 +1327,8 @@ export const useGameStore = create<GameState>()((set, get) => {
       if (!removed.ok) return;
       let placed: InvItem[] | null = null;
       for (const d of receiveDests(removed.inventory, eqNext)) {
-        if (fitInDest(removed.inventory, d, removed.removed, eqNext)) {
-          placed = insertIntoDest(removed.inventory, d, removed.removed, eqNext);
+        if (fitInDest(removed.inventory, d, removed.removed, eqNext, s.perks)) {
+          placed = insertIntoDest(removed.inventory, d, removed.removed, eqNext, s.perks);
           break;
         }
       }
@@ -1317,7 +1347,7 @@ export const useGameStore = create<GameState>()((set, get) => {
 
     transferItem: (uid, dest) => {
       const s = get();
-      const res = transferCarried(s.inventory, s.equipped, uid, dest);
+      const res = transferCarried(s.inventory, s.equipped, uid, dest, s.perks);
       if (!res.ok) {
         const msgs: Record<string, string> = {
           'cycle': 'A container can’t go inside itself.',
@@ -1542,6 +1572,7 @@ export const useGameStore = create<GameState>()((set, get) => {
     },
     perkPoints: 0,
     perks: [],
+    secondWindDay: -1,
     addSkillXp: (skill, amt) => {
       // Lane 8 engine adoption: level math lives in systems/skills.applyXp
       // (semantically identical to the old inline copy — cap 10, overflow
@@ -2067,7 +2098,7 @@ export const useGameStore = create<GameState>()((set, get) => {
 
     arrangeContainer: (dest, order) => {
       const s = get();
-      const spec = specForDest(s.inventory, dest);
+      const spec = specForDest(s.inventory, dest, s.perks);
       if (!spec) return;
       const items = listInDest(s.inventory, dest, s.equipped);
       const { placed } = arrangeGridItems(items, spec.cols, spec.rows, order);
@@ -2155,6 +2186,16 @@ export const useGameStore = create<GameState>()((set, get) => {
       // workstation gate: the recipe's station must be within reach
       if (recipe.station && s.nearStation !== recipe.station) {
         s.addToast(`Needs a ${STATION_LABEL[recipe.station]}.`);
+        return;
+      }
+      // Order #5 gate unification: the instant path enforces the
+      // recipe's declared skillReq through the SAME reader the queue
+      // path and the phone's tree use — systems/skills.meetsSkillReq
+      // over the store's skills map (previously this path ignored
+      // skill gates entirely; see skills-audit.md).
+      const req = recipe.skillReq as { skill: import('../data/skills').SkillId; level: number } | undefined;
+      if (req && !meetsSkillReq(s, req)) {
+        s.addToast(`Needs ${skillReqLabel(req)}.`);
         return;
       }
       for (const c of recipe.components) {
@@ -2285,6 +2326,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         skills: s.skills,
         perkPoints: s.perkPoints,
         perks: s.perks,
+        secondWindDay: s.secondWindDay ?? -1,
         survivors: s.survivors,
         base: s.base,
         vehicles: eng ? eng.getVehicleStates() : [],
@@ -2352,6 +2394,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         skills: snap.skills as GameState['skills'],
         perkPoints: snap.perkPoints,
         perks: snap.perks,
+        secondWindDay: snap.secondWindDay ?? -1,
         survivors: snap.survivors,
         base: cleanBase,
         // wave 3 fields: absent on older v3 saves — default them here.

@@ -26,6 +26,7 @@ function frameDecay(perFrameAt60: number, dt: number): number {
 import { useGameStore } from '../store/gameStore';
 import { buildHumanFigure, solveArmIK } from './figureKit';
 import { XP_EVENTS, type XpEventId } from '../systems/skills';
+import { blockHitStaminaCost, swingDurationMult } from '../systems/perkEffects';
 import { ITEMS } from '../data/items';
 
 /** Pay a Lane 8 XP event through the store (amounts live in the table). */
@@ -152,6 +153,8 @@ export class Player {
   stamina = 100;
   meleeCd = 0;
   rangedCd = 0;
+  private adrenalineT = 0; // br_adrenaline: seconds of fast swings left after a kill
+  private prevHp: number | null = null; // block-cost detection (hp drop while guarding)
   private stepAcc = 0;
   private walkNoiseT = 0;
   private sprintNoiseT = 0;
@@ -564,6 +567,7 @@ export class Player {
 
     this.meleeCd -= dt;
     this.rangedCd -= dt;
+    if (this.adrenalineT > 0) this.adrenalineT = Math.max(0, this.adrenalineT - dt);
     if (this.muzzleT > 0) {
       this.muzzleT -= dt;
       if (this.muzzleT <= 0) this.muzzle.intensity = 0;
@@ -726,6 +730,22 @@ export class Player {
     } else {
       const regen = moving ? 4.5 : 10;
       this.stamina = Math.min(100, this.stamina + regen * dt);
+    }
+
+    // block cost (br_blocker): a husk hit that lands while you guard
+    // still costs stamina — Blocker pays 40% less. Detected as an hp
+    // drop while blocking with an attacking husk in reach, so falls
+    // and acid never charge it.
+    {
+      const st = useGameStore.getState();
+      if (
+        this.prevHp != null && st.hp < this.prevHp && input.blocking && this.handItemId != null &&
+        ctx.husks.husks.some((h) => h.alive && h.state === 'attack' &&
+          Math.hypot(h.group.position.x - this.pos.x, h.group.position.z - this.pos.z) < 3.4)
+      ) {
+        this.stamina = Math.max(0, this.stamina - blockHitStaminaCost(st.perks));
+      }
+      this.prevHp = st.hp;
     }
 
     // lean state: Q/E held (or mobile buttons) — computed before combat so
@@ -972,9 +992,14 @@ export class Player {
         onThrow: ctx.onThrow,
       });
       if (res.swung) {
-        this.swingTotal = res.stats.swingTime;
-        this.meleeCd = res.stats.swingTime + 0.16;
-        this.attackT = res.stats.swingTime; // swing the arm — weapon or bare fist
+        // br_adrenaline: a kill in the last 5s makes this swing faster
+        const durMult = swingDurationMult(useGameStore.getState().perks, this.adrenalineT > 0);
+        this.swingTotal = res.stats.swingTime * durMult;
+        this.meleeCd = res.stats.swingTime * durMult + 0.16;
+        this.attackT = res.stats.swingTime * durMult; // swing the arm — weapon or bare fist
+        if (res.kills > 0 && useGameStore.getState().perks.includes('br_adrenaline')) {
+          this.adrenalineT = 5;
+        }
         // rebuild the trail to this weapon's exact sweep wedge (range × arc),
         // shifted toward the lean like the swing origin is
         this.swingTrail.geometry.dispose();

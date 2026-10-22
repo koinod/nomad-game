@@ -18,6 +18,7 @@ import { buildGroundMesh } from './weaponMeshes';
 import { buildItemModel } from './itemModels';
 import { buildFurnitureMesh, applyDisturbed, applyRestored, FURNITURE_LABEL, type FurnitureKind } from './furnitureMeshes';
 import { sfx } from '../systems/audio';
+import { alarmTripMult, lootChanceMult, rareLootMult, respawnClockMult } from '../systems/perkEffects';
 import { AlarmRegistry, type AlarmDef } from './alarm';
 import { CAMPFIRE_SPOTS, biomeAt } from './World';
 import { ENCLAVE_CACHES, NPC_PLACEMENTS } from '../data/worldWiring';
@@ -277,13 +278,23 @@ export class InteractSystem {
         // A lockpick doesn't help you here — only the disarm box does.
         // Interact applies the toast/rep/flag; the 60m noise burst and
         // the scout pair are Game's to fire (registry event queue).
+        // Order #5 gh_lootghost: the trip itself is a probability roll
+        // (half as often) — the registry stays armed on a miss, so a
+        // later open rolls again. Forced entries (Game marks them)
+        // report the 'forced_entry' trigger.
         if (c.alarmPoiId && c.major) {
-          const ev = this.alarms.trip(c.alarmPoiId, 'container_trip');
-          if (ev) {
-            st.addToast(ev.effect.toast);
-            sfx.play('beacon', { volume: 0.8 });
-            if (ev.effect.factionRep) st.addRep(ev.effect.factionRep.faction, ev.effect.factionRep.delta);
-            st.setFlag(`alarm_tripped:${c.alarmPoiId}`);
+          const forced = this.forcedIds.has(c.id);
+          this.forcedIds.delete(c.id);
+          if (this.hooks.rng() < alarmTripMult(st.perks)) {
+            const ev = this.alarms.trip(c.alarmPoiId, forced ? 'forced_entry' : 'container_trip');
+            if (ev) {
+              st.addToast(ev.effect.toast);
+              sfx.play('beacon', { volume: 0.8 });
+              if (ev.effect.factionRep) st.addRep(ev.effect.factionRep.faction, ev.effect.factionRep.delta);
+              st.setFlag(`alarm_tripped:${c.alarmPoiId}`);
+            }
+          } else {
+            st.addToast('Somewhere, an alarm chirps once and dies. (Loot Ghost)');
           }
         }
         // W6 (stage 7): quest containers report their interact once,
@@ -297,9 +308,15 @@ export class InteractSystem {
         // §4.5: the container's biome weights each entry's class, so the
         // same crate table plays differently in the forest vs in town.
         if (restocked || !st.lootStash[c.id]) {
+          // Order #5 scavenger perks ride the one loot roll: Keen Eye
+          // (+ Night Harvest at night) scale every chance; the Island
+          // Remembers capstone adds its bonus on rare entries only.
+          const isNight = st.timeMinutes < 360 || st.timeMinutes >= 1080;
           const items = rollLoot(c.loot, this.hooks.rng, {
             resourceMult: this.hooks.resourceMult,
             biome: biomeAt(c.x, c.z),
+            chanceMult: lootChanceMult(st.perks, isNight),
+            entryMult: (e) => rareLootMult(st.perks, e.chance),
           });
           if (items.length === 0) {
             st.addToast('Nothing useful inside.');
@@ -739,10 +756,19 @@ export class InteractSystem {
 
   /** Respawn sweep: restock every container whose clock has run out —
    *  mesh back, furniture restored, fresh label, loot re-rolls on open. */
+  /** Order #5: Game flags a container whose search was FORCED (smashed
+   *  open without a pick) so its alarm trip reports 'forced_entry'. */
+  private forcedIds = new Set<string>();
+  markForced(id: string): void {
+    this.forcedIds.add(id);
+  }
+
   private sweepRespawns(): void {
     const now = this.absMinutes();
+    // sc_remembers: the island forgets 25% faster for the capstone.
+    const clockMult = respawnClockMult(useGameStore.getState().perks);
     for (const [id, at] of this.lootedAtMin) {
-      if (now - at < respawnDaysFor(id) * 1440) continue;
+      if (now - at < respawnDaysFor(id) * 1440 * clockMult) continue;
       this.lootedAtMin.delete(id);
       this.respawnedIds.add(id);
       const mesh = this.crateMeshes.get(id);
@@ -825,7 +851,9 @@ export class InteractSystem {
         const biome = biomeAt(x, z); // §4.5 weighting applies to corpses too
         const taken: string[] = [];
         for (const e of table) {
-          if (rng() > weightedChance(e, biome)) continue;
+          // sc_remembers pays its rare-entry bonus "everywhere" — corpses too
+          const chance = Math.min(1, weightedChance(e, biome) * rareLootMult(useGameStore.getState().perks, e.chance));
+          if (rng() > chance) continue;
           const qty = Math.max(1, Math.round(e.min + rng() * (e.max - e.min)));
           if (!s.addItem(e.id, qty, true, { found: true })) {
             s.addToast('Pack full — left the rest on the body.');

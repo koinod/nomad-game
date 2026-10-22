@@ -44,7 +44,7 @@ export const TREES: { id: TreeId; name: string; blurb: string }[] = [
 export const PERKS: PerkDef[] = [
   // ---- Scavenger ----
   { id: 'sc_keen', tree: 'scavenger', tier: 1, name: 'Keen Eye', desc: 'Loot chance +10% on searched containers.', effect: { lootChanceMult: 1.1 } },
-  { id: 'sc_pockets', tree: 'scavenger', tier: 1, name: 'Deep Pockets', desc: '+4 pack slots.', effect: { bonusSlots: 4 } },
+  { id: 'sc_pockets', tree: 'scavenger', tier: 1, name: 'Deep Pockets', desc: 'Your pockets hold +4 more slots (a 4×2 grid).', effect: { bonusSlots: 4 } },
   { id: 'sc_fingers', tree: 'scavenger', tier: 1, name: 'Light Fingers', desc: 'Hold-to-search −25% time, −25% noise.', effect: { searchTimeMult: 0.75, searchNoiseMult: 0.75 } },
   { id: 'sc_salvager', tree: 'scavenger', tier: 2, name: 'Salvager', desc: 'Disassembly yields +1 item.', requires: ['sc_keen'], effect: { disasmBonus: 1 } },
   { id: 'sc_locksmith', tree: 'scavenger', tier: 2, name: 'Locksmith', desc: 'A successful pick never consumes the lockpick; forced entry −50% noise.', requires: ['sc_pockets'], effect: { lockpickKept: 1, forcedEntryNoiseMult: 0.5 } },
@@ -54,16 +54,16 @@ export const PERKS: PerkDef[] = [
   { id: 'sc_remembers', tree: 'scavenger', tier: 4, name: 'The Island Remembers', desc: 'Capstone — POI respawn clocks −25%; T4+ loot chance +10% everywhere.', requires: ['sc_nightharvest', 'sc_packmule'], effect: { respawnMult: 0.75, rareLootMult: 1.1 } },
   // ---- Brawler ----
   { id: 'br_heavy', tree: 'brawler', tier: 1, name: 'Heavy Swings', desc: 'Melee damage +15%.', effect: { meleeDmgMult: 1.15 } },
-  { id: 'br_blocker', tree: 'brawler', tier: 1, name: 'Blocker', desc: 'Block cost −40%, block mitigation +10%.', effect: { blockCostMult: 0.6, blockPctBonus: 0.1 } },
+  { id: 'br_blocker', tree: 'brawler', tier: 1, name: 'Blocker', desc: 'Blocking stops 85% of a hit (from 75%); blocking a hit costs −40% stamina.', effect: { blockCostMult: 0.6, blockPctBonus: 0.1 } },
   { id: 'br_adrenaline', tree: 'brawler', tier: 1, name: 'Adrenaline', desc: 'A kill speeds your swings +20% for 5s.', effect: { killSwingMult: 1.2 } },
   { id: 'br_cleaver', tree: 'brawler', tier: 2, name: 'Cleaver', desc: 'Melee cleave +1 target.', requires: ['br_heavy'], effect: { cleaveBonus: 1 } },
   { id: 'br_executioner', tree: 'brawler', tier: 2, name: 'Executioner', desc: '+50% damage to staggered/stunned husks.', requires: ['br_blocker'], effect: { executeMult: 1.5 } },
   { id: 'br_thickskin', tree: 'brawler', tier: 2, name: 'Thick Skin', desc: 'Armor mitigation +5% (stacks with worn gear).', requires: ['br_adrenaline'], effect: { armorBonus: 0.05 } },
   { id: 'br_secondwind', tree: 'brawler', tier: 3, name: 'Second Wind', desc: 'Once per day, a lethal hit leaves you at 1 HP.', requires: ['br_cleaver'], effect: { secondWind: 1 } },
-  { id: 'br_unstoppable', tree: 'brawler', tier: 3, name: 'Unstoppable', desc: 'Knockback taken −50%; swings can\u2019t be interrupted.', requires: ['br_executioner'], effect: { uninterruptible: 1, knockbackMult: 0.5 } },
+  { id: 'br_unstoppable', tree: 'brawler', tier: 3, name: 'Unstoppable', desc: 'Knockback taken −50% — hits barely move you.', requires: ['br_executioner'], effect: { knockbackMult: 0.5 } },
   { id: 'br_juggernaut', tree: 'brawler', tier: 4, name: 'Juggernaut', desc: 'Capstone — brute hits don\u2019t break your block; +30% melee damage below 50% HP.', requires: ['br_secondwind', 'br_unstoppable'], effect: { lowHpDmgMult: 1.3, bruteBlockHold: 1 } },
   // ---- Mechanic ----
-  { id: 'me_tinkerer', tree: 'mechanic', tier: 1, name: 'Tinkerer', desc: 'Crafting feels instant — parts just fit.', effect: { craftSpeedMult: 1.25 } },
+  { id: 'me_tinkerer', tree: 'mechanic', tier: 1, name: 'Tinkerer', desc: 'Timed crafts run 25% faster — parts just fit.', effect: { craftSpeedMult: 1.25 } },
   { id: 'me_grease', tree: 'mechanic', tier: 1, name: 'Grease Monkey', desc: 'Vehicle repairs cost 1 fewer part (min 1).', effect: { repairCostBonus: -1 } },
   { id: 'me_efficient', tree: 'mechanic', tier: 1, name: 'Efficient Hands', desc: '20% chance to refund one component on any craft.', effect: { refundChance: 0.2 } },
   { id: 'me_gunsmith', tree: 'mechanic', tier: 2, name: 'Gunsmith', desc: 'Mod attach costs halved; detach returns the cost.', requires: ['me_tinkerer'], effect: { modCostMult: 0.5 } },
@@ -78,7 +78,7 @@ export const PERKS: PerkDef[] = [
   { id: 'gh_patient', tree: 'ghost', tier: 1, name: 'Patient', desc: 'Searching makes no extra noise.', effect: { quietSearch: 1 } },
   { id: 'gh_backstab', tree: 'ghost', tier: 2, name: 'Backstab', desc: 'Melee ×3 from behind or against unaware husks.', requires: ['gh_soft'], effect: { backstabMult: 3 } },
   { id: 'gh_vanish', tree: 'ghost', tier: 2, name: 'Vanish', desc: 'Flashbang blind radius +4m; breaking line of sight is 2× faster.', requires: ['gh_shadow'], effect: { flashRadiusBonus: 4, losBreakMult: 2 } },
-  { id: 'gh_nightowl', tree: 'ghost', tier: 2, name: 'Night Owl', desc: 'Night stealth +20%, slight night vision (ambient lift).', requires: ['gh_patient'], effect: { nightStealthMult: 0.8 } },
+  { id: 'gh_nightowl', tree: 'ghost', tier: 2, name: 'Night Owl', desc: 'Night stealth +20% — the dark works for you, not against you.', requires: ['gh_patient'], effect: { nightStealthMult: 0.8 } },
   { id: 'gh_lootghost', tree: 'ghost', tier: 3, name: 'Loot Ghost', desc: 'Containers never make search noise; alarms trip half as often against you.', requires: ['gh_backstab'], effect: { alarmMult: 0.5, searchSilent: 1 } },
   { id: 'gh_coldblood', tree: 'ghost', tier: 3, name: 'Cold Blood', desc: 'Screamer screams don\u2019t mark you — the horde-call misses.', requires: ['gh_vanish'], effect: { screamImmune: 1 } },
   { id: 'gh_unseen', tree: 'ghost', tier: 4, name: 'Unseen', desc: 'Capstone — crouched, still, and shadowed: husks can\u2019t see you past 3m.', requires: ['gh_lootghost', 'gh_coldblood'], effect: { unseen: 1 } },

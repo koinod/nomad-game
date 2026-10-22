@@ -31,6 +31,8 @@ import {
 } from '../data/stations';
 import { useGameStore, craftQueueBridge } from '../store/gameStore';
 import { walkCarried } from '../store/containers';
+import { craftTimeMult } from './perkEffects';
+import { perkById } from '../data/skills';
 
 // ---------------------------------------------------------------------------
 // Recipe metadata overlay (§4.1 timers + §4.2/§6.1 gates)
@@ -45,6 +47,9 @@ export interface RecipeMeta {
   stationTier?: number;
   /** Blueprint item that must be owned (gate only, never consumed). */
   blueprintId?: string;
+  /** Order #5: a perk that must be owned (Master Fabricator's bench
+   *  gun_parts). Enforced by checkCraft from CraftContext.perks. */
+  perkReq?: string;
   /** Special facility requirement ('turret_host' = T3 Machine Shop / Garage). */
   facilityReq?: 'turret_host';
 }
@@ -91,6 +96,9 @@ export const RECIPE_META: Record<string, RecipeMeta> = {
   r_car_battery: { timeSec: 1200 },
   r_armor_plate: { timeSec: 2400, stationTier: 3 },
   r_circuit_board: { timeSec: 1200, stationTier: 3 },
+  // Master Fabricator capstone (me_masterfab): gun_parts at any
+  // Weapons Bench — the recipe data lives in STATION_RECIPES.
+  r_gun_parts: { timeSec: 600, perkReq: 'me_masterfab' },
   // Turret (§4.3) — the only blueprint-gated craft in the game.
   r_turret: {
     timeSec: 10 * 3600,
@@ -109,6 +117,13 @@ export function recipeMeta(recipe: FieldRecipe): RecipeMeta {
 
 export function recipeDurationMin(recipe: FieldRecipe): number {
   return recipeMeta(recipe).timeSec / 60;
+}
+
+/** Order #5: the duration a player actually waits — Tinkerer speeds
+ *  every timed craft, Fabricator speeds Machine Shop fabrication.
+ *  The queue starts jobs at this duration; the panel displays it. */
+export function effectiveDurationMin(recipe: FieldRecipe, perks: readonly string[]): number {
+  return recipeDurationMin(recipe) * craftTimeMult(perks, recipe.station);
 }
 
 /** True when the recipe completes instantly (v1 path in gameStore). */
@@ -210,6 +225,9 @@ export interface CraftContext {
   /** Built facility ids at the player's base (turret host + tiers). */
   facilities: readonly string[];
   skillLevel: SkillLevelProvider;
+  /** Order #5: owned perks — the perk gate (Master Fabricator) and the
+   *  turret blueprint waiver read these. Absent = no perks. */
+  perks?: readonly string[];
 }
 
 export interface CraftCheck {
@@ -218,6 +236,8 @@ export interface CraftCheck {
   stationOk: boolean;
   tierOk: boolean;
   skillOk: boolean;
+  /** Order #5: the Master-Fabricator-style perk gate, when declared. */
+  perkOk: boolean;
   /** The skill gate as evaluated; `inert` = substrate absent, gate waived. */
   skillGate: { skill: SkillId; need: number; have: number | null; inert: boolean } | null;
   blueprintOk: boolean;
@@ -252,19 +272,34 @@ export function checkCraft(recipe: FieldRecipe, ctx: CraftContext): CraftCheck {
   const tierOk = !recipe.station || ctx.nearStationTier >= tierNeed;
   if (stationOk && !tierOk) reasons.push(`Needs a tier ${tierNeed} station.`);
 
+  // Order #5 gate unification: the enforced gate is RECIPE_META's,
+  // falling back to the recipe data's own skillReq — and the level is
+  // read through the caller's provider over the SAME skills map the
+  // phone's tree displays (storeSkillLevel reads gameStore.skills).
+  const gateReq = meta.skillReq ?? (recipe as { skillReq?: { skill: SkillId; level: number } }).skillReq;
   let skillGate: CraftCheck['skillGate'] = null;
   let skillOk = true;
-  if (meta.skillReq) {
-    const have = ctx.skillLevel(meta.skillReq.skill);
+  if (gateReq) {
+    const have = ctx.skillLevel(gateReq.skill);
     const inert = have === undefined;
-    skillOk = inert || have >= meta.skillReq.level;
-    skillGate = { skill: meta.skillReq.skill, need: meta.skillReq.level, have: have ?? null, inert };
+    skillOk = inert || have >= gateReq.level;
+    skillGate = { skill: gateReq.skill, need: gateReq.level, have: have ?? null, inert };
     if (!skillOk) {
-      reasons.push(`Needs ${meta.skillReq.skill} ${meta.skillReq.level} (you: ${have}).`);
+      reasons.push(`Needs ${gateReq.skill} ${gateReq.level} (you: ${have}).`);
     }
   }
 
-  const blueprintOk = !meta.blueprintId || ctx.countItem(meta.blueprintId) > 0;
+  const perks = ctx.perks ?? [];
+  const perkOk = !meta.perkReq || perks.includes(meta.perkReq);
+  if (!perkOk) {
+    reasons.push(`Needs the ${perkById(meta.perkReq!)?.name ?? meta.perkReq} perk.`);
+  }
+
+  // me_masterfab: the turret needs no blueprint for a Master Fabricator.
+  const blueprintOk =
+    !meta.blueprintId ||
+    ctx.countItem(meta.blueprintId) > 0 ||
+    (recipe.id === 'r_turret' && perks.includes('me_masterfab'));
   if (!blueprintOk) reasons.push('Needs the blueprint (loot: military armory, convoy cargo).');
 
   const facilityOk = meta.facilityReq !== 'turret_host' || hasTurretHost(ctx.facilities);
@@ -279,6 +314,7 @@ export function checkCraft(recipe: FieldRecipe, ctx: CraftContext): CraftCheck {
       stationOk &&
       tierOk &&
       skillOk &&
+      perkOk &&
       blueprintOk &&
       facilityOk &&
       resultKnown,
@@ -286,6 +322,7 @@ export function checkCraft(recipe: FieldRecipe, ctx: CraftContext): CraftCheck {
     stationOk,
     tierOk,
     skillOk,
+    perkOk,
     skillGate,
     blueprintOk,
     facilityOk,
@@ -438,7 +475,8 @@ export const useCraftQueue = create<CraftQueueState>()((set, get) => ({
     if (!check.ok) return check.reasons[0] ?? 'Cannot craft that yet.';
     if (!consumeComponents(recipe)) return 'Missing components.';
     const uid = `job_${++jobSeq}_${recipeId}`;
-    const job = startJob(recipeId, recipeDurationMin(recipe), nowGameMin(), uid);
+    // Order #5: Tinkerer / Fabricator shorten the actual job duration.
+    const job = startJob(recipeId, effectiveDurationMin(recipe, ctx.perks ?? []), nowGameMin(), uid);
     set({ jobs: [...get().jobs, job] });
     useGameStore.getState().addToast(`Started ${recipe.name} — ${formatDurationMin(job.durationMin)}.`);
     return null;

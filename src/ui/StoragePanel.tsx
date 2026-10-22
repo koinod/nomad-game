@@ -20,6 +20,7 @@ export default function StoragePanel() {
   const items = useGameStore((s) => s.storageItems);
   const inventory = useGameStore((s) => s.inventory);
   const equipped = useGameStore((s) => s.equipped);
+  const perks = useGameStore((s) => s.perks);
   const closeStorage = useGameStore((s) => s.closeStorage);
   const storagePut = useGameStore((s) => s.storagePut);
   const storageTake = useGameStore((s) => s.storageTake);
@@ -44,7 +45,7 @@ export default function StoragePanel() {
   // else you carry is reachable through the inventory deck.
   const packHolder = equipped.backpack ? findCarried(inventory, equipped.backpack)?.item : undefined;
   const packItems = packHolder ? (packHolder.contents ?? []) : inventory.filter((i) => i.loc === 'pockets');
-  const packDims = packHolder ? gridSpecForItem(packHolder) ?? pocketsSpec() : pocketsSpec();
+  const packDims = packHolder ? gridSpecForItem(packHolder) ?? pocketsSpec(perks) : pocketsSpec(perks);
   const storedSel = selStored ? items.find((it) => it.uid === selStored) : undefined;
   const storedSelIdx = storedSel ? items.indexOf(storedSel) : -1;
   const packSel = selPack ? packItems.find((it) => it.uid === selPack) : undefined;

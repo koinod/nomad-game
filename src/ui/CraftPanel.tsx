@@ -26,11 +26,11 @@ import {
 import { reachableStationTier } from '../data/stations';
 import {
   checkCraft,
+  effectiveDurationMin,
   formatDurationMin,
   getRecipe,
   isInstant,
   jobProgress,
-  recipeDurationMin,
   recipeMeta,
   storeSkillLevel,
   TURRET_RECIPE,
@@ -52,6 +52,7 @@ export function CraftPanel() {
   const inventory = useGameStore((s) => s.inventory);
   const nearStation = useGameStore((s) => s.nearStation);
   const base = useGameStore((s) => s.base);
+  const perks = useGameStore((s) => s.perks);
   const craftRecipe = useGameStore((s) => s.craftRecipe);
   const jobs = useCraftQueue((s) => s.jobs);
   const enqueue = useCraftQueue((s) => s.enqueue);
@@ -86,6 +87,7 @@ export function CraftPanel() {
       : 0,
     facilities,
     skillLevel: storeSkillLevel,
+    perks,
   });
 
   const nowMin = useGameStore.getState().daysElapsed * 1440 + useGameStore.getState().timeMinutes;
@@ -93,8 +95,10 @@ export function CraftPanel() {
   const metaLine = (r: FieldRecipe): string => {
     const meta = recipeMeta(r);
     const bits: string[] = [];
-    if (!isInstant(r)) bits.push(`⏱ ${formatDurationMin(recipeDurationMin(r))}`);
+    // the displayed time is the time YOU wait (Tinkerer/Fabricator applied)
+    if (!isInstant(r)) bits.push(`⏱ ${formatDurationMin(effectiveDurationMin(r, perks))}`);
     if (meta.skillReq) bits.push(`${meta.skillReq.skill} ${meta.skillReq.level}+`);
+    if (meta.perkReq) bits.push('capstone perk');
     if ((meta.stationTier ?? 1) > 1) bits.push(`tier ${meta.stationTier} station`);
     if (meta.blueprintId) bits.push('blueprint');
     if (meta.facilityReq === 'turret_host') bits.push('T3 facility');

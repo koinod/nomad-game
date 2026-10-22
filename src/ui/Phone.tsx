@@ -4,7 +4,6 @@ import { ITEMS, STATION_LABEL } from '../data/items';
 import { QUESTS } from '../data/quests';
 import { FACTIONS, repTier } from '../data/factions';
 import { MAP_MARKERS } from '../data/territory';
-import { SKILLS, TREES, PERKS, xpToNext } from '../data/skills';
 import { traitName, moraleBand, type SurvivorJob } from '../data/survivors';
 import { FACILITIES, baseHeat, heatBand, buildMinutes, tieredFacility, CLAIM_SITES } from '../data/base';
 import {
@@ -19,6 +18,8 @@ import { UPGRADES, canInstallUpgrade } from '../data/upgrades';
 import { carParams, estimatePerformance, UPGRADE_MASS_KG } from '../game/carSpec';
 import { VEHICLE_DEFS } from '../game/Vehicles';
 import { carryLimitKg, encumbranceTier, totalWeightKg } from '../store/inventoryUtils';
+import { walkCarried } from '../store/containers';
+import { carryBonusKg, heavyShiftKg } from '../systems/perkEffects';
 import InventoryDeck from './InventoryDeck';
 import SkillsPanel from './SkillsPanel';
 import { CraftPanel } from './CraftPanel';
@@ -57,9 +58,10 @@ function LoadoutTab() {
   const equipped = useGameStore((s) => s.equipped);
   const difficulty = useGameStore((s) => s.difficulty);
   const battery = useGameStore((s) => s.battery);
+  const perks = useGameStore((s) => s.perks);
   const weight = totalWeightKg(inventory);
-  const limit = carryLimitKg(equipped, inventory, difficulty);
-  const tier = encumbranceTier(weight, limit);
+  const limit = carryLimitKg(equipped, inventory, difficulty, carryBonusKg(perks));
+  const tier = encumbranceTier(weight, limit, heavyShiftKg(perks));
   const tierLabel = { ok: 'Pack light', heavy: 'Heavy', overloaded: 'Overloaded', immobile: 'Immobile' }[tier];
   const tierColor = tier === 'ok' ? 'text-[#5aa469]' : tier === 'heavy' ? 'text-[#e8b34b]' : 'text-[#d9534f]';
 
@@ -691,75 +693,6 @@ function LogTab() {
 
 const JOBS: SurvivorJob[] = ['Idle', 'Builder', 'Mechanic', 'Medic', 'Farmer', 'Scavenger', 'Guard', 'Operator'];
 
-function SkillsTab() {
-  const skills = useGameStore((s) => s.skills);
-  const perkPoints = useGameStore((s) => s.perkPoints);
-  const perks = useGameStore((s) => s.perks);
-  const buyPerk = useGameStore((s) => s.buyPerk);
-
-  return (
-    <div className="flex flex-col gap-4">
-      <section>
-        <h3 className="mb-2 flex items-center justify-between text-xs font-semibold text-[#8a94a3]">
-          Skills <span className="text-[#e8b34b]">{perkPoints} perk point{perkPoints === 1 ? '' : 's'}</span>
-        </h3>
-        <div className="grid grid-cols-2 gap-1.5">
-          {SKILLS.map((sk) => {
-            const st = skills[sk.id];
-            const need = xpToNext(st.level);
-            return (
-              <div key={sk.id} className="rounded border border-[#232b36] bg-[#0b0e12] p-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-[#d7dde5]">{sk.name}</span>
-                  <span className="font-mono text-xs text-[#e8b34b]">Lv {st.level}</span>
-                </div>
-                <div className="mt-1 h-1.5 overflow-hidden rounded bg-[#232b36]">
-                  <div className="h-full bg-[#5aa469]" style={{ width: `${st.level >= 10 ? 100 : Math.round((st.xp / need) * 100)}%` }} />
-                </div>
-                <div className="mt-0.5 text-[10px] text-[#8a94a3]">
-                  {st.level >= 10 ? 'maxed' : `${st.xp}/${need} xp`}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
-      {TREES.map((tree) => (
-        <section key={tree.id}>
-          <h3 className="mb-1 text-xs font-semibold text-[#8a94a3]">{tree.name}</h3>
-          <p className="mb-2 text-[11px] text-[#8a94a3]">{tree.blurb}</p>
-          <div className="flex flex-col gap-1.5">
-            {PERKS.filter((p) => p.tree === tree.id).map((p) => {
-              const owned = perks.includes(p.id);
-              return (
-                <div key={p.id} className={`flex items-start justify-between gap-2 rounded border p-2 ${owned ? 'border-[#5aa469] bg-[#101812]' : 'border-[#232b36] bg-[#0b0e12]'}`}>
-                  <div>
-                    <div className="text-xs font-medium text-[#d7dde5]">
-                      {p.tier === 4 ? '★ ' : ''}{p.name} <span className="text-[10px] text-[#8a94a3]">T{p.tier}</span>
-                    </div>
-                    <div className="text-[11px] text-[#8a94a3]">{p.desc}</div>
-                  </div>
-                  {!owned && (
-                    <button
-                      onClick={() => { sfx.play('ui'); buyPerk(p.id); }}
-                      className="shrink-0 rounded border border-[#232b36] px-2 py-1 text-[11px] text-[#e8b34b] transition-colors hover:border-[#e8b34b]"
-                    >
-                      Learn (1)
-                    </button>
-                  )}
-                  {owned && <span className="shrink-0 text-[11px] text-[#5aa469]">Learned</span>}
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      ))}
-
-
-    </div>
-  );
-}
 
 
 /* ---------------- CREW (Team app) ---------------- */
@@ -837,11 +770,13 @@ function CharacterTab() {
   const useItemUid = useGameStore((s) => s.useItemUid);
   const treatSurvivor = useGameStore((s) => s.treatSurvivor);
   const weight = totalWeightKg(inventory);
-  const limit = carryLimitKg(equipped, inventory, difficulty, perks.includes('sc_packmule') ? 8 : 0);
-  const tier = encumbranceTier(weight, limit);
+  const limit = carryLimitKg(equipped, inventory, difficulty, carryBonusKg(perks));
+  const tier = encumbranceTier(weight, limit, heavyShiftKg(perks));
+  // armor reads the whole carried forest — the same count
+  // damagePlayer mitigates by (display and simulation agree).
   const armorPct = Math.min(
     50,
-    Math.round(100 * inventory.reduce((a, i) => a + (ITEMS[i.itemId]?.armor ?? 0) * i.qty, 0)) +
+    Math.round(100 * walkCarried(inventory).reduce((a, i) => a + (ITEMS[i.itemId]?.armor ?? 0) * i.qty, 0)) +
       (perks.includes('br_thickskin') ? 5 : 0),
   );
   const bar = (v: number, max: number, color: string) => (
@@ -1000,12 +935,12 @@ function CharacterTab() {
           </div>
         )}
       </section>
-      {/* Lane 8 SkillsPanel (merged stage 2a): the full §6.2 surface —
-          tier chains, capstone exclusivity, engine lock reasons — under
-          the compact SkillsTab summary strip. Its LightIndicator named
-          export is Lane 11's HUD piece, fed by the store's `visibility`
-          flag (Lane 5 contract). */}
-      <SkillsTab />
+      {/* Order #5: ONE skill surface — the full §6.2 tree (tier
+          chains, capstone exclusivity, engine lock reasons via
+          perkRowState) under the health management above. The old
+          compact SkillsTab duplicate was deleted: two trees that can
+          disagree are worse than one. SkillsPanel's LightIndicator
+          named export is Lane 11's HUD piece. */}
       <SkillsPanel />
     </div>
   );

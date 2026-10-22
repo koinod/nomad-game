@@ -12,6 +12,7 @@
 import { useGameStore } from '../store/gameStore';
 import { ITEMS, FIELD_RECIPES, STATION_RECIPES, STATION_LABEL } from '../data/items';
 import { carryLimitKg, encumbranceTier, totalWeightKg } from '../store/inventoryUtils';
+import { carryBonusKg, heavyShiftKg } from '../systems/perkEffects';
 import { hasPhoneCarried } from '../store/containers';
 import InventoryDeck from './InventoryDeck';
 import InventoryOverlay from './InventoryOverlay';
@@ -37,9 +38,10 @@ export default function Backpack() {
   const nearStation = useGameStore((s) => s.nearStation);
   const countItem = useGameStore((s) => s.countItem);
 
+  const perks = useGameStore((s) => s.perks);
   const weight = totalWeightKg(inventory);
-  const limit = carryLimitKg(equipped, inventory, difficulty);
-  const tier = encumbranceTier(weight, limit);
+  const limit = carryLimitKg(equipped, inventory, difficulty, carryBonusKg(perks));
+  const tier = encumbranceTier(weight, limit, heavyShiftKg(perks));
   const tierLabel = { ok: 'Pack light', heavy: 'Heavy', overloaded: 'Overloaded', immobile: 'Immobile' }[tier];
   const tierColor = tier === 'ok' ? 'text-[#5aa469]' : tier === 'heavy' ? 'text-[#e8b34b]' : 'text-[#d9534f]';
 

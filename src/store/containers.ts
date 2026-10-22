@@ -22,6 +22,7 @@
 //   - slotted/worn items never transfer directly (unequip first).
 
 import { ITEMS } from '../data/items';
+import { perkNum } from '../data/skills';
 import { layoutItems } from './gridUtils';
 import { slotOfUid } from './equipment';
 import type { Equipped, InvItem, NearbyEntry } from './types';
@@ -61,8 +62,13 @@ export function gridSpecForItem(it: InvItem): GridSpec | null {
   return c ? { cols: c.cols, rows: c.rows, kg: c.kg } : null;
 }
 
-export function pocketsSpec(): GridSpec {
-  return { cols: POCKET_DIMS.cols, rows: POCKET_DIMS.rows, kg: POCKET_KG };
+export function pocketsSpec(perks?: readonly string[]): GridSpec {
+  // sc_pockets (Deep Pockets): +4 slots over the base 2×2 — the grid
+  // grows a column pair (4×2 = 8 cells). The effect value is a slot
+  // count; two slots per added column at 2 rows.
+  const bonusSlots = perks ? perkNum(perks, 'bonusSlots', 0) : 0;
+  const cols = POCKET_DIMS.cols + (bonusSlots > 0 ? Math.ceil(bonusSlots / POCKET_DIMS.rows) : 0);
+  return { cols, rows: POCKET_DIMS.rows, kg: POCKET_KG };
 }
 
 // ---------- walking the forest ----------
@@ -248,8 +254,8 @@ export function listInDest(inv: readonly InvItem[], dest: CarriedDest, eq?: Equi
   return holder ? [...(holder.item.contents ?? [])] : [];
 }
 
-export function specForDest(inv: readonly InvItem[], dest: CarriedDest): GridSpec | null {
-  if (dest.type === 'pockets') return pocketsSpec();
+export function specForDest(inv: readonly InvItem[], dest: CarriedDest, perks?: readonly string[]): GridSpec | null {
+  if (dest.type === 'pockets') return pocketsSpec(perks);
   if (dest.type === 'loose') return { ...LOOSE_DIMS, kg: Number.POSITIVE_INFINITY };
   const holder = findCarried(inv, dest.uid);
   return holder ? gridSpecForItem(holder.item) : null;
@@ -262,8 +268,9 @@ export function fitInDest(
   dest: CarriedDest,
   item: InvItem,
   eq?: Equipped,
+  perks?: readonly string[],
 ): { gx: number; gy: number; rot: boolean } | null {
-  const spec = specForDest(inv, dest);
+  const spec = specForDest(inv, dest, perks);
   if (!spec) return null;
   const current = listInDest(inv, dest, eq).filter((i) => i.uid !== item.uid);
   const contentsKg = current.reduce((a, i) => a + itemWeightKg(i), 0);
@@ -276,8 +283,8 @@ export function fitInDest(
 
 /** Insert an instance into a destination grid (placement assigned).
  *  Assumes fitInDest passed. Returns the new forest. */
-export function insertIntoDest(inv: InvItem[], dest: CarriedDest, item: InvItem, eq?: Equipped): InvItem[] {
-  const placement = fitInDest(inv, dest, item, eq);
+export function insertIntoDest(inv: InvItem[], dest: CarriedDest, item: InvItem, eq?: Equipped, perks?: readonly string[]): InvItem[] {
+  const placement = fitInDest(inv, dest, item, eq, perks);
   const placed: InvItem = placement
     ? { ...item, gx: placement.gx, gy: placement.gy, rot: placement.rot }
     : { ...item, gx: undefined, gy: undefined, rot: undefined };
@@ -310,6 +317,7 @@ export function transferCarried(
   eq: Equipped,
   uid: string,
   dest: CarriedDest,
+  perks?: readonly string[],
 ): TransferResult {
   const found = findCarried(inv, uid);
   if (!found) return { ok: false, inventory: inv, reason: 'not-carried' };
@@ -340,11 +348,11 @@ export function transferCarried(
     }
   }
 
-  if (!fitInDest(inv, dest, item, eq)) return { ok: false, inventory: inv, reason: 'no-fit' };
+  if (!fitInDest(inv, dest, item, eq, perks)) return { ok: false, inventory: inv, reason: 'no-fit' };
 
   const removed = removeFromList(inv, uid);
   if (!removed.removed) return { ok: false, inventory: inv, reason: 'not-carried' };
-  return { ok: true, inventory: insertIntoDest(removed.list, dest, removed.removed, eq) };
+  return { ok: true, inventory: insertIntoDest(removed.list, dest, removed.removed, eq, perks) };
 }
 
 /** Where new pickups land, in order: the worn backpack first (it is
@@ -368,9 +376,9 @@ export function receiveDests(inv: readonly InvItem[], eq: Equipped): CarriedDest
 }
 
 /** Place a fresh instance into the first receive grid it fits. */
-export function addToCarried(inv: InvItem[], eq: Equipped, item: InvItem): InvItem[] | null {
+export function addToCarried(inv: InvItem[], eq: Equipped, item: InvItem, perks?: readonly string[]): InvItem[] | null {
   for (const dest of receiveDests(inv, eq)) {
-    if (fitInDest(inv, dest, item, eq)) return insertIntoDest(inv, dest, item, eq);
+    if (fitInDest(inv, dest, item, eq, perks)) return insertIntoDest(inv, dest, item, eq, perks);
   }
   return null;
 }

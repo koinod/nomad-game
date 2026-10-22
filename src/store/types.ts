@@ -532,6 +532,8 @@ export interface SaveSnapshot {
   skills: Record<string, { level: number; xp: number }>;
   perkPoints: number;
   perks: string[];
+  /** Order #5: the day Second Wind (br_secondwind) last fired; -1 = never. */
+  secondWindDay?: number;
   survivors: SurvivorDef[];
   base: { poiId: string; facilities: string[] } | null;
   vehicles: VehicleSave[];

@@ -43,11 +43,13 @@ export function slotLimit(equipped: Equipped, inv: InvItem[], bonusSlots = 0): n
 // Encumbrance tiers per spec: >100% no sprint, >130% no dodge, >160% cannot pick up.
 export type Encumbrance = 'ok' | 'heavy' | 'overloaded' | 'immobile';
 
-export function encumbranceTier(weightKg: number, limitKg: number): Encumbrance {
+export function encumbranceTier(weightKg: number, limitKg: number, heavyShiftKg = 0): Encumbrance {
   const r = limitKg <= 0 ? 99 : weightKg / limitKg;
   if (r > 1.6) return 'immobile';
   if (r > 1.3) return 'overloaded';
-  if (r > 1.0) return 'heavy';
+  // sc_packmule: the heavy tier starts heavyShiftKg past the limit;
+  // the overloaded/immobile lines stay ratio-based (spec §6.2).
+  if (weightKg > limitKg + heavyShiftKg) return 'heavy';
   return 'ok';
 }
 
