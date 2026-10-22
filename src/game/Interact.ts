@@ -733,7 +733,12 @@ export class InteractSystem {
     pickup('pk_baton', 'riot_baton', 1, 'relay_station', -3, 3);
     pickup('pk_flaregun', 'flare_gun', 1, 'lighthouse_base', -5.5, -3.5);
     pickup('pk_revolver', 'revolver', 1, 'town', 52, -26);
-    pickup('pk_crossbow', 'crossbow', 1, 'jonah_camp', -13, -7);
+    // pk_crossbow offset moved (-13,-7) -> (-10,-4) in the
+    // waist-channel gate-fix round: the bank feather shaved its
+    // knoll from 6.36 m to 0.39 m, leaving the pickup in the channel
+    // bank shallows. New spot is 4 m NE on the knoll's standing
+    // remnant (2.56 m), same west-of-camp character. Id unchanged.
+    pickup('pk_crossbow', 'crossbow', 1, 'jonah_camp', -10, -4);
     pickup('pk_bolts', 'bolts', 12, 'forest_cache', -2, 3);
     pickup('pk_smg', 'smg', 1, 'relay_station', 6, -2);
     pickup('pk_carbine', 'carbine', 1, 'wreck', 3, 2);
@@ -1056,7 +1061,13 @@ export function buildContainerDefs(pois: Record<string, [number, number]>): Cont
     C('n_log_4', 'jonah_camp', 14, 12, LOG_LOOT, 'logpile'),
     C('n_bush_1', 'forest_cache', 8, -14, BUSH_LOOT, 'berrybush'),
     C('n_bush_2', 'forest_cache', -8, 14, BUSH_LOOT, 'berrybush'),
-    C('n_bush_3', 'jonah_camp', -16, -8, BUSH_LOOT, 'berrybush'),
+    // n_bush_3 offset moved (-16,-8) -> (-10,4) in the waist-channel
+    // gate-fix round: the channel's bank feather (line passes ~21 m
+    // west of the old spot) carved its knoll from 7.45 m to -1.51 m —
+    // the bush stood drowned in the shallows. The new spot is the
+    // camp's west marsh edge just outside the carve's 33 m full
+    // influence, on standing ground (2.17 m). Id unchanged.
+    C('n_bush_3', 'jonah_camp', -10, 4, BUSH_LOOT, 'berrybush'),
     C('n_bush_4', 'dune_cache', -10, 8, BUSH_LOOT, 'berrybush'),
     // W6 (stage 7): the Enclave's three dead drops (worldWiring
     // ENCLAVE_CACHES) — lockpick-gated and one-shot (locked containers
