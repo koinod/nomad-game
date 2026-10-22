@@ -213,11 +213,14 @@ export class Game {
       ...this.world.lighthouseKit.colliders,
       ...this.world.airfieldKits.flatMap((k) => k.colliders),
       ...this.world.airfieldPropColliders,
+      ...this.world.sectorKits.flatMap((k) => k.colliders),
+      ...this.world.sectorPropColliders,
       ...this.world.stationColliders,
     ];
     this.houseFloors = [
       ...this.world.lighthouseKit.floors,
       ...this.world.airfieldKits.flatMap((k) => k.floors),
+      ...this.world.sectorKits.flatMap((k) => k.floors),
     ];
     // snapshot world diff
     const snap = opts.snapshot ?? null;
@@ -384,6 +387,7 @@ export class Game {
         ...buildContainerDefs(this.world.poiPositions),
         ...this.world.lighthouseKit.containers,
         ...this.world.airfieldKits.flatMap((k) => k.containers),
+        ...this.world.sectorKits.flatMap((k) => k.containers),
       ],
       savedLootedAt,
     );
