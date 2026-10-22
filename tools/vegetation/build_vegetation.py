@@ -311,21 +311,27 @@ def build_live_oak(rng, lod):
                 ((t2.x, t2.y, t2.z), 0.018),
             ]), 4, BARK_OAK)
     # Canopy masses over the primary limb ends + a broad crown center.
+    # (center, radii) pairs are kept so leaf cards can sit ON each
+    # mass's own ellipsoid shell — a fixed distance from the center
+    # leaves cards floating off the smaller masses.
     masses = []
     crown_c = trunk_top + Vector((0, 0, 1.9))
-    masses.append(emit_mass(g, rng, crown_c, Vector((3.1, 3.1, 1.7)),
-                            1, OAK_LEAF, disp=0.30))
+    crown_r = Vector((3.1, 3.1, 2.0))
+    emit_mass(g, rng, crown_c, crown_r, 1, OAK_LEAF, disp=0.30, squash=0.85)
+    masses.append((crown_c, crown_r))
     for tip in limb_tips:
-        masses.append(emit_mass(g, rng, tip + Vector((0, 0, 0.45)),
-                                Vector((1.35, 1.35, 0.8)),
-                                1 if near else 0, OAK_LEAF, disp=0.36))
+        c = tip + Vector((0, 0, 0.45))
+        r = Vector((1.35, 1.35, 0.85))
+        emit_mass(g, rng, c, r, 1 if near else 0, OAK_LEAF, disp=0.36, squash=0.85)
+        masses.append((c, r))
     if near:
-        # Leaf cards peppered on the canopy shell.
-        for c in masses:
+        # Leaf cards peppered on the canopy shells.
+        for (c, r) in masses:
             for _ in range(8):
                 off = Vector((rng.uniform(-1, 1), rng.uniform(-1, 1), rng.uniform(-0.4, 1)))
                 off.normalize()
-                emit_card(g, rng, c + off * rng.uniform(1.2, 2.2), 0.34, OAK_LEAF)
+                p = c + Vector((off.x * r.x, off.y * r.y, off.z * r.z * 0.85)) * rng.uniform(0.92, 1.06)
+                emit_card(g, rng, p, 0.34, OAK_LEAF)
         # Spanish moss: strands hang from the limb undersides.
         for tip in limb_tips:
             for _ in range(2):
@@ -414,10 +420,15 @@ def build_wax_myrtle(rng, lod):
     emit_mass(g, rng, Vector((0, 0, 1.55)), Vector((0.85, 0.85, 0.62)),
               1 if near else 0, MYRTLE_LEAF, disp=0.36)
     if near:
+        # cards hug the foliage masses (centered on the mass above
+        # each stem top), never floating free of them
         for top in tops:
+            c = top + Vector((0, 0, 0.34))
             for _ in range(3):
-                off = Vector((rng.uniform(-0.5, 0.5), rng.uniform(-0.5, 0.5), rng.uniform(0.1, 0.7)))
-                emit_card(g, rng, top + off, 0.26, MYRTLE_LEAF)
+                off = Vector((rng.uniform(-1, 1), rng.uniform(-1, 1), rng.uniform(-0.3, 1)))
+                off.normalize()
+                p = c + Vector((off.x * 0.62, off.y * 0.62, off.z * 0.5 * 0.78)) * rng.uniform(0.92, 1.06)
+                emit_card(g, rng, p, 0.26, MYRTLE_LEAF)
     return g
 
 

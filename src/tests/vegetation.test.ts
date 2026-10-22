@@ -40,10 +40,12 @@ interface GlbJson {
 
 function readGlb(file: string): GlbJson {
   const buf = readFileSync(join(MODELS_DIR, file));
-  expect(buf.readUInt32LE(0), file).toBe(0x46546c67); // 'glTF'
-  const jsonLen = buf.readUInt32LE(12);
-  expect(buf.readUInt32LE(16), file).toBe(0x4e4f534a); // 'JSON'
-  return JSON.parse(buf.subarray(20, 20 + jsonLen).toString('utf8')) as GlbJson;
+  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  expect(view.getUint32(0, true), file).toBe(0x46546c67); // 'glTF'
+  const jsonLen = view.getUint32(12, true);
+  expect(view.getUint32(16, true), file).toBe(0x4e4f534a); // 'JSON'
+  const jsonText = new TextDecoder().decode(buf.subarray(20, 20 + jsonLen));
+  return JSON.parse(jsonText) as GlbJson;
 }
 
 function lodMesh(glb: GlbJson, lod: string) {
