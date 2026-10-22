@@ -40,7 +40,7 @@ import {
 import { resolveCollisions, type Collider } from './Colliders';
 import { CAR_SEATS, carSeatPose } from './Player';
 import { buildHandMesh } from './weaponMeshes';
-import { sfx } from '../systems/audio';
+import { sfx, gunClassForItem } from '../systems/audio';
 import { useGameStore } from '../store/gameStore';
 import { ITEMS } from '../data/items';
 import { survivorLook, type SurvivorDef } from '../data/survivors';
@@ -294,7 +294,7 @@ class Companion {
         moved = this.moveToward(ctx, tp.x, tp.z, RUN_SPEED * 0.92, dt);
       } else {
         wantFace = Math.atan2(tp.x - g.position.x, tp.z - g.position.z);
-        this.tryStrike(def, tc, wp);
+        this.tryStrike(def, tc, wp, wid);
       }
     } else if (rt.order === 'follow') {
       const off = formationOffset(opts.formationIndex);
@@ -364,11 +364,13 @@ class Companion {
     g.rotation.z = pose.rollZ;
   }
 
-  private tryStrike(def: SurvivorDef, tc: ReturnType<typeof traitCombat>, wp: ReturnType<typeof weaponProfile>): void {
+  private tryStrike(def: SurvivorDef, tc: ReturnType<typeof traitCombat>, wp: ReturnType<typeof weaponProfile>, wid: string | null = null): void {
     if (this.attackCd > 0 || !this.target?.alive) return;
     this.attackCd = wp.cooldownSec;
     if (wp.ranged) {
-      sfx.play('shot', { volume: 0.45 });
+      // their gun, their class — heard from where they stand
+      const p = this.group.position;
+      sfx.gunshot(gunClassForItem(wid), { at: { x: p.x, z: p.z } });
       this.dealDamage(def, tc, wp);
     } else {
       sfx.play('swing', { volume: 0.4 });

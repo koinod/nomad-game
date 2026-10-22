@@ -247,6 +247,8 @@ export class Husk {
   // advances by metres actually moved; gaitBlend eases with real speed.
   gaitPhase = 0;
   gaitBlend = 0;
+  // Audio pass: the crawler's last sounded footfall index (skitter).
+  private skitterStep = 0;
   strikeT = 0; // melee strike arc clock (STRIKE_SEC); damage lands at the chop
   private strikeHitDone = false;
   private flinchJolt = 0; // this frame's flinch magnitude, composed over the gait torso
@@ -502,6 +504,7 @@ export class Husk {
 
   update(dt: number, ctx: HuskCtx, rng: () => number): void {
     const g = this.group;
+    const stateBefore = this.state;
     // ORDER #6: the gait's distance source — where the body stood when
     // this frame began (knockback slides count: a shoved husk stumbles).
     this.frameX = g.position.x;
@@ -687,7 +690,7 @@ export class Husk {
       if (this.telegraphT <= 0) {
         this.spitLaunch = { x: pp.x, y: pp.y + 1.15, z: pp.z };
         if (this.sacMesh) this.sacMesh.scale.set(0.9, 1.25, 0.9);
-        sfx.play('spit', { volume: 0.5 });
+        sfx.play('spit', { at: { x: g.position.x, z: g.position.z } });
       }
       g.position.y = ctx.groundY(g.position.x, g.position.z, g.position.y);
       return;
@@ -875,6 +878,13 @@ export class Husk {
     resolveCollisions(g.position, 0.5, ctx.colliders, g.position.y);
     groundClamp();
 
+    // Audio pass: entering the hunt is announced — a growl in the
+    // kind's own voice, positioned at the body. distP was sampled
+    // before the state machine ran (same frame, close enough).
+    if (this.state === 'hunt' && stateBefore !== 'hunt' && stateBefore !== 'attack' && distP < 60) {
+      sfx.vocal(this.kind, { at: { x: g.position.x, z: g.position.z } });
+    }
+
     // ORDER #6 locomotion: the stride is DISTANCE-clocked through
     // figureAnim — gaitPhase advances by the metres the body actually
     // covered this frame (frameX/Z were captured at update start), so
@@ -893,6 +903,17 @@ export class Husk {
       this.gaitBlend += (target - this.gaitBlend) * Math.min(1, dt * 7);
       if (this.gaitBlend < 0.005 && target === 0) this.gaitBlend = 0;
       this.gaitPhase = gaitPhaseAdvance(this.gaitPhase, dist, gait.cycleM);
+      // Audio pass: the crawler's feet are audible — a skitter tick
+      // on each footfall the gait clock strikes, while it's close
+      // enough to matter. Same phase the limbs swing on: the sound
+      // and the scuttle are one clock.
+      if (this.kind === 'crawler' && this.gaitBlend > 0.1) {
+        const stepIdx = Math.floor(this.gaitPhase / Math.PI);
+        if (stepIdx !== this.skitterStep) {
+          this.skitterStep = stepIdx;
+          if (distP < 24) sfx.vocal('crawler', { at: { x: g.position.x, z: g.position.z }, volume: 0.8 });
+        }
+      }
       const pose = gaitPose(this.gaitPhase + limp, gait, this.gaitBlend);
       if (this.strikeT > 0) {
         // the strike owns the arms and torso while it arcs; the legs
@@ -1299,7 +1320,7 @@ export class HuskManager {
     const s = useGameStore.getState();
     const spike = shriekNoiseLevel(dp);
     if (spike > s.noiseLevel) s.setNoiseLevel(spike);
-    sfx.play('shriek', { volume: Math.max(0.25, 1 - dp / 60) });
+    sfx.play('shriek', { at: { x: p.x, z: p.z } });
     ctx.onShriekFx?.(p.x, p.y + 2, p.z);
   }
 
@@ -1324,7 +1345,7 @@ export class HuskManager {
       const s = useGameStore.getState();
       s.damagePlayer(pdmg * DIFFICULTIES[s.difficulty].huskDamage, 'husk');
     }
-    sfx.play('burst', { volume: Math.max(0.3, 1 - dp / 40) });
+    sfx.play('burst', { at: { x: p.x, z: p.z } });
     this.addPool(p.x, p.z, ACID_POOL.burstRadius, ctx.groundY);
     ctx.onBurstFx?.(p.x, p.y + 1, p.z);
   }
@@ -1368,7 +1389,7 @@ export class HuskManager {
       }
       if (p.y <= ctx.groundY(p.x, p.z) + 0.08) {
         this.addPool(p.x, p.z, ACID_POOL.spitRadius, ctx.groundY);
-        sfx.play('spit', { volume: 0.3 });
+        sfx.play('spit', { at: { x: p.x, z: p.z }, volume: 0.7 });
         this.scene.remove(gl.mesh);
         this.globs.splice(i, 1);
       }

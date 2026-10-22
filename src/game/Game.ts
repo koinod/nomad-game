@@ -10,7 +10,7 @@ import { QUESTS } from '../data/quests';
 import { input, resetEdgeTriggers } from './input';
 import { ITEMS } from '../data/items';
 import { World, heightAt, biomeAt, CAMPFIRE_SPOTS } from './World';
-import { buildBetaRapierHeightfield } from './betaTerrain';
+import { betaHeightAt, betaSlopeAt, betaZoneAt, buildBetaRapierHeightfield } from './betaTerrain';
 import { BETA_PLAYER_SPAWN } from '../data/betaLayout';
 import { Player } from './Player';
 import { Fx } from './Fx';
@@ -30,7 +30,7 @@ import { canInstallUpgrade, storageCapKg, ramDamageFactor } from '../data/upgrad
 import type { InvItem, TrailerSave } from '../store/types'; // TrailerSave: legacy snapshot field, always [] now
 import { floorYAt, floorYAtRef, resolveCollisions, type Collider, type FloorRect } from './Colliders';
 import { captureVehicleSave, restoreVehicleFleet } from './saveMigration';
-import { sfx, ambience } from '../systems/audio';
+import { sfx, ambience, audioEngine, isUnderRoof, type RoofBox } from '../systems/audio';
 import { useCraftQueue } from '../systems/crafting';
 import { XP_EVENTS } from '../systems/skills';
 import { carryBonusKg, flashRadiusBonus, forcedEntryNoiseRadius, heavyShiftKg, searchDurationMult, searchNoiseRadius } from '../systems/perkEffects';
@@ -130,6 +130,10 @@ export class Game {
   private cleared = new Set<string>();
 
   private syncT = 0;
+  /** Audio pass: kit roof boxes for the interior (muffle) query,
+   *  collected once from the world's kits on first use. */
+  private audioRoofs: RoofBox[] | null = null;
+  private audioDir = new THREE.Vector3();
   private timeT = 0;
   private skyT = 0;
   private dangerT = 0;
@@ -1301,6 +1305,7 @@ export class Game {
     if (this.syncT >= 0.1) {
       this.syncT = 0;
       s.syncPlayer([player.pos.x, player.pos.y, player.pos.z], s.hp, player.stamina);
+      this.feedAudioEnvironment(player);
     }
 
     // ambience danger @ ~2Hz
@@ -1310,6 +1315,54 @@ export class Game {
       const t = husks.nearestThreat(player.pos.x, player.pos.z);
       ambience.setDanger(t.hunting || t.dist < 25 ? 2 : t.dist < 60 ? 1 : 0);
     }
+  }
+
+  /**
+   * Audio pass environment feed (~10 Hz): everything the soundscape
+   * needs, sampled from the same sources the rest of the game reads —
+   * the weather snapshot, the beta terrain field, and the kit roofs.
+   * Shoreline distance is estimated as height/slope over the height
+   * field (exact at the waterline, soft inland — surf only needs the
+   * trend). Interior is a binary under-a-roof test; the engine eases
+   * the muffle so doorways don't pop.
+   */
+  private feedAudioEnvironment(player: import('./Player').Player): void {
+    if (!this.audioRoofs) {
+      const boxes: RoofBox[] = [];
+      const w = this.world;
+      if (w) {
+        const kits = [w.lighthouseKit, ...(w.airfieldKits ?? []), ...(w.sectorKits ?? [])];
+        for (const k of kits) {
+          if (!k) continue;
+          for (const r of k.roofs) {
+            boxes.push({ x0: r.bounds.x0, z0: r.bounds.z0, x1: r.bounds.x1, z1: r.bounds.z1, topY: k.building.topPlateY });
+          }
+        }
+      }
+      this.audioRoofs = boxes;
+    }
+    const px = player.pos.x;
+    const pz = player.pos.z;
+    const h = betaHeightAt(px, pz);
+    let shore = 0;
+    if (h > 0) {
+      const slope = Math.max(0.02, betaSlopeAt(px, pz));
+      shore = Math.min(90, h / slope);
+    }
+    if (this.camera) {
+      this.camera.getWorldDirection(this.audioDir);
+      audioEngine.setListener(px, pz, this.audioDir.x, this.audioDir.z);
+    } else {
+      audioEngine.setListener(px, pz, 0, 1);
+    }
+    const wx = this.weather.snapshot();
+    audioEngine.setEnvironment({
+      weather: { state: wx.state, precipitation: wx.precipitation, windSpeed: wx.windSpeed },
+      isNight: this.lastNight,
+      zone: betaZoneAt(px, pz),
+      shoreDistM: shore,
+      interior: isUnderRoof(px, player.pos.y, pz, this.audioRoofs) ? 1 : 0,
+    });
   }
 
   private checkReachSteps(s: ReturnType<typeof useGameStore.getState>, px: number, pz: number, py: number): void {
@@ -1714,6 +1767,20 @@ export class Game {
       hasFuel: v.fuel > 0.05,
     }, v, (x, z) => this.driveGroundY(x, z));
     applyGlbVisuals(v);
+    // engine voice: the powertrain's own numbers, every frame — the
+    // oscillator params smooth themselves in the engine.
+    if (this.carPhysics) {
+      const cp = this.carPhysics;
+      const vp = v.group.position;
+      audioEngine.engineUpdate({
+        rpm: cp.rpm,
+        idleRpm: cp.idleRpm,
+        redlineRpm: cp.redlineRpm,
+        load: cp.throttleLoad,
+        speedMps: cp.speed,
+        surface: betaZoneAt(vp.x, vp.z),
+      });
+    }
     if (v.glb) {
       const lamp = this.isNight() ? 55 : 0;
       for (const l of v.glb.headLights) l.intensity = lamp;
@@ -1844,6 +1911,7 @@ export class Game {
     });
     s.addToast(`Driving the ${v.def.name}. F to get out${v.fuel <= 0.05 ? ' — the tank is dry, find a fuel can.' : ''}`);
     sfx.play('ui', { volume: 0.5 });
+    audioEngine.engineStart();
   }
 
   private exitVehicle(): void {
@@ -1860,6 +1928,7 @@ export class Game {
     resolveCollisions(player.pos, 0.45, this.houseColliders, player.pos.y);
     v.speed = 0;
     this.driving = null;
+    audioEngine.engineStop();
     player.endDrive();
     player.forceFirstPerson(this.wasFirstPerson, this.camera!); // restore the pre-drive view mode
     useGameStore.getState().setVehicle(null);

@@ -216,7 +216,8 @@ export class TurretSystem {
       t.mag -= 1;
       const dir = new THREE.Vector3(tp.x - t.x, 0, tp.z - t.z).normalize();
       best.damage(TURRET_DEF.stats.damage, dir, 1.2);
-      sfx.play('shot', { volume: 0.12 });
+      // positional: the distance law replaces the old flat 0.12 hack
+      sfx.gunshot('carbine', { at: { x: t.x, z: t.z } });
     }
   }
 }
