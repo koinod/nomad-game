@@ -17,12 +17,14 @@ import type { StationId } from '../data/items';
 import { WORLD_STATION_PLACEMENTS } from '../data/stations';
 import type { Collider } from './Colliders';
 import { LightShafts, tightenFog } from './PostFX';
-import { BETA_POI_PLACEMENTS, BETA_ROADS, BETA_DAYMARKERS, BETA_SECTORS, BETA_EXTRA_PADS } from '../data/betaLayout';
+import { BETA_POI_PLACEMENTS, BETA_ROADS, BETA_DAYMARKERS, BETA_SECTORS } from '../data/betaLayout';
 import {
-  betaHeightAt, betaSlopeAt, betaZoneAt, betaRoadDistance, buildBetaTerrainChunks,
+  betaHeightAt, betaSlopeAt, betaZoneAt, buildBetaTerrainChunks,
   type BetaZone,
 } from './betaTerrain';
-import { applyWindSway } from './Clouds';
+import {
+  computeVegPlacements, vegTreeAnchors, vegScatterVeto, VegetationLayer,
+} from './Vegetation';
 
 export const WORLD = {
   xMin: -700, xMax: 700,
@@ -310,6 +312,9 @@ export class World {
   /** Lane 12: light shafts hung at forest anchors (built in
    *  buildScatter); Game drives update() per frame with camera + sun. */
   lightShafts: LightShafts | null = null;
+  /** Modeled vegetation (BETA_SCATTER classes as instanced GLBs,
+   *  Vegetation.ts); built in buildScatter, populates as GLBs load. */
+  vegetation: VegetationLayer | null = null;
 
   private sun!: THREE.DirectionalLight;
   private skyAdj: SkyAdjust = weatherSkyAdjust(undefined);
@@ -710,117 +715,40 @@ export class World {
   // -- scatter ---------------------------------------------------------------
   //
   // Scatter is keyed to the Beta material zones (betaTerrain) and the
-  // layout's scatter table (BETA_SCATTER): trees in the forest zone,
-  // tufts on sand/marsh/grass, rocks on open ground. Two vetoes keep
-  // the surveyed world clean: nothing sprouts on a sector/extra pad
-  // (the flats are built ground — lighthouse grounds, the airbase, the
-  // Refuge, the helipad) and nothing sprouts on a road corridor.
+  // layout's scatter table (BETA_SCATTER): modeled vegetation in its
+  // declared zones (Vegetation.ts), rocks on open ground, logs in the
+  // woods. Two vetoes keep the surveyed world clean: nothing sprouts
+  // on a sector/extra pad (the flats are built ground — lighthouse
+  // grounds, the airbase, the Refuge, the helipad) and nothing
+  // sprouts on a road corridor.
 
-  /** True when (x, z) stands on surveyed ground (a sector or extra
-   *  pad, plus margin) — scatter keeps off it entirely. */
-  private onSurveyedGround(x: number, z: number): boolean {
-    for (const s of BETA_SECTORS) {
-      if (Math.abs(x - s.x) < s.padHalf[0] + 3 && Math.abs(z - s.z) < s.padHalf[1] + 3) return true;
-    }
-    for (const p of BETA_EXTRA_PADS) {
-      if (Math.abs(x - p.x) < p.half[0] + 3 && Math.abs(z - p.z) < p.half[1] + 3) return true;
-    }
-    return false;
-  }
-
+  /** The scatter veto (surveyed ground / road corridor) — the math
+   *  lives in Vegetation.ts, one source for every scatter system. */
   private scatterVeto(x: number, z: number, roadClearance: number): boolean {
-    return this.onSurveyedGround(x, z) || betaRoadDistance(x, z) < roadClearance;
+    return vegScatterVeto(x, z, roadClearance);
   }
 
   private buildScatter(): void {
-    // Trees: the maritime forest zone (the spine, the NW headland, the
-    // massif's gentler faces). Three looks — tall pines (two-tier
-    // cones), broadleaf (blob crowns), and dead snags — real depth.
-    interface TreeSpot { x: number; z: number; kind: 'pine' | 'leaf' | 'snag'; s: number }
-    const treeSpots: TreeSpot[] = [];
-    let guard = 0;
-    while (treeSpots.length < 380 && guard++ < 60000) {
-      const x = -690 + this.rng() * 1380;
-      const z = -310 + this.rng() * 620;
-      if (zoneAt(x, z) !== 'forest') continue;
-      if (this.scatterVeto(x, z, 7)) continue;
-      const r = this.rng();
-      const kind = r < 0.68 ? 'pine' : r < 0.93 ? 'leaf' : 'snag';
-      treeSpots.push({ x, z, kind, s: 0.9 + this.rng() * 0.85 });
-    }
-    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x4a3826, roughness: 1 });
-    const snagMat = new THREE.MeshStandardMaterial({ color: 0x6a655c, roughness: 1 });
-    const pineMat = new THREE.MeshStandardMaterial({ color: 0x2c5230, roughness: 1 });
-    const leafMat = new THREE.MeshStandardMaterial({ color: 0x3a6a34, roughness: 1 });
-    // Lane 12: canopies sway on the shared wind uniforms (Clouds.ts) —
-    // crowns/cones only, trunks hold. Grass is patched in buildGrass.
-    applyWindSway(pineMat, { strength: 0.3, height: 2.6 });
-    applyWindSway(leafMat, { strength: 0.35, height: 1.6 });
+    // Modeled vegetation (Vegetation.ts): the BETA_SCATTER classes as
+    // instanced Blender-built GLBs — live oak + loblolly forest, wax
+    // myrtle understory, marsh needle rush + spartina at the
+    // waterline, sea-oat dune grass on the foredune. This replaces the
+    // retired cone/blob/snag scatter outright (high-poly law).
+    // Placements are computed here (pure, seeded); the layer's meshes
+    // populate as the GLBs arrive.
+    const vegPlacements = computeVegPlacements(this.rng);
+    this.vegetation = new VegetationLayer();
+    this.vegetation.build(this.scene, vegPlacements);
+
+    // Lane 12: light-shaft anchors — every 15th tree placement,
+    // capped at 26, bases on the ground. Game drives the shafts.
+    this.lightShafts = new LightShafts(vegTreeAnchors(vegPlacements));
+    this.scene.add(this.lightShafts.group);
+
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const e = new THREE.Euler();
     const sc = new THREE.Vector3();
-    const setInst = (
-      im: THREE.InstancedMesh, i: number, x: number, y: number, z: number,
-      sx: number, sy: number, sz: number, ry: number,
-    ) => {
-      e.set(0, ry, 0);
-      q.setFromEuler(e);
-      m.compose(new THREE.Vector3(x, y, z), q, sc.set(sx, sy, sz));
-      im.setMatrixAt(i, m);
-    };
-    // pines: trunk + two stacked cones — 10–16m tall
-    const pines = treeSpots.filter((t) => t.kind === 'pine');
-    const pineTrunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.24, 0.38, 3.6, 5), trunkMat, Math.max(pines.length, 1));
-    const pineLo = new THREE.InstancedMesh(new THREE.ConeGeometry(2.5, 5.2, 7), pineMat, Math.max(pines.length, 1));
-    const pineHi = new THREE.InstancedMesh(new THREE.ConeGeometry(1.7, 4.2, 7), pineMat, Math.max(pines.length, 1));
-    pineTrunks.count = pines.length; pineLo.count = pines.length; pineHi.count = pines.length;
-    pines.forEach((t, i) => {
-      const y = this.groundY(t.x, t.z);
-      const ry = this.rng() * Math.PI * 2;
-      setInst(pineTrunks, i, t.x, y + 1.8 * t.s, t.z, t.s, t.s, t.s, ry);
-      setInst(pineLo, i, t.x, y + (3.6 + 2.6) * t.s, t.z, t.s, t.s, t.s, ry);
-      setInst(pineHi, i, t.x, y + (3.6 + 5.2 + 2.1) * t.s, t.z, t.s, t.s, t.s, ry + 0.4);
-    });
-    // broadleaf: trunk + three blobs
-    const leaves = treeSpots.filter((t) => t.kind === 'leaf');
-    const leafTrunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.26, 0.4, 2.6, 5), trunkMat, Math.max(leaves.length, 1));
-    const leafCrowns = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1.6, 1), leafMat, Math.max(leaves.length * 3, 1));
-    leafTrunks.count = leaves.length; leafCrowns.count = leaves.length * 3;
-    leaves.forEach((t, i) => {
-      const y = this.groundY(t.x, t.z);
-      const ry = this.rng() * Math.PI * 2;
-      setInst(leafTrunks, i, t.x, y + 1.3 * t.s, t.z, t.s, t.s, t.s, ry);
-      const cy = y + 3.4 * t.s;
-      setInst(leafCrowns, i * 3, t.x, cy, t.z, t.s, t.s * 0.9, t.s, ry);
-      setInst(leafCrowns, i * 3 + 1, t.x + 1.1 * t.s, cy + 0.9 * t.s, t.z + 0.4 * t.s, t.s * 0.7, t.s * 0.65, t.s * 0.7, ry + 1);
-      setInst(leafCrowns, i * 3 + 2, t.x - 1.0 * t.s, cy + 0.7 * t.s, t.z - 0.5 * t.s, t.s * 0.65, t.s * 0.6, t.s * 0.65, ry + 2);
-    });
-    // snags: bare lightning-killed trunks
-    const snags = treeSpots.filter((t) => t.kind === 'snag');
-    const snagTrunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.18, 0.3, 5.2, 5), snagMat, Math.max(snags.length, 1));
-    snagTrunks.count = snags.length;
-    snags.forEach((t, i) => {
-      const y = this.groundY(t.x, t.z);
-      e.set((this.rng() - 0.5) * 0.12, this.rng() * Math.PI * 2, (this.rng() - 0.5) * 0.12);
-      q.setFromEuler(e);
-      m.compose(new THREE.Vector3(t.x, y + 2.6 * t.s, t.z), q, sc.set(t.s, t.s, t.s));
-      snagTrunks.setMatrixAt(i, m);
-    });
-    for (const im of [pineTrunks, pineLo, pineHi, leafTrunks, leafCrowns, snagTrunks]) {
-      im.instanceMatrix.needsUpdate = true;
-      im.castShadow = true;
-      this.scene.add(im);
-    }
-
-    // Lane 12: light-shaft anchors — every 15th tree spot, capped at 26,
-    // bases on the ground. Game drives the shafts per frame.
-    const shaftAnchors = treeSpots
-      .filter((_, i) => i % 15 === 0)
-      .slice(0, 26)
-      .map((t) => ({ x: t.x, y: this.groundY(t.x, t.z), z: t.z }));
-    this.lightShafts = new LightShafts(shaftAnchors);
-    this.scene.add(this.lightShafts.group);
 
     // Rocks: open ground — sand, granite, grass, forest floor.
     const rockGeo = new THREE.IcosahedronGeometry(0.8, 0);
@@ -850,41 +778,19 @@ export class World {
     rocks.receiveShadow = true;
     this.scene.add(rocks);
 
-    this.buildGrass();
     this.buildUnderbrush();
   }
 
-  /** Underbrush: bushes in the forest band + fallen logs — one cheap instanced
-   *  pass each, so the woods read dense without tanking the frame budget. */
+  /** Fallen logs in the forest/marsh band — one cheap instanced pass.
+   *  (The blob bushes that used to share this method retired with the
+   *  cone/blob scatter — understory is the modeled wax myrtle now.) */
   private buildUnderbrush(): void {
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const e = new THREE.Euler();
     const sc = new THREE.Vector3();
-    // bushes: dark foliage blobs
-    const bushGeo = new THREE.IcosahedronGeometry(0.7, 1);
-    const bushMat = new THREE.MeshStandardMaterial({ color: 0x2a4a2c, roughness: 1 });
-    const bushCount = 160;
-    const bushes = new THREE.InstancedMesh(bushGeo, bushMat, bushCount);
     let placed = 0;
     let guard = 0;
-    while (placed < bushCount && guard++ < 30000) {
-      const x = -690 + this.rng() * 1380;
-      const z = -310 + this.rng() * 620;
-      const zn = zoneAt(x, z);
-      if (zn !== 'forest' && zn !== 'grass') continue;
-      if (this.scatterVeto(x, z, 6)) continue;
-      const s = 0.7 + this.rng() * 1.1;
-      e.set(0, this.rng() * 3, 0);
-      q.setFromEuler(e);
-      m.compose(new THREE.Vector3(x, this.groundY(x, z) + 0.3 * s, z), q, sc.set(s, s * 0.7, s));
-      bushes.setMatrixAt(placed, m);
-      placed++;
-    }
-    bushes.count = placed;
-    bushes.instanceMatrix.needsUpdate = true;
-    bushes.castShadow = true;
-    this.scene.add(bushes);
     // fallen logs: horizontal cylinders, slight tilt
     const logGeo = new THREE.CylinderGeometry(0.22, 0.28, 3.2, 7);
     const logMat = new THREE.MeshStandardMaterial({ color: 0x4a3826, roughness: 1 });
@@ -911,47 +817,6 @@ export class World {
     logs.receiveShadow = true;
     this.scene.add(logs);
   }
-
-  /** Dune-grass tufts: one cheap instanced mesh, big readability payoff. */
-  private buildGrass(): void {
-    const spots: [number, number][] = [];
-    let guard = 0;
-    while (spots.length < 1500 && guard++ < 40000) {
-      const x = -680 + this.rng() * 1360;
-      const z = -300 + this.rng() * 600;
-      const zn = zoneAt(x, z);
-      if (zn !== 'sand' && zn !== 'marsh' && zn !== 'grass') continue;
-      if (this.scatterVeto(x, z, 5.5)) continue;
-      spots.push([x, z]);
-    }
-    if (spots.length === 0) return;
-    const geo = new THREE.ConeGeometry(0.16, 0.9, 4);
-    geo.translate(0, 0.45, 0);
-    const mat = new THREE.MeshStandardMaterial({ roughness: 1 });
-    // Lane 12: grass tufts sway on the same shared wind as the canopies.
-    applyWindSway(mat, { strength: 0.18, height: 0.9 });
-    const grass = new THREE.InstancedMesh(geo, mat, spots.length);
-    const m = new THREE.Matrix4();
-    const q = new THREE.Quaternion();
-    const e = new THREE.Euler();
-    const sc = new THREE.Vector3();
-    const col = new THREE.Color();
-    spots.forEach(([x, z], i) => {
-      const s = 0.6 + this.rng() * 1.1;
-      e.set((this.rng() - 0.5) * 0.35, this.rng() * Math.PI * 2, (this.rng() - 0.5) * 0.35);
-      q.setFromEuler(e);
-      m.compose(new THREE.Vector3(x, this.groundY(x, z), z), q, sc.set(s, s, s));
-      grass.setMatrixAt(i, m);
-      grass.setColorAt(i, col.setHSL(0.2 + this.rng() * 0.07, 0.34, 0.3 + this.rng() * 0.14));
-    });
-    grass.instanceMatrix.needsUpdate = true;
-    if (grass.instanceColor) grass.instanceColor.needsUpdate = true;
-    grass.receiveShadow = true;
-    grass.name = 'grass';
-    this.scene.add(grass);
-  }
-
-
 
   private buildCampfires(): void {
     for (const id of ['shore_camp', 'jonah_camp', 'lighthouse_base']) {
