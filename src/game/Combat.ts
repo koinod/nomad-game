@@ -7,7 +7,7 @@ import { walkCarried } from '../store/containers';
 import { sfx, gunClassForItem } from '../systems/audio';
 import type { HuskManager } from './Husks';
 import { modSpreadMult } from '../data/mods';
-import { bloomSpread, convergedDir, moveSpread, rangeFalloff, rayGroundDistance } from './gunMath';
+import { bloomSpread, convergedDir, moveSpread, rangeFalloff, rayGroundDistance, sightFor, sightSpreadMult } from './gunMath';
 import { gunshotRadius, noiseClassRadius } from './noise';
 import {
   applyWear, armorMult, conditionDamageMult, rollJam, WEAR_PER_SHOT, WEAR_PER_SWING,
@@ -33,7 +33,6 @@ export interface CombatHooks {
   playerYaw: number;
   aimDir: THREE.Vector3; // camera forward, normalized
   eyePos: THREE.Vector3; // muzzle origin
-  spendStamina: (n: number) => boolean;
   flashMuzzle: () => void;
   aimLevel: number; // 0 = hip, 1 = shoulder, 2 = down sights — drives the accuracy cone
   onThrow?: (itemId: string) => void; // grenades: hand off to Game's projectile sim
@@ -53,46 +52,165 @@ export interface CombatHooks {
   muzzlePos?: THREE.Vector3; // Item 6: visible barrel tip — tracers/projectiles start here
 }
 
-/** Per-weapon melee feel: reach, arc, swing speed, knockback, stamina cost. */
+/**
+ * Per-weapon melee feel AND timing (Ian 2026-10-22: "timing for melee
+ * weapons"). Every weapon carries an explicit TIMING PROFILE —
+ * windup (raise, no hit yet) → active (the sweep resolves) → recovery
+ * (follow-through; the next swing cannot start until it ends). The
+ * SwingTimer state machine below enforces the profile; the old model
+ * (hits resolve on the click, cadence = one global swingTime + 0.16)
+ * is gone. swingTime is always windup + active + recovery — the full
+ * cycle the anim runs. Swings cost NO stamina (Ian, same pass): the
+ * stamina economy is sprint + jump only.
+ */
 export interface MeleeStats {
   damage: number;
   range: number;      // meters
   halfArcRad: number; // half-angle of the swing cone
-  swingTime: number;  // seconds the swing anim runs
+  windup: number;     // seconds from swing start to the active window
+  active: number;     // seconds the sweep is live (hits resolve at its start)
+  recovery: number;   // seconds of follow-through before the next swing
+  swingTime: number;  // windup + active + recovery (full cycle / anim)
   knockback: number;
-  stamina: number;
   cleave: number;     // max husks hit per swing
 }
 
+type MeleeCore = Omit<MeleeStats, 'swingTime'>;
+function profiled(core: MeleeCore): MeleeStats {
+  return { ...core, swingTime: core.windup + core.active + core.recovery };
+}
+
 const MELEE_STATS: Record<string, MeleeStats> = {
-  pipe:    { damage: 14, range: 3.1, halfArcRad: 0.75, swingTime: 0.42, knockback: 4.2, stamina: 18, cleave: 3 },
-  machete: { damage: 22, range: 2.9, halfArcRad: 0.62, swingTime: 0.3,  knockback: 2.4, stamina: 13, cleave: 2 },
-  hatchet: { damage: 18, range: 2.8, halfArcRad: 0.55, swingTime: 0.34, knockback: 3.0, stamina: 14, cleave: 2 },
-  baseball_bat: { damage: 16, range: 3.0, halfArcRad: 0.7, swingTime: 0.38, knockback: 3.8, stamina: 15, cleave: 3 },
-  combat_knife: { damage: 15, range: 2.5, halfArcRad: 0.45, swingTime: 0.22, knockback: 1.2, stamina: 8, cleave: 1 },
-  sledgehammer: { damage: 30, range: 2.9, halfArcRad: 0.6, swingTime: 0.55, knockback: 5.5, stamina: 22, cleave: 2 },
-  torch:   { damage: 6,  range: 2.7, halfArcRad: 0.6,  swingTime: 0.34, knockback: 2.0, stamina: 12, cleave: 2 },
-  flare:   { damage: 4,  range: 2.5, halfArcRad: 0.55, swingTime: 0.3,  knockback: 1.6, stamina: 10, cleave: 1 },
-  crowbar:     { damage: 17, range: 2.9, halfArcRad: 0.6,  swingTime: 0.33, knockback: 3.4, stamina: 14, cleave: 2 },
-  fire_axe:    { damage: 34, range: 3.0, halfArcRad: 0.55, swingTime: 0.52, knockback: 6.0, stamina: 24, cleave: 2 },
-  spear:       { damage: 20, range: 3.6, halfArcRad: 0.3,  swingTime: 0.4,  knockback: 2.8, stamina: 15, cleave: 1 },
-  riot_baton:  { damage: 12, range: 2.7, halfArcRad: 0.6,  swingTime: 0.2,  knockback: 2.2, stamina: 7,  cleave: 2 },
+  //            dmg  rng  arc   wind  act   rec   kb    cleave
+  pipe:         profiled({ damage: 14, range: 3.1, halfArcRad: 0.75, windup: 0.16, active: 0.12, recovery: 0.24, knockback: 4.2, cleave: 3 }),
+  machete:      profiled({ damage: 22, range: 2.9, halfArcRad: 0.62, windup: 0.11, active: 0.11, recovery: 0.18, knockback: 2.4, cleave: 2 }),
+  hatchet:      profiled({ damage: 18, range: 2.8, halfArcRad: 0.55, windup: 0.13, active: 0.11, recovery: 0.20, knockback: 3.0, cleave: 2 }),
+  baseball_bat: profiled({ damage: 16, range: 3.0, halfArcRad: 0.70, windup: 0.15, active: 0.12, recovery: 0.23, knockback: 3.8, cleave: 3 }),
+  combat_knife: profiled({ damage: 15, range: 2.5, halfArcRad: 0.45, windup: 0.07, active: 0.08, recovery: 0.12, knockback: 1.2, cleave: 1 }),
+  sledgehammer: profiled({ damage: 30, range: 2.9, halfArcRad: 0.60, windup: 0.24, active: 0.14, recovery: 0.34, knockback: 5.5, cleave: 2 }),
+  torch:        profiled({ damage: 6,  range: 2.7, halfArcRad: 0.60, windup: 0.13, active: 0.11, recovery: 0.20, knockback: 2.0, cleave: 2 }),
+  flare:        profiled({ damage: 4,  range: 2.5, halfArcRad: 0.55, windup: 0.11, active: 0.10, recovery: 0.19, knockback: 1.6, cleave: 1 }),
+  crowbar:      profiled({ damage: 17, range: 2.9, halfArcRad: 0.60, windup: 0.13, active: 0.11, recovery: 0.19, knockback: 3.4, cleave: 2 }),
+  fire_axe:     profiled({ damage: 34, range: 3.0, halfArcRad: 0.55, windup: 0.22, active: 0.13, recovery: 0.31, knockback: 6.0, cleave: 2 }),
+  spear:        profiled({ damage: 20, range: 3.6, halfArcRad: 0.30, windup: 0.15, active: 0.10, recovery: 0.25, knockback: 2.8, cleave: 1 }),
+  riot_baton:   profiled({ damage: 12, range: 2.7, halfArcRad: 0.60, windup: 0.08, active: 0.09, recovery: 0.13, knockback: 2.2, cleave: 2 }),
 };
-const FIST_STATS: MeleeStats = {
-  damage: 8, range: 2.3, halfArcRad: 0.5, swingTime: 0.26, knockback: 1.8, stamina: 10, cleave: 1,
-};
-const GUN_BASH_STATS: MeleeStats = {
-  damage: 12, range: 2.5, halfArcRad: 0.55, swingTime: 0.32, knockback: 2.6, stamina: 12, cleave: 1,
-};
+const FIST_STATS: MeleeStats = profiled({
+  damage: 8, range: 2.3, halfArcRad: 0.5, windup: 0.09, active: 0.09, recovery: 0.14, knockback: 1.8, cleave: 1,
+});
+const GUN_BASH_STATS: MeleeStats = profiled({
+  damage: 12, range: 2.5, halfArcRad: 0.55, windup: 0.12, active: 0.10, recovery: 0.20, knockback: 2.6, cleave: 1,
+});
+const THROW_STATS: MeleeStats = profiled({
+  damage: 0, range: 0, halfArcRad: 0, windup: 0.12, active: 0.08, recovery: 0.20, knockback: 0, cleave: 0,
+});
 
 export function meleeStatsFor(itemId: string | null): MeleeStats {
   if (itemId && MELEE_STATS[itemId]) return MELEE_STATS[itemId];
   const def = itemId ? ITEMS[itemId] : undefined;
+  if (def?.thrown) return THROW_STATS;
   if (def?.category === 'weapon-melee') {
     // unknown melee weapon: sane defaults from its damage number
-    return { damage: def.damage ?? 10, range: 2.8, halfArcRad: 0.6, swingTime: 0.34, knockback: 2.6, stamina: 14, cleave: 2 };
+    return profiled({ damage: def.damage ?? 10, range: 2.8, halfArcRad: 0.6, windup: 0.13, active: 0.11, recovery: 0.20, knockback: 2.6, cleave: 2 });
   }
   return FIST_STATS;
+}
+
+/**
+ * The swing state machine: windup → active → recovery, one swing at a
+ * time, enforced for every melee weapon (Player drives it; the hit
+ * resolution fires exactly once, when the active window opens).
+ * Input during a swing QUEUES at most one follow-up, which starts the
+ * instant recovery ends — never earlier, so recovery can't be skipped
+ * by buffering, and holding the button chains swings at exactly the
+ * weapon's cadence. Pure (no THREE/store) — cadence is unit-tested.
+ */
+export class SwingTimer {
+  phase: 'windup' | 'active' | 'recovery' | null = null;
+  private t = 0; // seconds left in the current phase
+  private stats: MeleeStats | null = null;
+  private durMult = 1;
+  private queued = false;
+  /** Set when a queued follow-up auto-starts (callers re-arm anim/sfx). */
+  justStarted = false;
+
+  get busy(): boolean {
+    return this.phase !== null;
+  }
+  get current(): MeleeStats | null {
+    return this.stats;
+  }
+
+  /** Begin a swing. False when one is already running. */
+  start(stats: MeleeStats, durMult = 1): boolean {
+    if (this.phase !== null) return false;
+    this.stats = stats;
+    this.durMult = durMult;
+    this.phase = 'windup';
+    this.t = stats.windup * durMult;
+    this.queued = false;
+    this.justStarted = true;
+    return true;
+  }
+
+  /** Ask for the next swing as soon as this one fully recovers. */
+  queue(): void {
+    if (this.phase !== null) this.queued = true;
+  }
+
+  cancel(): void {
+    this.phase = null;
+    this.stats = null;
+    this.queued = false;
+  }
+
+  /**
+   * Advance the machine. `hit` is true on exactly the frame the active
+   * window opens — the caller resolves the sweep then. A queued swing
+   * restarts inside the same update that ends recovery, so chain
+   * cadence is exactly windup+active+recovery with zero dead frames.
+   */
+  update(dt: number): { hit: boolean } {
+    this.justStarted = false;
+    let hit = false;
+    let rest = Math.max(0, dt);
+    // loop: one long frame can cross several phase boundaries
+    for (let guard = 0; guard < 8 && this.phase !== null && rest > 0; guard++) {
+      if (rest < this.t) {
+        this.t -= rest;
+        rest = 0;
+        break;
+      }
+      rest -= this.t;
+      if (this.phase === 'windup') {
+        this.phase = 'active';
+        this.t = (this.stats?.active ?? 0) * this.durMult;
+        hit = true;
+      } else if (this.phase === 'active') {
+        this.phase = 'recovery';
+        this.t = (this.stats?.recovery ?? 0) * this.durMult;
+      } else {
+        // recovery done: chain the queued swing or go idle
+        const stats = this.stats;
+        this.phase = null;
+        this.stats = null;
+        if (this.queued && stats) {
+          this.start(stats, this.durMult);
+          // the new windup eats whatever is left of this frame
+          if (rest >= this.t) {
+            rest -= this.t;
+            this.phase = 'active';
+            this.t = stats.active * this.durMult;
+            hit = true;
+          } else {
+            this.t -= rest;
+            rest = 0;
+          }
+        }
+      }
+    }
+    return { hit };
+  }
 }
 
 function equippedMeleeId(): string | null {
@@ -124,8 +242,7 @@ export function tryMelee(h: CombatHooks): MeleeResult {
     if (uid) s.removeItem(uid, 1);
     sfx.play('swing', { volume: 0.6 });
     h.onThrow(itemId);
-    const tStats: MeleeStats = { damage: 0, range: 0, halfArcRad: 0, swingTime: 0.4, knockback: 0, stamina: 6, cleave: 0 };
-    return { swung: true, hits: 0, kills: 0, specialKills: 0, stats: tStats };
+    return { swung: true, hits: 0, kills: 0, specialKills: 0, stats: meleeStatsFor(itemId) };
   }
   // no melee weapon but a gun in hand: bash with the gun itself
   const stats = itemId == null && equippedRangedDef() ? GUN_BASH_STATS : meleeStatsFor(itemId);
@@ -140,10 +257,8 @@ export function tryMelee(h: CombatHooks): MeleeResult {
     sfx.play('dryfire', { volume: 0.6 });
     return empty;
   }
-  if (!h.spendStamina(stats.stamina)) {
-    useGameStore.getState().addToast('Too winded to swing.');
-    return empty;
-  }
+  // swings are FREE (Ian 2026-10-22): stamina pays for sprint + jump
+  // only — a winded player swings exactly as hard as a fresh one.
   sfx.play('swing', { volume: 0.8 });
   h.emitNoise(h.playerPos.x, h.playerPos.z, noiseClassRadius('melee_swing'));
 
@@ -275,8 +390,14 @@ export function tryRanged(h: CombatHooks): RangedResult {
       ? 2.4 + (0.8 - 2.4) * (h.adsBlend / 0.55)
       : 0.8 + (0.18 - 0.8) * ((h.adsBlend - 0.55) / 0.45)
     : h.aimLevel === 2 ? 0.18 : h.aimLevel === 1 ? 0.8 : 2.4;
+  // the sight picture steadies (or, for glass, truly settles) the cone
+  // as the gun comes up: eased over the same blend that drives the cone
+  const sight = sightFor(def, mods);
+  const sightMult = h.adsBlend != null
+    ? sightSpreadMult(sight, h.adsBlend)
+    : h.aimLevel === 2 ? sight.adsSpreadMult : 1;
   const spread =
-    (def.spread ?? 0.045) * aimMult * modSpreadMult(mods, h.aimLevel) +
+    (def.spread ?? 0.045) * aimMult * modSpreadMult(mods, h.aimLevel) * sightMult +
     (h.aimLevel === 2 ? 0.002 : 0.006) +
     bloomSpread(h.bloom ?? 0, def.bloomMax ?? 0) +
     moveSpread(h.moveSpeedNorm ?? 0, h.aimLevel);
