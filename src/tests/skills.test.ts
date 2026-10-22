@@ -59,6 +59,8 @@ describe('§6.1 XP event table', () => {
       recruit: ['leadership', 15],
       siege_survived: ['leadership', 12],
       order_given: ['leadership', 2],
+      // Order #5 lane addition (not a §6.1 row): survival time pays scavenging.
+      day_survived: ['scavenging', 8],
     };
     for (const [id, [skill, xp]] of Object.entries(expected)) {
       const def = XP_EVENTS[id as XpEventId];
@@ -66,7 +68,7 @@ describe('§6.1 XP event table', () => {
       expect(def.skill, id).toBe(skill);
       expect(def.xp, id).toBe(xp);
     }
-    expect(Object.keys(XP_EVENTS)).toHaveLength(20);
+    expect(Object.keys(XP_EVENTS)).toHaveLength(21);
   });
 
   it('survivors earn at 0.5× (floored)', () => {

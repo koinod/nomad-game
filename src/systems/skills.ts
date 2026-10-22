@@ -71,7 +71,8 @@ export type XpEventId =
   | 'node_harvested'
   | 'recruit'
   | 'siege_survived'
-  | 'order_given';
+  | 'order_given'
+  | 'day_survived';
 
 export interface XpEventDef {
   skill: SkillId;
@@ -100,6 +101,10 @@ export const XP_EVENTS: Record<XpEventId, XpEventDef> = {
   recruit: { skill: 'leadership', xp: 15, label: 'Survivor recruited' },
   siege_survived: { skill: 'leadership', xp: 12, label: 'Siege survived (present)' },
   order_given: { skill: 'leadership', xp: 2, label: 'Order given (job assign)' },
+  // Lane addition (Order #5): the §6.1 table has no survival-time row,
+  // but living off the island is the scavenging loop's purest form —
+  // one award per day rollover, paid in advanceDay.
+  day_survived: { skill: 'scavenging', xp: 8, label: 'Another day survived' },
 };
 
 /** Survivors earn from the same table at half rate (§6.1). */
@@ -205,6 +210,25 @@ export function canBuyPerk(
     }
   }
   return { ok: true };
+}
+
+/** UI row state for one perk — the ONLY derivation the tree display
+ *  uses (Order #5): owned / available / locked-with-the-engine's-own
+ *  reason. Pure, so the phone's tree and the buy gate can be pinned
+ *  against each other in tests. */
+export type PerkRowState =
+  | { state: 'owned' }
+  | { state: 'available' }
+  | { state: 'locked'; reason: string };
+
+export function perkRowState(
+  owned: readonly string[],
+  perkPoints: number,
+  perkId: string,
+): PerkRowState {
+  if (owned.includes(perkId)) return { state: 'owned' };
+  const check = canBuyPerk(owned, perkPoints, perkId);
+  return check.ok ? { state: 'available' } : { state: 'locked', reason: check.reason };
 }
 
 /** Pure buy: returns the new owned list + remaining points, or null when
