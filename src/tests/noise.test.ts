@@ -105,7 +105,6 @@ function hooks(capture: { radius: number }): CombatHooks {
     playerYaw: 0,
     aimDir: new THREE.Vector3(0, 0, 1),
     eyePos: new THREE.Vector3(0, 1.6, 0),
-    spendStamina: () => true,
     flashMuzzle: () => undefined,
     aimLevel: 0,
   };

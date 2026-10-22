@@ -150,6 +150,7 @@ function AmmoCounter() {
 function Crosshair() {
   const meleeTarget = useGameStore((s) => s.meleeTarget);
   const hitmark = useGameStore((s) => s.hitmark);
+  const adsSight = useGameStore((s) => s.adsSight);
   const [, setTick] = useState(0);
   // fade the hitmarker out after ~180ms
   useEffect(() => {
@@ -160,6 +161,57 @@ function Crosshair() {
   const showMark = hitmark && Date.now() - hitmark.at < 190;
   const kill = hitmark?.kind === 'kill';
   const headshot = hitmark?.kind === 'headshot';
+  // down the sights, the reticle IS the sight picture (Ian 2026-10-22):
+  // a dot sight is one clean dot; glass gets its tube + mil reticle;
+  // irons keep the plain picture below.
+  if (adsSight === 'dot') {
+    return (
+      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" aria-hidden>
+        <div className="absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#ff4b3e] shadow-[0_0_6px_rgba(255,75,62,0.9)]" />
+        {showMark && (
+          <div
+            className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 font-bold ${
+              headshot ? 'text-2xl' : 'text-xl'
+            } ${kill ? 'text-[#d9534f]' : headshot ? 'text-[#ffd76a]' : 'text-[#e8b34b]'}`}
+            style={{ textShadow: '0 0 6px rgba(0,0,0,0.8)' }}
+          >
+            ✕
+          </div>
+        )}
+      </div>
+    );
+  }
+  if (adsSight === 'scope') {
+    return (
+      <div className="pointer-events-none absolute inset-0" aria-hidden>
+        {/* tube vignette: the world exists inside the glass only */}
+        <div
+          className="absolute left-1/2 top-1/2 aspect-square w-[min(92vh,92vw)] -translate-x-1/2 -translate-y-1/2 rounded-full"
+          style={{ boxShadow: '0 0 0 9999px rgba(2,4,6,0.94), inset 0 0 60px rgba(0,0,0,0.55)' }}
+        />
+        {/* mil reticle: hairlines + mil ticks on both axes */}
+        <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-black/70" />
+        <div className="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-black/70" />
+        {[-3, -2, -1, 1, 2, 3].map((m) => (
+          <div key={`h${m}`}>
+            <div className="absolute top-1/2 h-2 w-px bg-black/70" style={{ left: `calc(50% + ${m * 34}px)` }} />
+            <div className="absolute left-1/2 h-px w-2 bg-black/70" style={{ top: `calc(50% + ${m * 34}px)` }} />
+          </div>
+        ))}
+        <div className="absolute left-1/2 top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-black/80" />
+        {showMark && (
+          <div
+            className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 font-bold ${
+              headshot ? 'text-2xl' : 'text-xl'
+            } ${kill ? 'text-[#d9534f]' : headshot ? 'text-[#ffd76a]' : 'text-[#e8b34b]'}`}
+            style={{ textShadow: '0 0 6px rgba(0,0,0,0.8)' }}
+          >
+            ✕
+          </div>
+        )}
+      </div>
+    );
+  }
   return (
     <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" aria-hidden>
       {/* center dot */}

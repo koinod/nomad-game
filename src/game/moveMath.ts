@@ -48,6 +48,39 @@ export function wadeBlocksJump(groundY: number): boolean {
   return -groundY > 0.3;
 }
 
+// ---- Stamina economy (Ian 2026-10-22: "remove stamina for hits, just
+// do stamina for running and jumping") ----
+// Stamina pays for locomotion ONLY: sprinting drains it, jumping costs
+// a lump, everything else — swinging, blocking, getting hit — is free.
+// The tick is pure so the economy is pinned by unit tests, and Player
+// is a thin caller.
+
+export const STAMINA_MAX = 100;
+/** Sprint drain, points per second (the shipped rate, unchanged). */
+export const SPRINT_DRAIN_PER_SEC = 9;
+/** Lump cost of one jump. */
+export const JUMP_STAMINA_COST = 8;
+/** Regen per second while moving (but not sprinting). */
+export const STAMINA_REGEN_MOVING = 4.5;
+/** Regen per second standing still. */
+export const STAMINA_REGEN_IDLE = 10;
+
+/** One frame of the stamina economy. Sprinting drains; anything else
+ *  regens — faster standing still than on the move. */
+export function staminaTick(stamina: number, dt: number, sprinting: boolean, moving: boolean): number {
+  if (dt <= 0) return clamp(stamina, 0, STAMINA_MAX);
+  if (sprinting) return Math.max(0, stamina - SPRINT_DRAIN_PER_SEC * dt);
+  const regen = moving ? STAMINA_REGEN_MOVING : STAMINA_REGEN_IDLE;
+  return Math.min(STAMINA_MAX, stamina + regen * dt);
+}
+
+/** Pay a lump cost (a jump). Returns the new stamina, or null when the
+ *  pool can't afford it — the caller then refuses the action. */
+export function staminaSpend(stamina: number, cost: number): number | null {
+  if (cost <= 0) return stamina;
+  return stamina >= cost ? stamina - cost : null;
+}
+
 // ---- Item 1 (camera spaz / running feel, 2026-10-21 playtest) ----
 
 /**

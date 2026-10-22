@@ -2,7 +2,7 @@
 
 import * as THREE from 'three';
 import { input, consumeLook } from './input';
-import { tryMelee, tryRanged, meleeStatsFor, equippedMeleeId, equippedRangedDef } from './Combat';
+import { tryMelee, tryRanged, meleeStatsFor, swingStatsFor, equippedMeleeId, equippedRangedDef, SwingTimer } from './Combat';
 import { buildHandMesh, activeHandItemId, gripFor } from './weaponMeshes';
 import { noiseClassRadius } from './noise';
 import { getGame } from './instance';
@@ -13,8 +13,8 @@ import { sfx, StepClock } from '../systems/audio';
 import type { HuskManager } from './Husks';
 import { clamp, lerp } from './rng';
 import {
-  BOB_CYCLE_M, accelRate, bobPhaseDelta, expDamp, groundContactY, sprintFovKick, sprintLatch,
-  wadeBlocksJump, wadeBlocksSprint, wadeFactor,
+  BOB_CYCLE_M, JUMP_STAMINA_COST, accelRate, bobPhaseDelta, expDamp, groundContactY, sprintFovKick, sprintLatch,
+  staminaSpend, staminaTick, wadeBlocksJump, wadeBlocksSprint, wadeFactor,
 } from './moveMath';
 import { betaZoneAt } from './betaTerrain';
 
@@ -27,7 +27,7 @@ function frameDecay(perFrameAt60: number, dt: number): number {
 import { useGameStore } from '../store/gameStore';
 import { buildHumanFigure, solveArmIK } from './figureKit';
 import { XP_EVENTS, type XpEventId } from '../systems/skills';
-import { blockHitStaminaCost, swingDurationMult } from '../systems/perkEffects';
+import { swingDurationMult } from '../systems/perkEffects';
 import { ITEMS } from '../data/items';
 
 /** Pay a Lane 8 XP event through the store (amounts live in the table). */
@@ -38,7 +38,7 @@ function awardXpEvent(id: XpEventId, mult = 1): void {
 import { magSizeOf, modAdsTimeMult, modRecoilMult } from '../data/mods';
 import {
   RECOIL_RECOVERABLE, bloomAdd, bloomDecay, convergedDir, kickFor, rayGroundDistance,
-  recoveryStep, swayOffset,
+  recoveryStep, sightFor, sightFov, sightSwayMult, swayOffset,
 } from './gunMath';
 
 /** Seconds to bring a weapon from carry to ready, by what it is. */
@@ -159,10 +159,12 @@ export class Player {
   camYaw = Math.PI; // camera behind player facing +z? set on spawn
   camPitch = -0.18;
   stamina = 100;
-  meleeCd = 0;
   rangedCd = 0;
+  /** Melee runs on Combat's SwingTimer (windup/active/recovery per weapon). */
+  private swing = new SwingTimer();
+  private swingDurMult = 1; // duration scale of the in-flight swing (adrenaline)
+  private adsSightSent: import('./gunMath').SightType | null = null; // last sight synced to the HUD
   private adrenalineT = 0; // br_adrenaline: seconds of fast swings left after a kill
-  private prevHp: number | null = null; // block-cost detection (hp drop while guarding)
   /** Footstep clock wound on the bob cycle itself (audio pass). */
   private stepClock = new StepClock(BOB_CYCLE_M);
   private walkNoiseT = 0;
@@ -398,10 +400,78 @@ export class Player {
     return this.vel.length() > 0.6;
   }
 
+  /** Pay a lump stamina cost (today: jumping — swings and blocks are
+   *  free). False when the pool can't afford it; nothing is deducted. */
   spendStamina(n: number): boolean {
-    if (this.stamina < n) return false;
-    this.stamina -= n;
+    const after = staminaSpend(this.stamina, n);
+    if (after === null) return false;
+    this.stamina = after;
     return true;
+  }
+
+  /** The equipped gun's sights FOV at full ADS (38 for irons — the
+   *  shipped picture — tighter for a dot, true zoom for glass). */
+  private currentSightFov(): number {
+    const s = useGameStore.getState();
+    const inst = s.equipped.ranged ? s.inventory.find((i) => i.uid === s.equipped.ranged) : undefined;
+    const def = inst ? ITEMS[inst.itemId] : undefined;
+    return def ? sightFov(def, inst?.mods ?? []) : 38;
+  }
+
+  /** Arm the swing animation for a swing the state machine just
+   *  started: full-cycle duration + the trail rebuilt to this weapon's
+   *  exact sweep wedge (range × arc), shifted toward the lean. */
+  private armSwingAnim(stats: import('./Combat').MeleeStats): void {
+    this.swingTotal = stats.swingTime * this.swingDurMult;
+    this.attackT = stats.swingTime * this.swingDurMult; // swing the arm — weapon or bare fist
+    this.swingTrail.geometry.dispose();
+    this.swingTrail.geometry = new THREE.RingGeometry(
+      0.9, stats.range, 24, 1,
+      -Math.PI / 2 - stats.halfArcRad, stats.halfArcRad * 2,
+    );
+    this.swingTrail.position.x = this.leanAmt * 0.55;
+  }
+
+  /** The active window opened: resolve the sweep where the player
+   *  stands NOW (lean included — you can hook a swing around a
+   *  corner), then impact feel + XP. */
+  private resolveMeleeSwing(ctx: PlayerCtx): void {
+    const camRight = new THREE.Vector3(Math.cos(this.camYaw), 0, -Math.sin(this.camYaw));
+    const swingOrigin = this.pos.clone().addScaledVector(camRight, this.leanAmt * 0.55);
+    const res = tryMelee({
+      husks: ctx.husks,
+      emitNoise: ctx.emitNoise,
+      playerPos: swingOrigin,
+      playerYaw: this.yaw,
+      aimDir: new THREE.Vector3(),
+      eyePos: new THREE.Vector3(),
+      flashMuzzle: () => undefined,
+      aimLevel: this.aimLevel,
+      onThrow: ctx.onThrow,
+    });
+    if (!res.swung) return;
+    if (res.kills > 0 && useGameStore.getState().perks.includes('br_adrenaline')) {
+      this.adrenalineT = 5;
+    }
+    // the same swing can take down fleeing wildlife
+    const animalHits = ctx.animals.damageInArc(
+      this.pos, this.yaw, res.stats.range, res.stats.halfArcRad,
+      res.stats.damage, (kill) => ctx.onAnimalKill(kill),
+    );
+    const anyHit = res.hits > 0 || animalHits > 0;
+    if (anyHit) {
+      // impact feel: brief freeze-frame + camera punch + hitmark
+      getGame()?.requestHitstop(res.kills > 0 ? 0.09 : 0.055);
+      this.hitPunch = res.kills > 0 ? 0.34 : 0.22;
+      useGameStore.getState().setHitmark(res.kills > 0 ? 'kill' : 'hit');
+    }
+    if (res.kills > 0) {
+      // Lane 8 events: plain melee kills pay husk_kill_melee each;
+      // special-class kills pay special_kill instead
+      const plain = res.kills - res.specialKills;
+      if (plain > 0) awardXpEvent('husk_kill_melee', plain);
+      if (res.specialKills > 0) awardXpEvent('special_kill', res.specialKills);
+    }
   }
 
   flashMuzzle(): void {
@@ -574,7 +644,6 @@ export class Player {
       while (this.camYaw < -Math.PI) this.camYaw += Math.PI * 2;
     }
 
-    this.meleeCd -= dt;
     this.rangedCd -= dt;
     if (this.adrenalineT > 0) this.adrenalineT = Math.max(0, this.adrenalineT - dt);
     if (this.muzzleT > 0) {
@@ -635,11 +704,15 @@ export class Player {
     const moving = this.vel.length() > 0.6;
     this.speedNorm = clamp(this.vel.length() / SPRINT_SPEED, 0, 1);
 
-    // jump (edge) + gravity; the heightmap is the ground
+    // jump (edge) + gravity; the heightmap is the ground. Jumping is
+    // one of stamina's only two costs (Ian 2026-10-22) — a gassed
+    // player stays on the ground.
     if (input.jump && this.grounded && !this.crouching && !wadeBlocksJump(groundHere)) {
-      this.vy = JUMP_VEL;
-      this.grounded = false;
-      sfx.play('step', { volume: 0.4 });
+      if (this.spendStamina(JUMP_STAMINA_COST)) {
+        this.vy = JUMP_VEL;
+        this.grounded = false;
+        sfx.play('step', { volume: 0.4 });
+      }
     }
     if (!this.grounded) {
       this.vy -= GRAVITY * dt;
@@ -737,29 +810,12 @@ export class Player {
       this.armR.rotation.x *= settle;
     }
 
-    // stamina
-    if (sprinting) {
-      this.stamina = Math.max(0, this.stamina - 9 * dt);
-    } else {
-      const regen = moving ? 4.5 : 10;
-      this.stamina = Math.min(100, this.stamina + regen * dt);
-    }
-
-    // block cost (br_blocker): a husk hit that lands while you guard
-    // still costs stamina — Blocker pays 40% less. Detected as an hp
-    // drop while blocking with an attacking husk in reach, so falls
-    // and acid never charge it.
-    {
-      const st = useGameStore.getState();
-      if (
-        this.prevHp != null && st.hp < this.prevHp && input.blocking && this.handItemId != null &&
-        ctx.husks.husks.some((h) => h.alive && h.state === 'attack' &&
-          Math.hypot(h.group.position.x - this.pos.x, h.group.position.z - this.pos.z) < 3.4)
-      ) {
-        this.stamina = Math.max(0, this.stamina - blockHitStaminaCost(st.perks));
-      }
-      this.prevHp = st.hp;
-    }
+    // stamina (Ian 2026-10-22): sprint drain + jump cost are the ONLY
+    // charges — swinging, blocking and taking hits are free. Blocking
+    // still mitigates damage (perkEffects.blockThroughFactor); it just
+    // never bills the pool. The economy itself is pure and unit-tested
+    // (moveMath.staminaTick).
+    this.stamina = staminaTick(this.stamina, dt, sprinting, moving);
 
     // lean state: Q/E held (or mobile buttons) — computed before combat so
     // shots and swings originate from the peeked position
@@ -906,9 +962,19 @@ export class Player {
       const rInst = s.equipped.ranged ? s.inventory.find((i) => i.uid === s.equipped.ranged) : undefined;
       const rDef = rInst ? ITEMS[rInst.itemId] : undefined;
       const target = !rDef ? 0 : this.aimLevel === 2 ? 1 : this.aimLevel === 1 ? 0.55 : 0;
-      const t = Math.max(0.05, (rDef?.adsTime ?? 0.25) * modAdsTimeMult(rInst?.mods ?? []));
+      // the sight sets the final raise pace: a dot snaps up, glass
+      // takes its time (gunMath SIGHT_PROFILES via sightFor)
+      const sight = rDef ? sightFor(rDef, rInst?.mods ?? []) : null;
+      const sightMult = target === 1 && sight ? sight.adsTimeMult : 1;
+      const t = Math.max(0.05, (rDef?.adsTime ?? 0.25) * modAdsTimeMult(rInst?.mods ?? []) * sightMult);
       const step = dt / t;
       this.adsBlend += clamp(target - this.adsBlend, -step, step);
+      // HUD sight picture: which reticle to draw once the gun is up
+      const adsSightNow = this.aimLevel === 2 && this.adsBlend > 0.85 && sight ? sight.type : null;
+      if (adsSightNow !== this.adsSightSent) {
+        this.adsSightSent = adsSightNow;
+        s.setAdsSight(adsSightNow);
+      }
     }
 
     // --- reload (R): timed; rounds move from the pack into the magazine.
@@ -988,57 +1054,26 @@ export class Player {
     }
 
     // --- attacks (blocked while guarding or mid-draw) ---
-    if (input.attackMelee && this.meleeCd <= 0 && this.blockBlend < 0.5 && this.drawT <= 0) {
-      // leaning shifts the swing origin: you can hook a swing around a corner
-      const camRight = new THREE.Vector3(Math.cos(this.camYaw), 0, -Math.sin(this.camYaw));
-      const swingOrigin = this.pos.clone().addScaledVector(camRight, this.leanAmt * 0.55);
-      const res = tryMelee({
-        husks: ctx.husks,
-        emitNoise: ctx.emitNoise,
-        playerPos: swingOrigin,
-        playerYaw: this.yaw,
-        aimDir: new THREE.Vector3(),
-        eyePos: new THREE.Vector3(),
-        spendStamina: (n) => this.spendStamina(n),
-        flashMuzzle: () => undefined,
-        aimLevel: this.aimLevel,
-        onThrow: ctx.onThrow,
-      });
-      if (res.swung) {
-        // br_adrenaline: a kill in the last 5s makes this swing faster
-        const durMult = swingDurationMult(useGameStore.getState().perks, this.adrenalineT > 0);
-        this.swingTotal = res.stats.swingTime * durMult;
-        this.meleeCd = res.stats.swingTime * durMult + 0.16;
-        this.attackT = res.stats.swingTime * durMult; // swing the arm — weapon or bare fist
-        if (res.kills > 0 && useGameStore.getState().perks.includes('br_adrenaline')) {
-          this.adrenalineT = 5;
-        }
-        // rebuild the trail to this weapon's exact sweep wedge (range × arc),
-        // shifted toward the lean like the swing origin is
-        this.swingTrail.geometry.dispose();
-        this.swingTrail.geometry = new THREE.RingGeometry(
-          0.9, res.stats.range, 24, 1,
-          -Math.PI / 2 - res.stats.halfArcRad, res.stats.halfArcRad * 2,
-        );
-        this.swingTrail.position.x = this.leanAmt * 0.55;
-        // the same swing can take down fleeing wildlife
-        const animalHits = ctx.animals.damageInArc(
-          this.pos, this.yaw, res.stats.range, res.stats.halfArcRad,
-          res.stats.damage, (kill) => ctx.onAnimalKill(kill),
-        );
-        const anyHit = res.hits > 0 || animalHits > 0;
-        if (anyHit) {
-          // impact feel: brief freeze-frame + camera punch + hitmark
-          getGame()?.requestHitstop(res.kills > 0 ? 0.09 : 0.055);
-          this.hitPunch = res.kills > 0 ? 0.34 : 0.22;
-          useGameStore.getState().setHitmark(res.kills > 0 ? 'kill' : 'hit');
-        }
-        if (res.kills > 0) {
-          // Lane 8 events: plain melee kills pay husk_kill_melee each;
-          // special-class kills pay special_kill instead
-          const plain = res.kills - res.specialKills;
-          if (plain > 0) awardXpEvent('husk_kill_melee', plain);
-          if (res.specialKills > 0) awardXpEvent('special_kill', res.specialKills);
+    // Melee runs on the SwingTimer state machine (Combat): windup ->
+    // active -> recovery from the WEAPON's timing profile. The sweep
+    // resolves when the active window opens — not on the click — and
+    // a click mid-swing queues one follow-up that starts exactly when
+    // recovery ends. Swings never touch stamina (Ian 2026-10-22).
+    {
+      const ev = this.swing.update(dt);
+      if (this.swing.justStarted && this.swing.current) {
+        this.armSwingAnim(this.swing.current); // a queued chain re-arms
+      }
+      if (ev.hit) this.resolveMeleeSwing(ctx);
+      if (input.attackMelee && this.blockBlend < 0.5 && this.drawT <= 0) {
+        if (this.swing.busy) {
+          this.swing.queue();
+        } else {
+          const stats = swingStatsFor(equippedMeleeId());
+          // br_adrenaline: swings started within 5s of a kill run faster
+          const durMult = swingDurationMult(useGameStore.getState().perks, this.adrenalineT > 0);
+          this.swingDurMult = durMult;
+          if (this.swing.start(stats, durMult)) this.armSwingAnim(stats);
         }
       }
     }
@@ -1055,8 +1090,17 @@ export class Player {
       const convDist = rdef ? this.convDistFor(ctx.camera, ctx.husks, ctx.groundY, rdef.range ?? 45) : 25;
       const conv = convergedDir(eye, camOrigin, dir, convDist);
       const shotDir = new THREE.Vector3(conv.x, conv.y, conv.z);
+      // sway rides the sight picture: magnification magnifies the
+      // wander (scope), a dot steadies it a touch (gunMath profiles)
+      const sPre = useGameStore.getState();
+      const rInstPre = sPre.equipped.ranged ? sPre.inventory.find((i) => i.uid === sPre.equipped.ranged) : undefined;
+      const sightPre = rdef ? sightFor(rdef, rInstPre?.mods ?? []) : null;
       const sway = rdef
-        ? swayOffset(this.timeS, rdef.sway ?? 0, this.stamina, this.crouching, this.aimLevel)
+        ? swayOffset(
+            this.timeS,
+            (rdef.sway ?? 0) * (sightPre ? sightSwayMult(sightPre, this.adsBlend) : 1),
+            this.stamina, this.crouching, this.aimLevel,
+          )
         : { x: 0, y: 0 };
       const fired = tryRanged({
         husks: ctx.husks,
@@ -1068,7 +1112,6 @@ export class Player {
         camRay: { origin: camOrigin, dir },
         convDist,
         muzzlePos,
-        spendStamina: (n) => this.spendStamina(n),
         flashMuzzle: () => this.flashMuzzle(),
         aimLevel: this.aimLevel,
         groundY: ctx.groundY,
@@ -1224,10 +1267,11 @@ export class Player {
       cam.rotateZ(-leanAmt * 0.32); // roll the view with the lean
     }
 
-    // sight picture: field of view narrows as you go down the sights;
-    // a full sprint kicks it wider — speed you can feel
+    // sight picture: field of view narrows as you go down the sights —
+    // to the EQUIPPED SIGHT's own FOV (iron 38°, dot ~31°, scope by its
+    // zoom); a full sprint kicks it wider — speed you can feel
     const speedNorm = clamp(Math.hypot(this.vel.x, this.vel.z) / SPRINT_SPEED, 0, 1);
-    const wantFov = this.aimLevel === 2 ? 38 : this.aimLevel === 1 ? 52 : 60 + (sprinting ? sprintFovKick(speedNorm) : 0);
+    const wantFov = this.aimLevel === 2 ? this.currentSightFov() : this.aimLevel === 1 ? 52 : 60 + (sprinting ? sprintFovKick(speedNorm) : 0);
     if (Math.abs(cam.fov - wantFov) > 0.05) {
       cam.fov = lerp(cam.fov, wantFov, expDamp(10, dt));
       cam.updateProjectionMatrix();

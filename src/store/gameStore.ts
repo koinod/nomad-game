@@ -128,6 +128,10 @@ interface GameState {
   hitmark: { kind: 'hit' | 'kill' | 'headshot'; at: number } | null;
   setMeleeTarget: (b: boolean) => void;
   setHitmark: (kind: 'hit' | 'kill' | 'headshot') => void;
+  /** Sight picture the HUD draws at full ADS (Player-synced; null =
+   *  not down the sights — the plain crosshair rules). */
+  adsSight: 'iron' | 'dot' | 'scope' | null;
+  setAdsSight: (t: 'iron' | 'dot' | 'scope' | null) => void;
 
   // crafting stations: which workstation the player is standing at (if any)
   nearStation: import('../data/items').StationId | null;
@@ -766,6 +770,7 @@ export const useGameStore = create<GameState>()((set, get) => {
 
     meleeTarget: false,
     hitmark: null,
+    adsSight: null,
     nearStation: null,
     atBase: null,
     weatherNow: { state: 'clear', wetPct: 0 },
@@ -1674,6 +1679,9 @@ export const useGameStore = create<GameState>()((set, get) => {
       if (get().meleeTarget !== b) set({ meleeTarget: b });
     },
     setHitmark: (kind) => set({ hitmark: { kind, at: Date.now() } }),
+    setAdsSight: (t) => {
+      if (get().adsSight !== t) set({ adsSight: t });
+    },
     setNearStation: (s) => {
       if (get().nearStation !== s) set({ nearStation: s });
     },
