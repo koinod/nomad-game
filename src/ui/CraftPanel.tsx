@@ -38,6 +38,7 @@ import {
   type CraftContext,
 } from '../systems/crafting';
 import { sfx } from '../systems/audio';
+import { presenceContext } from '../systems/facilityPresence';
 import { FinishesSection } from './FinishRow';
 
 const STATION_ORDER: StationId[] = ['workbench', 'chemistry', 'industrial'];
@@ -51,7 +52,7 @@ function stationRecipes(station: StationId): FieldRecipe[] {
 export function CraftPanel() {
   const inventory = useGameStore((s) => s.inventory);
   const nearStation = useGameStore((s) => s.nearStation);
-  const base = useGameStore((s) => s.base);
+  const atBase = useGameStore((s) => s.atBase);
   const perks = useGameStore((s) => s.perks);
   const craftRecipe = useGameStore((s) => s.craftRecipe);
   const jobs = useCraftQueue((s) => s.jobs);
@@ -72,23 +73,29 @@ export function CraftPanel() {
     return () => clearInterval(id);
   }, [tick]);
 
-  const facilities = base?.facilities ?? [];
+  // ORDER #4 C5: facility context comes from the presence mirror —
+  // the base the player is standing in, and only that base. Away from
+  // every claimed base there is no facility context at all.
   const countItem = (id: string) => inventory.reduce((a, i) => a + (i.itemId === id ? i.qty : 0), 0);
 
-  const ctxFor = (station: StationId | null): CraftContext => ({
-    countItem,
-    nearStation,
-    facilityStation: null,
-    nearStationTier: station
-      ? reachableStationTier(station, {
-          atWorldStation: nearStation === station,
-          facilities,
-        })
-      : 0,
-    facilities,
-    skillLevel: storeSkillLevel,
-    perks,
-  });
+  const ctxFor = (station: StationId | null): CraftContext => {
+    const pc = presenceContext(atBase, station);
+    return {
+      countItem,
+      nearStation,
+      facilityStation: pc.facilityStation,
+      nearStationTier: station
+        ? reachableStationTier(station, {
+            atWorldStation: nearStation === station,
+            facilities: pc.facilityIds,
+          })
+        : 0,
+      facilities: pc.facilityIds,
+      skillLevel: storeSkillLevel,
+      perks,
+      atBaseName: atBase?.siteName ?? null,
+    };
+  };
 
   const nowMin = useGameStore.getState().daysElapsed * 1440 + useGameStore.getState().timeMinutes;
 
@@ -197,7 +204,11 @@ export function CraftPanel() {
         <section key={st}>
           <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">
             {STATION_LABEL[st]}
-            {nearStation === st ? ' — in reach' : ' — visit to craft'}
+            {nearStation === st
+              ? ' — in reach'
+              : atBase && (atBase.stationTiers[st] ?? 0) > 0
+                ? ` — in reach at ${atBase.siteName}`
+                : ' — visit to craft'}
           </h3>
           <div className="flex flex-col gap-1.5">{stationRecipes(st).map((r) => recipeRow(r))}</div>
         </section>
