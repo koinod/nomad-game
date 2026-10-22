@@ -207,38 +207,79 @@ export function ackermannSteer(steer: number, wheelX: number, wheelZ: number): [
 export const SIDE_FRICTION_FRONT = 0.9;
 export const SIDE_FRICTION_REAR = 0.9;
 
-/** Per-def suspension tune (Item 3, 2026-10-21). Until this wave
- *  every car ran one hardcoded stiffness (32), NO damping was ever
- *  set, and travel was a shared 0.28 — the GT500 (heavier, lower,
- *  period geometry) bottomed out through its whole travel on a 3 m
- *  drop and its wheels visually rose past the fender arches.
+/** Per-def suspension tune (Item 3, 2026-10-21; pitch-sway pass
+ *  2026-10-22). Until the 2026-10-21 wave every car ran one
+ *  hardcoded stiffness (32), NO damping was ever set, and travel
+ *  was a shared 0.28 — the GT500 (heavier, lower, period geometry)
+ *  bottomed out through its whole travel on a 3 m drop and its
+ *  wheels visually rose past the fender arches.
  *
  *  archTravelM is the body's own datum: how far a wheel may rise
  *  (suspension length below rest) before its top passes the arch
  *  lip; archTopM is the arch lip's height over the ground plane.
  *  The visual clamp and the geometry test both read these numbers.
- *  Mustang damping stays UNSET (Rapier defaults) — its measured
- *  behavior was Ian-approved and does not move; the GT500 gets a
- *  full explicit tune for its mass and geometry. */
+ *
+ *  2026-10-22 (Ian's playtest verdict: "swaying front to back —
+ *  take that out"): the Mustang's damping no longer stays unset.
+ *  Diagnosis (probes in vehicleDynamics.test.ts history): the sway
+ *  was TWO defects — (1) the service brake was a flat 26,000 N·m
+ *  per wheel, which the controller converts to patch force with NO
+ *  friction cap (measured decel 146 m/s² ≈ 15 g — the car stoppied,
+ *  rear wheels airborne, then porpoised on recovery); brakes are
+ *  now sized from the tire (see brakeTorques below). (2) What
+ *  damping existed was far under critical for the pitch mode.
+ *  Damping here is derived per def from the quarter-car relation
+ *  c = 2·ζ·√(k·m) on each corner (k from the measured sag law
+ *  below, m the corner mass), ζ ≈ 1 for the pitch mode — no
+ *  overshoot, one settle. The Rapier-unit conversion of c is
+ *  calibrated on the measured settle tests, not assumed.
+ *
+ *  SPRING LAW (measured across the fleet, 2026-10-22): Rapier's
+ *  suspension spring is load-normalized — static sag ≈ 2.3 /
+ *  stiffness metres, independent of mass (Mustang 0.075 @ 32,
+ *  GT500 0.050 @ 46, Dark Horse 0.048 @ 48, Sprinter 0.038 @ 60,
+ *  Prime 0.017 @ 136). Stiffness picks the sag and the ride
+ *  frequency (ω = √(g/sag)); per-axle corner loads then set the
+ *  DAMPING via the quarter-car relation, which is where the mass
+ *  distribution actually enters this controller. */
 export interface SuspTune {
   stiffness: number;
   compression?: number;
   relaxation?: number;
+  /** Rear-axle overrides (wheels 2/3); absent = the front values. */
+  stiffnessRear?: number;
+  compressionRear?: number;
+  relaxationRear?: number;
   travel: number;
   archTravelM: number;
   archTopM: number;
   /** Rapier's per-wheel max suspension force. The engine DEFAULT
-   *  silently caps at ~car mass per wheel (measured: a 2,200 kg
-   *  vehicle settles, a 2,600 kg one collapses to its travel floor
-   *  at ANY stiffness) — the cars never reach it, so they keep the
-   *  default and their tuned behavior is untouched. Heavy defs set
-   *  it explicitly: ~3x the static corner load, so landings can
-   *  still spike and bottom like the cars do. */
+   *  silently caps near the static corner load (measured: a
+   *  2,200 kg vehicle settles, a 2,600 kg one collapses to its
+   *  travel floor at ANY stiffness). The 2026-10-21 wave assumed
+   *  "the cars never reach it" — WRONG under braking: a 0.95 g
+   *  stop transfers ~1.4x the static load onto the front corners,
+   *  the default cap saturates, the front sinks at damper speed
+   *  until the chassis collider grounds out at ~5 degrees, and
+   *  the recovery is the porpoise Ian ordered removed (probed
+   *  2026-10-22). EVERY def now sets it explicitly, sized per def
+   *  from the dive probes: above every sustained load a tire can
+   *  actually generate (brake transfer peaks ~1.4x the static
+   *  corner), with landing headroom — the heavies sit ~3x their
+   *  corner load, the GT500 30,000 (its dive died at any cap
+   *  >= 30k while its 3 m drop still bottoms there). Setting the
+   *  cap at all also changes Rapier's force path (measured: sag
+   *  and impact character shift) — the integration pins encode
+   *  the capped character. */
   maxForceN?: number;
 }
 export const SUSP_TUNES: Record<string, SuspTune> = {
-  mustang: { stiffness: 32, travel: 0.28, archTravelM: 0.18, archTopM: 0.87 },
-  gt500: { stiffness: 46, compression: 4.5, relaxation: 6.5, travel: 0.24, archTravelM: 0.17, archTopM: 0.86 },
+  // Stallion FX: stiffness 32 sagged 0.075 m and left the rear
+  // near its travel floor under full throttle; 44 puts the sag at
+  // ~0.052 m (the Dark Horse's class). Damping set explicitly per
+  // the pitch-sway pass (was: Rapier defaults, i.e. none).
+  mustang: { stiffness: 44, compression: 4.5, relaxation: 6.5, travel: 0.28, archTravelM: 0.18, archTopM: 0.87, maxForceN: 16000 },
+  gt500: { stiffness: 46, compression: 4.5, relaxation: 6.5, travel: 0.24, archTravelM: 0.17, archTopM: 0.86, maxForceN: 30000 },
   // Class-8 air-ride class tune, scaled to the clean-sheet truck's
   // 12.1 t crewed mass (stiffness and force cap x 12,133/9,833 off
   // the retired 9.8 t tune, so the laden stance does not move).
@@ -256,10 +297,110 @@ export const SUSP_TUNES: Record<string, SuspTune> = {
   // invariant holds for the STOCK rolling set (2×0.345 + 0.17 =
   // 0.86 ≤ 0.87); the Stage 2 MT set overlapping the stock arches
   // is a documented build residual (lift is game-side), not pinned.
-  dark_horse: { stiffness: 48, compression: 4.5, relaxation: 6.5, travel: 0.24, archTravelM: 0.17, archTopM: 0.87 },
+  dark_horse: { stiffness: 48, compression: 4.5, relaxation: 6.5, travel: 0.24, archTravelM: 0.17, archTopM: 0.87, maxForceN: 18500 },
 };
 export function suspTuneFor(defId: string): SuspTune {
   return SUSP_TUNES[defId] ?? SUSP_TUNES.mustang;
+}
+
+/** The tune one wheel runs: wheels 2/3 (rear axle) take the rear
+ *  overrides when the def declares them. */
+export function tuneForWheel(tune: SuspTune, wheelIdx: number): { stiffness: number; compression?: number; relaxation?: number } {
+  if (wheelIdx >= 2) {
+    return {
+      stiffness: tune.stiffnessRear ?? tune.stiffness,
+      compression: tune.compressionRear ?? tune.compression,
+      relaxation: tune.relaxationRear ?? tune.relaxation,
+    };
+  }
+  return { stiffness: tune.stiffness, compression: tune.compression, relaxation: tune.relaxation };
+}
+
+/** CG height per def (m over the ground plane) — the lever arm of
+ *  longitudinal weight transfer. The cars share the estimator's
+ *  0.52 (carSpec's transfer term); the van and the Class-8 carry
+ *  theirs higher, as their bodies do. */
+export const CG_HEIGHT_M: Record<string, number> = {
+  mustang: 0.52,
+  gt500: 0.52,
+  dark_horse: 0.52,
+  nomad_prime: 1.05,
+  sprinter_van: 0.78,
+};
+
+/** Fraction of the tire's friction limit the service brake is
+ *  sized to: just under lockup, so a full stop rides the tire
+ *  instead of blowing through it. */
+export const BRAKE_GRIP_FRACTION = 0.92;
+
+/**
+ * The controller's brake-path gain, MEASURED (pitch-sway pass,
+ * 2026-10-22): the patch force a brake application produces is
+ * ~123 × the sum of the values handed to setWheelBrake — linear
+ * from near zero to lockup, and the same 121–125 for every def
+ * (1.8 t coupe to 12.1 t tractor, wheel radii 0.343–0.538). The
+ * old flat 26,000 therefore acted as ~3.2 MN of patch force
+ * (≈15 g of decel, a stoppie, and the porpoise). brakeTorques
+ * returns honest N·m; the application sites divide by
+ * (wheelRadius × BRAKE_PATH_GAIN) so the defs carry real numbers.
+ * The gain presumably rides on the 1/120 world timestep set in
+ * create() — the decel pins in vehicleDynamics.test.ts will catch
+ * it if that ever changes.
+ */
+export const BRAKE_PATH_GAIN = 123;
+
+/** Brake pressure build-up (1/s toward demand): a real hydraulic
+ *  system takes ~0.25 s to reach full line pressure; applying full
+ *  torque in one step kicks the pitch mode with an impulse no
+ *  damper can hide. Release is faster (~0.1 s), as pedals are. */
+export const BRAKE_RISE_RATE = 4; // full pressure in ~0.25 s
+export const BRAKE_RELEASE_RATE = 10;
+
+/** The lift kit's spring softening: the pre-pass flat override (26)
+ *  was ~0.8 × the Mustang's old rate; the kit now scales each def's
+ *  own per-axle rates by the same proportion. */
+export const LIFT_SPRING_SCALE = 0.8;
+
+export interface BrakeTorques {
+  /** Per-wheel service brake torque (N·m) at the front axle. */
+  front: number;
+  /** Per-wheel service brake torque (N·m) at the rear axle. */
+  rear: number;
+  /** Per-wheel handbrake torque (N·m), rear axle only. */
+  handRear: number;
+}
+
+/**
+ * REAL BRAKE SIZING (pitch-sway pass, 2026-10-22). The controller
+ * turns brake torque into patch force as torque / radius with NO
+ * friction cap — the old flat 26,000 N·m per wheel measured a
+ * 146 m/s² (≈15 g) initial decel, a stoppie (rear wheels at full
+ * droop, group origin 0.95 m up), and the porpoise on recovery
+ * that Ian ordered removed. Real brakes are sized BY the tire:
+ * the most a wheel can transmit is μ × its dynamic corner load.
+ *
+ * Total service capacity F = μ·m·g, split front/rear by the
+ * DYNAMIC axle loads at the friction limit: transfer fraction
+ * μ·h/L moves load forward under braking, so the front bias is
+ * frontFrac + μ·h/L (the standard brake-bias derivation — a car
+ * braked at its own limit wants ~70% front). The handbrake is
+ * sized to lock the rear axle against its static load — which is
+ * all a handbrake can honestly do — not the old flat 30,000.
+ * Pure: derived from the live params, so cargo mass moves the
+ * brakes with the car. Tests pin the decel ceiling.
+ */
+export function brakeTorques(p: CarParams, defId: string, geom: ChassisGeom): BrakeTorques {
+  const L = geom.wheelZ * 2;
+  const h = CG_HEIGHT_M[defId] ?? 0.52;
+  const frontFrac = 1 - p.rearLoadFrac;
+  const frontDyn = THREE.MathUtils.clamp(frontFrac + (p.tireMu * h) / L, 0.5, 0.85);
+  const totalF = BRAKE_GRIP_FRACTION * p.tireMu * p.massKg * 9.81;
+  const rearStaticCornerN = (p.massKg * 9.81 * p.rearLoadFrac) / 2;
+  return {
+    front: (totalF * frontDyn * p.wheelRadiusM) / 2,
+    rear: (totalF * (1 - frontDyn) * p.wheelRadiusM) / 2,
+    handRear: p.tireMu * rearStaticCornerN * p.wheelRadiusM,
+  };
 }
 
 /** The wheel-visual clamp (Item 3b): a wheel may tuck INTO its arch
@@ -329,6 +470,12 @@ export class CarPhysics {
    *  visual value. */
   rawSuspension: [number, number, number, number] = [0.32, 0.32, 0.32, 0.32];
   private spin = 0;
+  /** Brake line pressure 0..1 — ramps like the real system (see
+   *  BRAKE_RISE_RATE); shared by the service brake and handbrake. */
+  private brakePress = 0;
+  /** Time spent in the parked-hold state (handbrake, no demand,
+   *  near-still, dry) — feeds the sleep in step(). */
+  private holdT = 0;
   // kinematic fallback state
   private kinGear = 0;
   private shiftT = 0;
@@ -437,9 +584,10 @@ export class CarPhysics {
     }
     const tune = suspTuneFor(this.defId);
     for (let i = 0; i < 4; i++) {
-      ctrl.setWheelSuspensionStiffness(i, tune.stiffness);
-      if (tune.compression !== undefined) ctrl.setWheelSuspensionCompression(i, tune.compression);
-      if (tune.relaxation !== undefined) ctrl.setWheelSuspensionRelaxation(i, tune.relaxation);
+      const t = tuneForWheel(tune, i);
+      ctrl.setWheelSuspensionStiffness(i, t.stiffness);
+      if (t.compression !== undefined) ctrl.setWheelSuspensionCompression(i, t.compression);
+      if (t.relaxation !== undefined) ctrl.setWheelSuspensionRelaxation(i, t.relaxation);
       if (tune.maxForceN !== undefined) ctrl.setWheelMaxSuspensionForce(i, tune.maxForceN);
       ctrl.setWheelMaxSuspensionTravel(i, tune.travel);
       ctrl.setWheelFrictionSlip(i, this.params.tireMu * this.gripScale * 4.0);
@@ -457,12 +605,16 @@ export class CarPhysics {
     this.params = paramsForDef(this.defId, upgrades, cargoKg);
     if (this.chassisCollider) this.chassisCollider.setMass(this.params.massKg);
     if (this.controller) {
+      const tune = suspTuneFor(this.defId);
       for (let i = 0; i < 4; i++) {
         this.controller.setWheelFrictionSlip(i, this.params.tireMu * this.gripScale * 4.0);
         // the lift kit is geometry, not a stat: longer rest length,
-        // softer springs — clearance you can see, roll you can feel
+        // softer springs — clearance you can see, roll you can feel.
+        // The softening scales the def's own per-axle rates (the old
+        // flat 26 was the pre-pass Mustang rate × ~0.8).
         this.controller.setWheelSuspensionRestLength(i, this.restLen());
-        this.controller.setWheelSuspensionStiffness(i, this.params.lifted ? 26 : suspTuneFor(this.defId).stiffness);
+        const t = tuneForWheel(tune, i);
+        this.controller.setWheelSuspensionStiffness(i, this.params.lifted ? t.stiffness * LIFT_SPRING_SCALE : t.stiffness);
       }
     }
   }
@@ -492,6 +644,7 @@ export class CarPhysics {
     this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     this.speed = 0;
+    this.holdT = 0; // a teleported body restarts its parked-hold clock
   }
 
   wake(): void {
@@ -530,7 +683,14 @@ export class CarPhysics {
     let gear = this.gearState;
     const rpmIn = (g: number) => ((v / circ) * p.gears[g] * p.finalDrive) * 60;
     while (gear < p.gears.length - 1 && rpmIn(gear) > p.redlineRpm) gear++;
-    while (gear > 0 && rpmIn(gear) < 1500) gear--;
+    // downshift hysteresis must clear the post-shift landing rpm
+    // (redline x ratio step, ~0.84 on the Prime's box) MINUS the
+    // speed the shift cut bleeds on a grade. At the old 1500 the
+    // Prime trapped itself at ~2 m/s on a 10 deg climb: upshift at
+    // redline, 0.25 s cut, rpm fell through 1500, downshift, repeat
+    // (probed 2026-10-22). Real AMT grade logic holds the gear;
+    // 1100 is below every box's landing band with room for the cut.
+    while (gear > 0 && rpmIn(gear) < 1100) gear--;
     if (this.speed < -0.1) gear = 0; // reverse uses 1st
     // a shift is a real event: drive force cuts for 0.25 s (same in the
     // estimator — the displayed numbers and the body agree)
@@ -538,12 +698,20 @@ export class CarPhysics {
       this.shiftT = 0.25;
     }
     this.gearState = gear;
-    let rpm = ((v / circ) * p.gears[gear] * p.finalDrive) * 60;
-    rpm = Math.max(p.idleRpm, Math.min(rpm, p.redlineRpm + 400));
+    const rawRpm = ((v / circ) * p.gears[gear] * p.finalDrive) * 60;
+    let rpm = Math.max(p.idleRpm, Math.min(rawRpm, p.redlineRpm + 400));
     const tq = torqueAt(p.torqueCurve, rpm);
     const wheelTq = tq * p.gears[gear] * p.finalDrive * p.drivetrainEff;
     const cut = this.shiftT > 0 ? 0 : 1;
-    return { force: (wheelTq / p.wheelRadiusM) * throttle * cut, rpm, gear };
+    // the rev limiter is real: past redline + 400 the ECU cuts fuel
+    // and the engine makes no force. Forward gears never reach it
+    // (they shift first, and top speed is drag/gearing-balanced
+    // below it), but REVERSE has one gear — without the cut the
+    // torque lookup held its last breakpoint flat and a reversing
+    // truck ran away past 100 m/s (probed 2026-10-22). Reverse top
+    // speed is now what the gearing says it is.
+    const limiter = rawRpm > p.redlineRpm + 400 ? 0 : 1;
+    return { force: (wheelTq / p.wheelRadiusM) * throttle * cut * limiter, rpm, gear };
   }
 
   step(dt: number, input: DriveInput, v: Vehicle, groundY: (x: number, z: number) => number): void {
@@ -581,18 +749,64 @@ export class CarPhysics {
     this.stalled = wsNow.stalled;
     body.setAngularDamping(wsNow.submerged > 0.25 ? 2.2 : 0.9);
 
+    // PARKED HOLD (pitch-sway pass, 2026-10-22): the raycast tire
+    // holds a slope through its slip curve, which needs slip —
+    // a handbrake-held car creeps ~3 cm/s down a 10 deg slope
+    // forever (measured; brake value is irrelevant, the wheels
+    // are already locked). A real parked car does not creep: its
+    // wheels are mechanically locked and the contact is static.
+    // The engine's own model of that state is SLEEP. Held on the
+    // handbrake, dry, no throttle, near-zero speed for half a
+    // second -> the body sleeps; any control demand wakes it.
+    const hasDemand = Math.abs(input.throttle) > 0.02 || Math.abs(input.steer) > 0.02;
+    if (body.isSleeping() && hasDemand) body.wakeUp();
+    // total velocity, not forward speed: a body FALLING (drop tests,
+    // hoisted cars) has ~0 forward speed but is not "held"
+    const lvH = body.linvel();
+    const speedMag = Math.hypot(lvH.x, lvH.y, lvH.z);
+    const holding = input.handbrake && !hasDemand && speedMag < 0.08 && wsNow.submerged === 0;
+    this.holdT = holding ? this.holdT + dt : 0;
+    if (this.holdT > 0.5 && !body.isSleeping()) body.sleep();
+
     const th = input.hasFuel && !this.stalled ? input.throttle : 0;
-    const { force, rpm, gear } = this.gearAndForce(th);
-    this.rpm = rpm;
-    this.gear = gear;
+    const gf = this.gearAndForce(th);
+    this.rpm = gf.rpm;
+    this.gear = gf.gear;
     this.throttleLoad = Math.abs(th);
+    // the driven axle's traction limit, the estimator's own formula
+    // (carSpec.estimatePerformance): engine force past what the
+    // driven tires can transmit is not power, it's wheelspin the
+    // build sheet never promised. Forward launches already live
+    // under it; the path that ran away was REVERSE at standstill —
+    // the Prime's 1350 N·m at idle through its 14.4 first gear is
+    // 136 kN at the patch uncapped. Capped here, forward and
+    // reverse alike, the body and the phone's numbers agree.
+    let force = gf.force;
+    {
+      const h = CG_HEIGHT_M[this.defId] ?? 0.52;
+      const L = this.geom.wheelZ * 2;
+      const transfer = (p.massKg * Math.abs(force / p.massKg) * h) / L;
+      const tractionMax = p.tireMu * this.gripScale * (p.massKg * 9.81 * p.rearLoadFrac + transfer);
+      force = THREE.MathUtils.clamp(force, -tractionMax, tractionMax);
+    }
     const braking = (th < 0 && this.speed >= 0.5) || (th > 0 && this.speed < -0.5);
+    // brakes sized by the tire, per axle (brakeTorques) — never a
+    // flat force the contact patch cannot transmit. Pressure ramps
+    // like a real hydraulic system; the handbrake shares the ramp
+    // (a cable pull is not a step function either).
+    const brakeDemand = braking || input.handbrake;
+    this.brakePress = THREE.MathUtils.clamp(
+      this.brakePress + (brakeDemand ? BRAKE_RISE_RATE : -BRAKE_RELEASE_RATE) * dt,
+      0, 1,
+    );
+    const brakes = brakeTorques(p, this.defId, this.geom);
+    const toController = (torqueNm: number) => (torqueNm / (p.wheelRadiusM * BRAKE_PATH_GAIN)) * this.brakePress;
     for (let i = 0; i < 4; i++) {
       const driven = i >= 2;
       ctrl.setWheelEngineForce(i, driven ? (braking ? 0 : force / 2) : 0);
       let brake = 0;
-      if (braking) brake = 26000;
-      if (input.handbrake && i >= 2) brake = 30000;
+      if (braking) brake = toController(i >= 2 ? brakes.rear : brakes.front);
+      if (input.handbrake && i >= 2) brake = toController(brakes.handRear);
       ctrl.setWheelBrake(i, brake);
     }
 
@@ -653,12 +867,17 @@ export class CarPhysics {
     this.syncVisual(dt, v);
   }
 
-  /** Parked: hold the car still (handbrake) without a driver. */
+  /** Parked: hold the car still without a driver — all four service
+   *  brakes at their real sized torques (the old flat 30,000 N·m
+   *  was ~15× what the tire can hold; the hold is identical, the
+   *  number is now honest). */
   parkBrake(): void {
     if (!this.controller || !this.world) return;
+    const brakes = brakeTorques(this.params, this.defId, this.geom);
+    const conv = 1 / (this.params.wheelRadiusM * BRAKE_PATH_GAIN);
     for (let i = 0; i < 4; i++) {
       this.controller.setWheelEngineForce(i, 0);
-      this.controller.setWheelBrake(i, 30000);
+      this.controller.setWheelBrake(i, (i >= 2 ? brakes.rear : brakes.front) * conv);
     }
     this.controller.updateVehicle(1 / 60);
     this.world.step();
@@ -710,10 +929,13 @@ export class CarPhysics {
     this.throttleLoad = Math.abs(th);
     const tq = torqueAt(p.torqueCurve, Math.min(rpm, p.redlineRpm));
     let force = ((tq * p.gears[gear] * p.finalDrive * p.drivetrainEff) / p.wheelRadiusM) * th;
-    const transfer = (p.massKg * Math.abs(force) / p.massKg * 0.52) / 2.718;
+    const transfer = (p.massKg * Math.abs(force) / p.massKg * (CG_HEIGHT_M[this.defId] ?? 0.52)) / (this.geom.wheelZ * 2);
     const tractionMax = p.tireMu * this.gripScale * (p.massKg * 9.81 * p.rearLoadFrac + transfer);
     force = THREE.MathUtils.clamp(force, -tractionMax, tractionMax);
-    if (th < 0 && this.speed > 0.5) force = -22000 / Math.max(1, 1); // braking
+    // service brake, sized by the tire like the rigid path (the old
+    // flat -22,000 N overrode the traction clamp above and meant
+    // 12 m/s² for the coupe but 1.8 for the truck)
+    if (th < 0 && this.speed > 0.5) force = -BRAKE_GRIP_FRACTION * p.tireMu * this.gripScale * p.massKg * 9.81;
     const resist = p.dragK * this.speed * Math.abs(this.speed)
       + p.rollingCoef * p.massKg * 9.81 * Math.tanh(this.speed * 2);
     const a = (force - resist) / p.massKg;
@@ -721,7 +943,11 @@ export class CarPhysics {
     // water drag, same medium as the rigid path
     if (this.submerged > 0) this.speed -= this.speed * Math.min(1, 2.0 * this.submerged * dt);
     if (th === 0 && Math.abs(this.speed) < 0.2) this.speed = 0;
-    this.speed = Math.max(-13, this.speed);
+    // reverse tops out at first gear's redline, same as the rigid
+    // path's limiter (the old flat -13 let the truck back up at
+    // 47 km/h its gearing cannot do)
+    const revMax = ((p.redlineRpm + 400) / (p.gears[0] * p.finalDrive)) * (2 * Math.PI * p.wheelRadiusM) / 60;
+    this.speed = Math.max(-revMax, this.speed);
     // bicycle yaw
     const steerTarget = -input.steer * MAX_STEER * (1 / (1 + Math.abs(this.speed) * 0.055));
     this.steerAngle += THREE.MathUtils.clamp(steerTarget - this.steerAngle, -2.8 * dt, 2.8 * dt);
