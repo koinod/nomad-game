@@ -20,7 +20,7 @@
 
 import * as THREE from 'three';
 import { FURNITURE_LOOT } from '../data/items';
-import { BETA_EXTRA_PADS } from '../data/betaLayout';
+import { BETA_EXTRA_PADS, BETA_WAIST_CROSSINGS } from '../data/betaLayout';
 import { Kit, type KitResult } from './kit';
 import type { Collider } from './Colliders';
 import { decalPlane } from './modelKit';
@@ -1499,7 +1499,8 @@ function citadelGround(gw: GroundWorks): void {
 
 function refugeGround(gw: GroundWorks): void {
   // the palisade ring, inset from the pad edge — W gate where the
-  // inland spur terminates, E gate facing the NC-12 corridor
+  // NC-12 west fork departs for the Pier, E gate facing the NC-12
+  // corridor
   gw.palisadeRun('x', -50, -86, 26, [], -1);
   gw.palisadeRun('x', 30, -86, 26, [], 1);
   gw.palisadeRun('z', -86, -50, 30, [[-44.5, -39.5]], -1);
@@ -1516,7 +1517,7 @@ function refugeGround(gw: GroundWorks): void {
   }
   gw.feature('refuge_palisade_n', 'refuge', 'palisade', -30, -50, 56, 0.4, 'Palisade north run.');
   gw.feature('refuge_palisade_s', 'refuge', 'palisade', -30, 30, 56, 0.4, 'Palisade south run.');
-  gw.feature('refuge_palisade_w', 'refuge', 'palisade', -86, -10, 0.4, 40, 'Palisade west run — gate where the inland spur terminates.');
+  gw.feature('refuge_palisade_w', 'refuge', 'palisade', -86, -10, 0.4, 40, 'Palisade west run — gate where the NC-12 west fork departs for the Pier.');
   gw.feature('refuge_palisade_e', 'refuge', 'palisade', 26, -10, 0.4, 40, 'Palisade east run — gate facing NC-12.');
 
   // ── greeble: fighting platforms inside the north run (deck on
@@ -1641,6 +1642,76 @@ const BUILDERS: Record<string, (cx: number, cz: number, rot: 0 | 1 | 2 | 3, gy: 
   tern_fuel_dock: buildFuelDock,
 };
 
+/** The founded decks over the waist channel — the visible half of
+ *  BETA_WAIST_CROSSINGS (waist-channel revision, aerial v2 canon).
+ *  betaTerrain stamps the founded bed into the grid and the roads
+ *  grade over it; this builds what the eye reads: a slab riding a
+ *  hand's breadth over the bed (the deck surface the road runs on),
+ *  guardrails on posts at both edges, and a concrete abutment
+ *  headwall at each end founded through the water to the channel
+ *  bed. Ground works, not kit buildings — they are road structures,
+ *  and the stronghold census (24 kits) does not count them. No
+ *  colliders: the crossing is driven on its graded roadbed and the
+ *  rails are dressing, the gantry's barrier-arm precedent. */
+function buildCrossingDecks(gw: GroundWorks): void {
+  const DECK_W = 11;
+  for (const c of BETA_WAIST_CROSSINGS) {
+    const [ax, az] = c.a;
+    const [bx, bz] = c.b;
+    const dx = bx - ax;
+    const dz = bz - az;
+    const len = Math.hypot(dx, dz);
+    const ux = dx / len;
+    const uz = dz / len;
+    const px = -uz;
+    const pz = ux;
+    const ry = Math.atan2(ux, uz);
+    const sector = c.id.startsWith('citadel') ? 'citadel' : 'pier_hq';
+    const slabTop = c.deckY + 0.06;
+    // Slab in ~11 m panels.
+    const panels = Math.max(1, Math.round(len / 11));
+    for (let n = 0; n < panels; n++) {
+      const tm = (n + 0.5) / panels;
+      const mx = ax + dx * tm;
+      const mz = az + dz * tm;
+      const panelLen = len / panels + 0.25;
+      gw.box(DECK_W, 0.35, panelLen, CONCRETE, mx, slabTop - 0.175, mz, ry, 0.9);
+      // Top rails, one run per panel per edge.
+      for (const s of [-1, 1]) {
+        const ex = mx + px * s * (DECK_W / 2 - 0.35);
+        const ez = mz + pz * s * (DECK_W / 2 - 0.35);
+        gw.box(0.14, 0.1, panelLen, STEEL_DARK, ex, slabTop + 0.78, ez, ry, 0.7);
+      }
+    }
+    // Rail posts along the span.
+    const bays = Math.max(2, Math.round(len / 5.5));
+    for (let n = 0; n <= bays; n++) {
+      const t = n / bays;
+      const cxp = ax + dx * t;
+      const czp = az + dz * t;
+      for (const s of [-1, 1]) {
+        const ex = cxp + px * s * (DECK_W / 2 - 0.35);
+        const ez = czp + pz * s * (DECK_W / 2 - 0.35);
+        gw.box(0.18, 0.85, 0.18, STEEL_DARK, ex, slabTop + 0.36, ez, 0, 0.7);
+      }
+    }
+    // Abutment headwalls: founded at the channel bed, bearing the
+    // deck at each end of the span.
+    for (const t of [0.015, 0.985]) {
+      const hx = ax + dx * t;
+      const hz = az + dz * t;
+      const bot = -4.9;
+      gw.box(DECK_W + 0.6, slabTop - bot, 0.9, CONCRETE_DARK, hx, (slabTop + bot) / 2, hz, ry, 0.95);
+    }
+    gw.feature(
+      `${c.id}_deck`, sector, 'causeway_deck',
+      (ax + bx) / 2, (az + bz) / 2,
+      Math.abs(dx) / 2 + DECK_W / 2, Math.abs(dz) / 2 + DECK_W / 2,
+      `${c.id} founded deck over the waist channel: slab + rails on the stamped bed, abutments founded at the channel bed.`,
+    );
+  }
+}
+
 /** Build every stronghold: the gated kits + the ground works.
  *  Pure construction — the caller (World) adds the groups and merges
  *  colliders/floors/containers, exactly like the airbase. */
@@ -1656,6 +1727,7 @@ export function buildSectors(groundY: GroundY): SectorsBuild {
   citadelGround(gw);
   refugeGround(gw);
   pierGround(gw);
+  buildCrossingDecks(gw);
   gw.bakePalisadeLogs();
   return { kits, groundGroup: gw.group, propColliders: gw.colliders, features: gw.features };
 }
