@@ -232,6 +232,19 @@ export function vegMaterialFor(def: VegClassDef): THREE.MeshStandardMaterial {
   return mat;
 }
 
+/** Spatial cell (m) the instanced layer is chunked into (perf lane,
+ *  2026-10-22). One InstancedMesh per (class, LOD) for the whole island
+ *  can never be frustum-culled — its bounding sphere IS the island — so
+ *  every instance drew in the main pass AND the near-LOD set drew in
+ *  full into the sun's ±75 m shadow pass every frame (~307k tris for
+ *  shadows of trees possibly a kilometre away; census in
+ *  tools/perf/census.probe.ts). Chunking into cells lets BOTH passes
+ *  cull per cell: same placements, same LODs, same triangles — the
+ *  census sim at 120–170 m cells puts the airbase shadow cost at
+ *  ~4–10k tris and vista vegetation shadow at ~50–66k. 150 m splits
+ *  the difference between culling power and unit count. */
+export const VEG_CELL_M = 150;
+
 // ─── the instanced layer ─────────────────────────────────────────────────────
 
 interface VegGeos { lod0: THREE.BufferGeometry; lod1: THREE.BufferGeometry }
@@ -272,21 +285,25 @@ export class VegetationLayer {
   build(scene: THREE.Scene, placements: VegPlacement[]): void {
     scene.add(this.group);
     if (typeof window === 'undefined') return;
-    // bucket placements by class + lod
+    // bucket placements by class + lod + spatial cell (VEG_CELL_M) so
+    // frustum + shadow culling work per cell instead of never
     const buckets = new Map<string, VegPlacement[]>();
     for (const p of placements) {
-      const key = `${p.def}:${p.lod}`;
+      const key = `${p.def}:${p.lod}:${Math.floor(p.x / VEG_CELL_M)}:${Math.floor(p.z / VEG_CELL_M)}`;
       const arr = buckets.get(key);
       if (arr) arr.push(p);
       else buckets.set(key, [p]);
     }
+    // one material per class, shared across its cells (the wind-sway
+    // params are per-class by construction)
+    const mats = new Map<VegClassId, THREE.MeshStandardMaterial>();
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const e = new THREE.Euler();
     const pos = new THREE.Vector3();
     const scl = new THREE.Vector3();
     for (const [key, arr] of buckets) {
-      const [defId, lodStr] = key.split(':') as [VegClassId, string];
+      const [defId, lodStr, cellX, cellZ] = key.split(':') as [VegClassId, string, string, string];
       const def = vegDef(defId);
       const lod = Number(lodStr) as 0 | 1;
       void loadVegGeos(def.glb).then((geos) => {
@@ -295,7 +312,9 @@ export class VegetationLayer {
           return;
         }
         const geo = lod === 0 ? geos.lod0 : geos.lod1;
-        const im = new THREE.InstancedMesh(geo, vegMaterialFor(def), arr.length);
+        let mat = mats.get(def.id);
+        if (!mat) { mat = vegMaterialFor(def); mats.set(def.id, mat); }
+        const im = new THREE.InstancedMesh(geo, mat, arr.length);
         arr.forEach((p, i) => {
           e.set(0, p.rotY, 0);
           q.setFromEuler(e);
@@ -306,9 +325,11 @@ export class VegetationLayer {
         // Only the near LOD casts: the shadow camera is local to the
         // player, and an InstancedMesh draws whole into the shadow
         // pass — far-LOD shadows would cost the full set for nothing.
+        // (Cell chunking above is what makes this cheap: a cell only
+        // enters the shadow pass when it intersects the sun's box.)
         im.castShadow = def.castShadow && lod === 0;
         im.receiveShadow = true;
-        im.name = `veg:${def.id}:lod${lod}`;
+        im.name = `veg:${def.id}:lod${lod}@${cellX},${cellZ}`;
         im.computeBoundingSphere();
         this.meshes.push(im);
         this.group.add(im);
