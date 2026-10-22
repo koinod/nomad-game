@@ -509,6 +509,31 @@ export interface MoraleRuntime {
   breakingDays: Record<string, number>;
 }
 
+/** ORDER #6: where a survivor's body is supposed to be. 'follow' walks
+ *  with the player (and rides when the player drives), 'hold' stays at
+ *  the spot where the order landed and guards it, 'base' lives at the
+ *  claimed home — resting, eating from the stockpile, guarding it. */
+export type SurvivorOrder = 'follow' | 'hold' | 'base';
+
+/** ORDER #6 runtime state per survivor — same pattern as MoraleRuntime:
+ *  persisted alongside `survivors`; SurvivorDef carries none of it.
+ *  Needs are 0..100 (100 = fed / rested) and tick in-world via the
+ *  companion system; the day-scale upkeep in systems/morale stays the
+ *  base-level abstraction for crew without a body on screen. */
+export interface SurvivorRuntime {
+  order: SurvivorOrder;
+  hunger: number;
+  fatigue: number;
+  /** The weapon this survivor carries — the InvItem instance LIVES
+   *  here while equipped (out of the player's pack; conservation is
+   *  pinned by the companions store tests). */
+  weapon: InvItem | null;
+}
+
+export function defaultSurvivorRuntime(): SurvivorRuntime {
+  return { order: 'follow', hunger: 80, fatigue: 85, weapon: null };
+}
+
 export interface SaveSnapshot {
   version: 3;
   savedAt: number;
@@ -566,6 +591,12 @@ export interface SaveSnapshot {
   claims?: ClaimsState;
   moraleRuntime?: MoraleRuntime;
   beaconChoice?: 'light' | 'dark' | null;
+  // ORDER #6 — optional on v3, same rule: per-survivor runtime (orders,
+  // needs, carried weapon) and per-survivor skill maps (order #5's
+  // survivor XP hooks, finally fed). Absent on older saves; the store
+  // defaults both on load.
+  survivorRuntime?: Record<string, SurvivorRuntime>;
+  survivorSkills?: Record<string, Record<string, { level: number; xp: number }>>;
 }
 
 export interface SaveMeta {

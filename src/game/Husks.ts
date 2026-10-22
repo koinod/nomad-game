@@ -11,6 +11,9 @@ import {
   SPIT_GRAVITY,
 } from './huskMath';
 import { bindFigureGLB, buildHuskFigure, figureGLBUrl, poseSlump, type FigureRig } from './figureKit';
+import {
+  GAITS, STRIKE_HIT_AT, STRIKE_SEC, applyGaitPose, gaitPhaseAdvance, gaitPose, idlePose, strikePose,
+} from './figureAnim';
 import { computeVisibility, canHuskSee } from './visibility';
 import { resolveCollisions, type Collider } from './Colliders';
 import { sfx } from '../systems/audio';
@@ -216,6 +219,10 @@ export class Husk {
   get armorClass(): number {
     return KIND_STATS[this.kind].armorClass;
   }
+  /** ORDER #6: the posed rig (animation tests + tooling read it). */
+  get figureRig(): FigureRig | null {
+    return this.rig;
+  }
   get profile(): HitProfile {
     return KIND_STATS[this.kind].profile;
   }
@@ -232,11 +239,19 @@ export class Husk {
   burstPending = false; // bloater: died and owes the world an explosion
   burstDone = false;
   private crawlT = 0; // crawler: swerve clock
-  private torsoBaseRotX = 0.14; // flinch returns the torso to ITS slump, not a constant
   private jawMesh: THREE.Object3D | null = null;
   private sacMesh: THREE.Mesh | null = null; // spitter throat sac (pulses on telegraph)
   private eyeMat: THREE.MeshBasicMaterial | null = null;
-  limpT = 0; // walk-cycle clock for the shuffle animation
+  limpT = 0; // legacy walk-cycle clock — now only the idle-sway timebase
+  // ORDER #6: distance-clocked gait state (figureAnim). gaitPhase
+  // advances by metres actually moved; gaitBlend eases with real speed.
+  gaitPhase = 0;
+  gaitBlend = 0;
+  strikeT = 0; // melee strike arc clock (STRIKE_SEC); damage lands at the chop
+  private strikeHitDone = false;
+  private flinchJolt = 0; // this frame's flinch magnitude, composed over the gait torso
+  private frameX = 0; // position at update start — the gait's distance source
+  private frameZ = 0;
   stunT = 0; // flashbang / concussion: no perception, no movement
   knock = new THREE.Vector3();
   removed = false;
@@ -244,7 +259,6 @@ export class Husk {
   private mats: THREE.Material[] = [];
   private bodyMat!: THREE.MeshStandardMaterial;
   private headMesh: THREE.Object3D | null = null;
-  private torsoMesh: THREE.Object3D | null = null;
   private rig: FigureRig | null = null; // LANE 4: the figureKit rig (pivots posed by update)
 
   constructor(id: string, kind: HuskKind, x: number, z: number, zoneId: string, groundY: (x: number, z: number) => number) {
@@ -283,8 +297,6 @@ export class Husk {
     this.mats.push(...rig.mats);
     this.bodyMat = rig.bodyMat;
     this.headMesh = rig.head;
-    this.torsoMesh = rig.torso;
-    this.torsoBaseRotX = rig.pose.torsoX;
     this.jawMesh = rig.jaw;
     this.sacMesh = rig.sac;
     this.eyeMat = rig.eyeMat;
@@ -339,8 +351,6 @@ export class Husk {
     this.mats.push(...rig.mats);
     this.bodyMat = rig.bodyMat;
     this.headMesh = rig.head;
-    this.torsoMesh = rig.torso;
-    this.torsoBaseRotX = rig.pose.torsoX;
     this.jawMesh = rig.jaw;
     this.sacMesh = rig.sac;
     this.eyeMat = rig.eyeMat;
@@ -492,6 +502,11 @@ export class Husk {
 
   update(dt: number, ctx: HuskCtx, rng: () => number): void {
     const g = this.group;
+    // ORDER #6: the gait's distance source — where the body stood when
+    // this frame began (knockback slides count: a shoved husk stumbles).
+    this.frameX = g.position.x;
+    this.frameZ = g.position.z;
+    this.limpT += dt;
     if (this.state === 'dead') {
       this.deathT += dt;
       // ragdoll-lite: tip over and stay — the corpse is searchable (Skyrim-style).
@@ -508,23 +523,29 @@ export class Husk {
     }
 
     // flinch: the hit lands on the body — head snaps back, torso rocks,
-    // both riding one jolt curve scaled by the hit's stagger power
+    // both riding one jolt curve scaled by the hit's stagger power.
+    // ORDER #6: the head snap still writes here (nothing else owns the
+    // head), but the torso rock is STORED, not written — the gait block
+    // at the end of update composes it over the stride's torso so the
+    // two never fight over the pivot.
+    this.flinchJolt = 0;
     if (this.flinchT > 0) {
       this.flinchT -= dt;
       const phase = 1 - Math.max(this.flinchT, 0) / 0.24;
       const jolt = Math.sin(phase * Math.PI) * this.flinchPow;
+      this.flinchJolt = jolt;
       if (this.headMesh) this.headMesh.rotation.x = -jolt * 0.85;
-      if (this.torsoMesh) this.torsoMesh.rotation.x = this.torsoBaseRotX - jolt * 0.42;
       if (this.flinchT <= 0) {
         this.flinchPow = 0;
         if (this.headMesh) this.headMesh.rotation.x = 0;
-        if (this.torsoMesh) this.torsoMesh.rotation.x = this.torsoBaseRotX;
       }
     }
 
-    // stagger: rock back on the heels, attacks can't land mid-stagger
+    // stagger: rock back on the heels, attacks can't land mid-stagger —
+    // a stagger also kills a strike arc mid-wind-up (the chop never comes)
     if (this.staggerT > 0) {
       this.staggerT -= dt;
+      this.strikeT = 0;
       const k = Math.min(1, this.staggerT / 0.55);
       g.rotation.x = Math.sin(k * Math.PI) * 0.4; // jolt back, then recover
       if (this.staggerT <= 0) g.rotation.x = 0;
@@ -795,10 +816,25 @@ export class Husk {
         g.rotation.y = Math.atan2(toPlayer.x, toPlayer.z);
         if (distP > 2.8) {
           this.state = 'hunt';
+          this.strikeT = 0; // walked away mid-swing: the arc dies
           break;
         }
-        if (this.attackCd <= 0) {
+        // ORDER #6: a strike is an ARC, not an instant — the cooldown
+        // starts the wind-up (figureAnim.strikePose poses it in the
+        // animation block), and the damage lands when the chop crosses
+        // (STRIKE_HIT_AT through the arc). Sidestep during the wind-up
+        // and the hit whiffs: distP is re-read at the crossing.
+        if (this.strikeT <= 0 && this.attackCd <= 0) {
           this.attackCd = 1.4;
+          this.strikeT = STRIKE_SEC;
+          this.strikeHitDone = false;
+        }
+        if (this.strikeT > 0) {
+          this.strikeT -= dt;
+          const arcT = 1 - Math.max(this.strikeT, 0) / STRIKE_SEC;
+          if (!this.strikeHitDone && arcT >= STRIKE_HIT_AT) {
+            this.strikeHitDone = true;
+            if (distP <= 2.9) {
           const s = useGameStore.getState();
           // br_juggernaut: a brute's hit BREAKS a normal block — only
           // the capstone holds a guard against it (damagePlayer reads
@@ -819,8 +855,10 @@ export class Husk {
               pp.addScaledVector(_v2.copy(toPlayer).normalize(), kb);
             }
           }
-          // lunge visual
-          this.knock.addScaledVector(toPlayer.normalize(), 1.2);
+              // lunge visual
+              this.knock.addScaledVector(toPlayer.normalize(), 1.2);
+            }
+          }
         }
         break;
       }
@@ -837,41 +875,51 @@ export class Husk {
     resolveCollisions(g.position, 0.5, ctx.colliders, g.position.y);
     groundClamp();
 
-    // the shuffle: asymmetric limp walk — bob, roll, and a yaw wobble driven
-    // by each husk's own phase. Faster when hunting, heavier in attack.
+    // ORDER #6 locomotion: the stride is DISTANCE-clocked through
+    // figureAnim — gaitPhase advances by the metres the body actually
+    // covered this frame (frameX/Z were captured at update start), so
+    // feet and ground can never disagree the way the old fixed-rate
+    // limpT swing did whenever a kind's real speed left its state's
+    // band. Every kind has its own gait now (GAITS): the shambler's
+    // uneven drag, the brute's heavy lumber, the stalker's low prowl —
+    // and the crawler finally SCUTTLES: its forelimbs strike in
+    // diagonal pairs instead of riding a frozen pose across the ground.
     const limp = (g.userData.limpPhase as number) ?? 0;
-    const moving =
-      this.state === 'hunt' || this.state === 'wander' || this.state === 'investigate' || this.state === 'return';
-    const rate = this.state === 'hunt' ? 7.5 : 5;
-    if (moving) {
-      const amp = this.state === 'hunt' ? 1 : 0.55;
-      this.limpT += dt * rate;
-      g.position.y += Math.abs(Math.sin(this.limpT + limp)) * 0.06 * amp;
-      g.rotation.z = Math.sin(this.limpT + limp) * 0.05 * amp;
-      g.rotation.y += Math.sin(this.limpT * 0.5 + limp) * 0.03 * amp; // wobble, not drift
-      // LANE 4: the rig's limbs actually swing now — legs stride, arms
-      // counter-swing around their hang, all around the posed bases.
-      // The crawler is exempt: its pivots ARE the scuttle pose.
-      if (this.rig && this.kind !== 'crawler') {
-        const swAmp = (this.kind === 'brute' ? 0.2 : 0.36) * amp;
-        const sw = Math.sin(this.limpT + limp) * swAmp;
-        this.rig.legL.rotation.x = this.rig.pose.legLX + sw;
-        this.rig.legR.rotation.x = this.rig.pose.legRX - sw;
-        this.rig.armL.rotation.x = this.rig.pose.armLX - sw * 0.65;
-        this.rig.armR.rotation.x = this.rig.pose.armRX + sw * 0.65;
+    if (this.rig) {
+      const gait = GAITS[this.kind];
+      const dist = Math.hypot(g.position.x - this.frameX, g.position.z - this.frameZ);
+      const speedNow = dt > 0 ? dist / dt : 0;
+      const target = Math.min(1, speedNow / (KIND_STATS[this.kind].speed * 0.7));
+      this.gaitBlend += (target - this.gaitBlend) * Math.min(1, dt * 7);
+      if (this.gaitBlend < 0.005 && target === 0) this.gaitBlend = 0;
+      this.gaitPhase = gaitPhaseAdvance(this.gaitPhase, dist, gait.cycleM);
+      const pose = gaitPose(this.gaitPhase + limp, gait, this.gaitBlend);
+      if (this.strikeT > 0) {
+        // the strike owns the arms and torso while it arcs; the legs
+        // keep striding under it (a husk mid-lunge still has feet)
+        const sp = strikePose(1 - Math.max(this.strikeT, 0) / STRIKE_SEC);
+        this.rig.legL.rotation.x = this.rig.pose.legLX + pose.legL;
+        this.rig.legR.rotation.x = this.rig.pose.legRX + pose.legR;
+        this.rig.armL.rotation.x = this.rig.pose.armLX + sp.armL;
+        this.rig.armR.rotation.x = this.rig.pose.armRX + sp.armR;
+        this.rig.torso.rotation.x = this.rig.pose.torsoX + sp.torsoAdd - this.flinchJolt * 0.42;
+      } else {
+        applyGaitPose(this.rig, pose);
+        // the flinch rock composes over the gait's torso (see the
+        // flinch block — it stores the jolt instead of writing here)
+        this.rig.torso.rotation.x -= this.flinchJolt * 0.42;
+        if (this.gaitBlend < 0.03) {
+          // standing: breathe over the base pose instead of freezing
+          const ip = idlePose(this.limpT, limp);
+          this.rig.torso.rotation.x += ip.torsoAdd;
+          this.rig.armL.rotation.x += ip.armSway;
+          this.rig.armR.rotation.x += ip.armSway;
+        }
       }
-    } else {
-      g.rotation.z *= 0.9;
-      // limbs settle back to their posed bases when the husk stops
-      if (this.rig && this.kind !== 'crawler') {
-        const relax = (o: THREE.Object3D, base: number) => {
-          o.rotation.x += (base - o.rotation.x) * 0.12;
-        };
-        relax(this.rig.legL, this.rig.pose.legLX);
-        relax(this.rig.legR, this.rig.pose.legRX);
-        relax(this.rig.armL, this.rig.pose.armLX);
-        relax(this.rig.armR, this.rig.pose.armRX);
-      }
+      if (pose.bobY > 0) g.position.y += pose.bobY;
+      g.rotation.z = pose.rollZ;
+      // the old shuffle's yaw wobble survives as flavor, phase-locked
+      g.rotation.y += Math.sin(this.gaitPhase * 0.5 + limp) * 0.02 * this.gaitBlend;
     }
   }
 }
@@ -1197,6 +1245,24 @@ export class HuskManager {
       if (Math.hypot(c.x - x, c.z - z) <= radius) n++;
     }
     return n;
+  }
+
+  /** ORDER #6: the nearest live husk to a point — companion combat
+   *  targeting (the player-facing nearestThreat reports only numbers;
+   *  a companion needs the body itself). */
+  nearestAlive(x: number, z: number, radius: number): Husk | null {
+    let best: Husk | null = null;
+    let bestD = radius;
+    for (const h of this.husks) {
+      if (!h.alive) continue;
+      const c = h.group.position;
+      const d = Math.hypot(c.x - x, c.z - z);
+      if (d <= bestD) {
+        best = h;
+        bestD = d;
+      }
+    }
+    return best;
   }
 
   /** Leave a burning-green acid pool where something nasty landed. */

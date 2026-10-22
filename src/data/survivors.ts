@@ -182,6 +182,34 @@ export const NPC_LOOKS: Record<string, SurvivorLook> = {
   the_accountant: { skin: 0xc9a180, jacket: 0x585048, pants: 0x35322c, build: 'slim', hair: 0x2c2620, hairStyle: 'crop' },
 };
 
+/**
+ * ORDER #6: the look ANY survivor renders with — designed recruits use
+ * their authored SURVIVOR_LOOKS entry; generated crew get a
+ * deterministic look hashed from their id (same face every session, no
+ * two ids sharing the full combination by construction of the hash).
+ */
+export function survivorLook(id: string): SurvivorLook {
+  const designed = SURVIVOR_LOOKS[id];
+  if (designed) return designed;
+  let h = 7;
+  for (let i = 0; i < id.length; i++) h = (Math.imul(h, 31) + id.charCodeAt(i)) | 0;
+  const pick = (n: number) => Math.abs(h >> (n * 3)) % 6;
+  const skins = [0x8a5a3b, 0xa8785a, 0xc9a180, 0xe0bfa0, 0x6e4530, 0x54331f];
+  const jackets = [0x5a4632, 0x3c5a6e, 0x6e3c3c, 0x4a5a3c, 0x555555, 0x6b5a2e, 0x2e4a4e, 0x87551f];
+  const pants = [0x35322c, 0x2c3540, 0x404040, 0x3a3230];
+  const hairs = [0x2a1e16, 0x4a3220, 0x8a6a42, 0xb8b0a4, 0x14100c];
+  const builds = ['slim', 'standard', 'heavy'] as const;
+  const styles = ['crop', 'long', 'hawk', 'bald'] as const;
+  return {
+    skin: skins[pick(0) % skins.length],
+    jacket: jackets[pick(1) % jackets.length],
+    pants: pants[pick(2) % pants.length],
+    build: builds[pick(3) % builds.length],
+    hair: hairs[pick(4) % hairs.length],
+    hairStyle: styles[pick(5) % styles.length],
+  };
+}
+
 export function traitName(id: string): string {
   return TRAITS.find((t) => t.id === id)?.name ?? id;
 }
