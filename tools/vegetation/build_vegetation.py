@@ -379,7 +379,7 @@ def build_loblolly(rng, lod):
                 ((mid.x, mid.y, mid.z), 0.045),
                 ((tip.x, tip.y, tip.z), 0.02),
             ]), 4, BARK_PINE)
-            if t >= 2:
+            if t >= 4:
                 emit_mass(g, rng, mid + Vector((0, 0, 0.06)),
                           Vector((0.62, 0.62, 0.4)), 0, PINE_NEEDLE, disp=0.42)
             emit_mass(g, rng, tip + Vector((0, 0, 0.1)),

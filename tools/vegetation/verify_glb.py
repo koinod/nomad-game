@@ -18,7 +18,7 @@ MODELS = os.path.join(WT, "public", "models")
 # class -> (LOD0 ceiling, LOD1 ceiling, min height m, max height m)
 BUDGET = {
     'veg-live-oak': (1150, 330, 4.5, 7.5),
-    'veg-loblolly': (1700, 190, 10.0, 13.0),
+    'veg-loblolly': (1560, 190, 10.0, 13.0),
     'veg-wax-myrtle': (720, 220, 1.8, 3.0),
     'veg-needle-rush': (80, 30, 0.8, 1.5),
     'veg-spartina': (85, 30, 0.8, 1.5),
