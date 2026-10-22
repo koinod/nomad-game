@@ -228,6 +228,7 @@ export const DISPATCH_VEHICLE_DATA: Record<string, DispatchVehicleData> = {
   gt500: { tankLiters: 61, burnClass: 1.15 }, // Shelby GT500 (GT500_DEF: fuelMax 61, burnClass 1.15)
   nomad_prime: { tankLiters: 950, burnClass: 1.6 }, // Nomad Prime semi (PRIME_DEF: fuelMax 950, burnClass 1.6)
   sprinter_van: { tankLiters: 110, burnClass: 1.05 }, // V-04 Sprinter (SPRINTER_DEF: fuelMax 110, burnClass 1.05)
+  dark_horse: { tankLiters: 61, burnClass: 1.1 }, // Stallion Dark Horse (DARKHORSE_DEF: fuelMax 61, burnClass 1.1)
 };
 
 export const DISPATCH_VEHICLE_DEFAULT: DispatchVehicleData = { tankLiters: 60, burnClass: 1 };
