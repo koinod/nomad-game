@@ -79,13 +79,26 @@ head = L.build_head(SKULL_Y, HS, mats, gaunt=0.1,
 
 # --------------------------------------------------------------- arms ----
 arm_l, hand_l, _ = L.build_arm(-1, -ARM_X, HIP_Y + SHOULDER_LOCAL, ARM_S, mats,
-                               sleeve_len=0.0, rad=1.55, fist=1.5)
+                               sleeve_len=0.0, rad=1.55, fist=1.5, elbow=0.14)
 arm_r, hand_r, _ = L.build_arm(1, ARM_X, HIP_Y + SHOULDER_LOCAL, ARM_S, mats,
-                               sleeve_len=0.0, rad=1.55, fist=1.5)
+                               sleeve_len=0.0, rad=1.55, fist=1.5, elbow=0.14)
+
+# Joint caps (continuity pass): the brute's shoulders are bare skin
+# (the shirt remnant stops at the chest); hips ride in the pants.
+shoulder_caps = L.joint_caps("shoulderCaps", [
+    ((-ARM_X, 0, HIP_Y + SHOULDER_LOCAL), (0.096, 0.094, 0.098), ARM_S * 1.55),
+    (( ARM_X, 0, HIP_Y + SHOULDER_LOCAL), (0.096, 0.094, 0.098), ARM_S * 1.55),
+], mats['skin'])
+hip_caps = L.joint_caps("hipCaps", [
+    ((-HIP_X, 0, HIP_Y), (0.110, 0.104, 0.097), LEG_S * 1.45),
+    (( HIP_X, 0, HIP_Y), (0.110, 0.104, 0.097), LEG_S * 1.45),
+], mats['pants'])
+L.paint_grime(shoulder_caps)
+L.paint_grime(hip_caps)
 
 # --------------------------------------------------------------- legs ----
-leg_l, pants_l, _ = L.build_leg(-1, -HIP_X, HIP_Y, LEG_S, mats, pants_len=0.34, boot=False, rad=1.45)
-leg_r, pants_r, _ = L.build_leg(1, HIP_X, HIP_Y, LEG_S, mats, pants_len=0.34, boot=False, rad=1.45)
+leg_l, pants_l, _ = L.build_leg(-1, -HIP_X, HIP_Y, LEG_S, mats, pants_len=0.34, boot=False, rad=1.45, knee=0.18)
+leg_r, pants_r, _ = L.build_leg(1, HIP_X, HIP_Y, LEG_S, mats, pants_len=0.34, boot=False, rad=1.45, knee=0.18)
 
 # -------------------------------------------------------------- grime ----
 L.paint_grime(torso_skin, stains=[
@@ -110,7 +123,7 @@ for p in (pants_l, pants_r): L.paint_grime(p)
 
 # ------------------------------------------------------------ assembly ---
 parts = {
-    'torso': [torso_skin, torso_mesh, pants_pelvis],
+    'torso': [torso_skin, torso_mesh, pants_pelvis, shoulder_caps, hip_caps],
     'head': [head['skull'], head['neck'], head['eyes']],
     'jaw': [head['jaw']],
     'armL': [arm_l, hand_l],
