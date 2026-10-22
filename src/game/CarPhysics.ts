@@ -303,6 +303,15 @@ export class CarPhysics {
   // shared state (both modes)
   speed = 0; // signed m/s along the car's forward
   steerAngle = 0;
+  /** Powertrain state, refreshed every step in BOTH modes — the
+   *  audio engine's engine voice reads these (rpm/gear were computed
+   *  inside gearAndForce/stepKinematic and thrown away before the
+   *  audio pass asked for them). */
+  rpm = 0;
+  gear = 0;
+  throttleLoad = 0; // 0..1, |throttle| after fuel/stall gating
+  get idleRpm(): number { return this.params.idleRpm; }
+  get redlineRpm(): number { return this.params.redlineRpm; }
   /** Per-wheel front steer angles after Ackermann (visuals + tests). */
   steerWheels: [number, number] = [0, 0];
   /** Water interaction state, refreshed every step (Item 2). */
@@ -566,7 +575,10 @@ export class CarPhysics {
     body.setAngularDamping(wsNow.submerged > 0.25 ? 2.2 : 0.9);
 
     const th = input.hasFuel && !this.stalled ? input.throttle : 0;
-    const { force } = this.gearAndForce(th);
+    const { force, rpm, gear } = this.gearAndForce(th);
+    this.rpm = rpm;
+    this.gear = gear;
+    this.throttleLoad = Math.abs(th);
     const braking = (th < 0 && this.speed >= 0.5) || (th > 0 && this.speed < -0.5);
     for (let i = 0; i < 4; i++) {
       const driven = i >= 2;
@@ -686,6 +698,9 @@ export class CarPhysics {
     if (rpm < 1400 && gear > 0) gear--;
     this.kinGear = gear;
     rpm = Math.max(p.idleRpm, ((spd / circ) * p.gears[gear] * p.finalDrive) * 60);
+    this.rpm = rpm;
+    this.gear = gear;
+    this.throttleLoad = Math.abs(th);
     const tq = torqueAt(p.torqueCurve, Math.min(rpm, p.redlineRpm));
     let force = ((tq * p.gears[gear] * p.finalDrive * p.drivetrainEff) / p.wheelRadiusM) * th;
     const transfer = (p.massKg * Math.abs(force) / p.massKg * 0.52) / 2.718;
