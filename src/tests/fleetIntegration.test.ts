@@ -16,6 +16,9 @@ import { estimatePerformance, peakPowerKw } from '../game/carSpec';
  * approved as-is). Registered defs + spawns, per-def diesel physics
  * on the shared rigid-body stack, spec-class performance measured in
  * the body — the same evidentiary pattern as gt500Integration.
+ * (The Prime half was re-anchored to the clean-sheet PRD v3.0 build
+ * on 2026-10-22 — primeIntegration.test.ts carries its full
+ * contract; the Prime pins here track the same numbers.)
  */
 
 describe('registration', () => {
@@ -77,7 +80,7 @@ describe('per-def diesel physics selection', () => {
   it('params are the fixed spec sheets; cargo is real mass on top', () => {
     const p = paramsForDef('nomad_prime', [], 0);
     expect(p.redlineRpm).toBe(2100);
-    expect(p.idleRpm).toBe(600);
+    expect(p.idleRpm).toBe(650); // clean-sheet DD16 sheet (primeDef, 2026-10-22)
     expect(p.gears).toEqual(PRIME_PARAMS.gears);
     expect(p.massKg).toBe(PRIME_PARAMS.massKg);
     expect(paramsForDef('nomad_prime', [], 500).massKg).toBe(PRIME_PARAMS.massKg + 500);
@@ -108,7 +111,7 @@ describe('per-def diesel physics selection', () => {
     expect(p.topSpeedKmh).toBeLessThan(152); // spec: 145
     expect(p.zeroToHundredSec).toBeGreaterThan(10);
     expect(p.zeroToHundredSec).toBeLessThan(25);
-    expect(p.massKg).toBe(9833);
+    expect(p.massKg).toBe(12133); // clean-sheet armored datum: 11,250 + driver + fuel
     const s = estimatePerformance(SPRINTER_PARAMS);
     expect(s.topSpeedKmh).toBeGreaterThan(115);
     expect(s.topSpeedKmh).toBeLessThan(133); // spec: 125
@@ -117,7 +120,7 @@ describe('per-def diesel physics selection', () => {
   });
 
   it('chassis geometry + arch datum are per def and consistent', () => {
-    expect(geomFor('nomad_prime').half).toEqual([1.27, 0.45, 4.3]);
+    expect(geomFor('nomad_prime').half).toEqual([1.31, 0.45, 4.47]); // clean-sheet: 2,621 x 8,941
     expect(geomFor('sprinter_van').half).toEqual([1.01, 0.35, 3.49]);
     for (const id of ['nomad_prime', 'sprinter_van']) {
       const tune = suspTuneFor(id);
@@ -259,7 +262,7 @@ describe('rigid-body fleet', () => {
     expect(t100).toBeLessThan(28);
   }, 90000);
 
-  it('the Prime hauls to highway speed like 9.8 t of diesel should', async () => {
+  it('the Prime hauls to highway speed like 12.1 t of diesel should', async () => {
     const cp = await CarPhysics.create(flat);
     const v = fakeVehicle('nomad_prime');
     cp.spawnCar(v, [], 0);

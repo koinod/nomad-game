@@ -90,7 +90,7 @@ export const AIRBASE_PADS: AirbasePad[] = [
   { id: 'pad_dark_horse', label: 'DH', lx: -4, lz: -9, hx: 4.5, hz: 3.2, heading: Math.PI / 2, vehicleId: 'dark_horse' },
   { id: 'pad_gt500', label: 'GT500', lx: 7, lz: -9, hx: 4.5, hz: 3.2, heading: Math.PI / 2, vehicleId: 'gt500' },
   { id: 'pad_sprinter', label: 'V-04', lx: 19, lz: -9, hx: 5.25, hz: 3.2, heading: Math.PI / 2, vehicleId: 'sprinter_van' },
-  // The Prime is 8.55 long / 2.55 wide: a 13 x 6.8 pad gives swing room.
+  // The Prime is 8.94 long / 2.62 wide (3.14 over mirrors): a 13 x 6.8 pad gives swing room.
   { id: 'pad_prime', label: 'PRIME', lx: 36, lz: -12, hx: 6.5, hz: 3.4, heading: Math.PI / 2, vehicleId: 'nomad_prime' },
 ];
 

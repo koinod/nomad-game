@@ -86,12 +86,14 @@ export interface CarSeatSpec {
 export const CAR_SEATS: Record<string, CarSeatSpec> = {
   gt500: { cushionY: 0.56, floorY: 0.16, roofY: 1.37 },
   mustang: { cushionY: 0.55, floorY: 0.16, roofY: 1.35 },
-  // Nomad Prime (measured from the GLB): cushion top 1.395, cab floor
-  // top 1.14, cab roof line over the seats ~3.40. A high cab: the
-  // solved thigh angle runs steeper than the cars' (legs drop from a
-  // captain's chair to a high floorboard) — the pose test's band
-  // accounts for it.
-  nomad_prime: { cushionY: 1.4, floorY: 1.14, roofY: 3.4 },
+  // Nomad Prime (clean-sheet GLB, re-measured 2026-10-22): cushion
+  // top 1.40 (the build's datum), cab floor top 1.14, inner roof
+  // line 2.92 — the Headliner node's underside, under the 3.02 cab
+  // roof shell (the 4.12 overall height is stack tips, not cab).
+  // A high cab: the solved thigh angle runs steeper than the cars'
+  // (legs drop from a captain's chair to a high floorboard) — the
+  // pose test's band accounts for it.
+  nomad_prime: { cushionY: 1.4, floorY: 1.14, roofY: 2.92 },
   // V-04 Sprinter (measured from the GLB): seat base top 0.98, cab
   // floor top 0.63, inner roof 2.62.
   sprinter_van: { cushionY: 0.98, floorY: 0.63, roofY: 2.62 },

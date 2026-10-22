@@ -29,9 +29,11 @@ const AIRBASE_GRADE = betaSector('airbase').padY;
 import { SEAHAWK_PAD, VEHICLE_DEFS, VEHICLE_SPAWNS } from '../game/Vehicles';
 import { NPC_PLACEMENTS } from '../data/worldWiring';
 
-/** The Prime's overall height from Ian's spec sheet (fleet canon) —
+/** The Prime's overall height — the clean-sheet build's measured
+ *  4,120 mm at the stack tips (design-refs/proof-prime/
+ *  BUILD_REPORT.md; the retired fleet-sheet truck stood 3.92) —
  *  the tallest vehicle the hangar mouth and fuel canopy must clear. */
-const PRIME_HEIGHT_M = 3.92;
+const PRIME_HEIGHT_M = 4.12;
 
 function expectDaylight(buildings: Parameters<typeof auditDaylight>[0][]): void {
   const out: QaFailure[] = [];
