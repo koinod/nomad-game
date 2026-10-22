@@ -81,6 +81,10 @@ export const RECIPE_META: Record<string, RecipeMeta> = {
   r_laser: { timeSec: 300, skillReq: { skill: 'mechanics', level: 1 } },
   r_choke: { timeSec: 300, skillReq: { skill: 'mechanics', level: 1 } },
   r_flashlight: { timeSec: 240 },
+  r_scope: { timeSec: 300, skillReq: { skill: 'mechanics', level: 1 } },
+  r_reload_556: { timeSec: 90 },
+  r_reload_rifle: { timeSec: 90 },
+  r_bolts: { timeSec: 60 },
   // Bench firearms mirror the skill gates their recipe data declares
   // (items.ts skillReq) so the queue enforces what the data promises.
   r_revolver: { timeSec: 1200, skillReq: { skill: 'mechanics', level: 1 } },
@@ -92,6 +96,8 @@ export const RECIPE_META: Record<string, RecipeMeta> = {
   r_gunpowder: { timeSec: 300 },
   r_molotov: { timeSec: 180 },
   r_smoke_grenade: { timeSec: 300, skillReq: { skill: 'mechanics', level: 1 } },
+  r_frag: { timeSec: 300, skillReq: { skill: 'mechanics', level: 1 } },
+  r_flashbang: { timeSec: 240, skillReq: { skill: 'mechanics', level: 1 } },
   // Machine Shop
   r_tire: { timeSec: 900 },
   r_engine_part: { timeSec: 3600, stationTier: 3 },
