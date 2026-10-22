@@ -91,13 +91,27 @@ head = L.build_head(SKULL_Y, 1.0, mats, gaunt=0.4, jut=0.055,
 
 # --------------------------------------------------------------- arms ----
 arm_l, hand_l, sleeve_l = L.build_arm(-1, -ARM_X, HIP_Y + SHOULDER_LOCAL, ARM_S, mats,
-                                      sleeve_len=0.12, rad=0.85, finger_len=1.55)
+                                      sleeve_len=0.12, rad=0.85, finger_len=1.55, elbow=0.55)
 arm_r, hand_r, sleeve_r = L.build_arm(1, ARM_X, HIP_Y + SHOULDER_LOCAL, ARM_S, mats,
-                                      sleeve_len=0.12, rad=0.85, finger_len=1.55)
+                                      sleeve_len=0.12, rad=0.85, finger_len=1.55, elbow=0.55)
 
 # --------------------------------------------------------------- legs ----
-leg_l, pants_l, _ = L.build_leg(-1, -HIP_X, HIP_Y, 1.0, mats, pants_len=0.30, boot=False, rad=0.88)
-leg_r, pants_r, _ = L.build_leg(1, HIP_X, HIP_Y, 1.0, mats, pants_len=0.30, boot=False, rad=0.88)
+leg_l, pants_l, _ = L.build_leg(-1, -HIP_X, HIP_Y, 1.0, mats, pants_len=0.30, boot=False, rad=0.88, knee=0.45)
+leg_r, pants_r, _ = L.build_leg(1, HIP_X, HIP_Y, 1.0, mats, pants_len=0.30, boot=False, rad=0.88, knee=0.45)
+
+# Joint caps (continuity pass): the vest stops below the shoulder, so
+# the shoulder caps are skin; hips ride in the pants material. Both
+# parent to the torso — they stay on the pivots at any pose angle.
+shoulder_caps = L.joint_caps("shoulderCaps", [
+    ((-ARM_X, 0, HIP_Y + SHOULDER_LOCAL), (0.096, 0.094, 0.098), ARM_S * 0.85),
+    (( ARM_X, 0, HIP_Y + SHOULDER_LOCAL), (0.096, 0.094, 0.098), ARM_S * 0.85),
+], mats['skin'])
+hip_caps = L.joint_caps("hipCaps", [
+    ((-HIP_X, 0, HIP_Y), (0.110, 0.104, 0.097), 0.88),
+    (( HIP_X, 0, HIP_Y), (0.110, 0.104, 0.097), 0.88),
+], mats['pants'])
+L.paint_grime(shoulder_caps)
+L.paint_grime(hip_caps)
 
 # -------------------------------------------------------------- grime ----
 L.paint_grime(torso_skin, stains=[((0.0, -0.09, SKULL_Y - 0.18), 0.09, L.BLOOD)])
@@ -117,7 +131,7 @@ for r in ridges: L.paint_grime(r)
 
 # ------------------------------------------------------------ assembly ---
 parts = {
-    'torso': [torso_skin, torso_mesh, pants_pelvis] + ridges,
+    'torso': [torso_skin, torso_mesh, pants_pelvis, shoulder_caps, hip_caps] + ridges,
     'head': [head['skull'], head['neck'], head['eyes'], head['hair']],
     'jaw': [head['jaw']],
     'armL': [arm_l, hand_l, sleeve_l],
