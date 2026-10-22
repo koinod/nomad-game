@@ -244,12 +244,12 @@ describe('loot roll integration (rollLoot)', () => {
 
 describe('sc_packmule heavy shift (encumbranceTier)', () => {
   it('at limit+5kg you are heavy without the perk, fine with it; overloaded stays ratio-based', () => {
-    const limit = 20;
-    expect(encumbranceTier(25, limit, heavyShiftKg([]))).toBe('heavy');
-    expect(encumbranceTier(25, limit, heavyShiftKg(['sc_packmule']))).toBe('ok');
-    expect(encumbranceTier(30, limit, heavyShiftKg(['sc_packmule']))).toBe('heavy'); // shift spent at +10
-    expect(encumbranceTier(27, limit, heavyShiftKg(['sc_packmule']))).toBe('overloaded'); // r = 1.35 > 1.3
-    expect(encumbranceTier(25, limit, 0)).toBe('heavy'); // default unchanged
+    const limit = 40; // a mule-scale limit, where +10kg < the 1.3 ratio line
+    expect(encumbranceTier(45, limit, heavyShiftKg([]))).toBe('heavy');
+    expect(encumbranceTier(45, limit, heavyShiftKg(['sc_packmule']))).toBe('ok');
+    expect(encumbranceTier(51, limit, heavyShiftKg(['sc_packmule']))).toBe('heavy'); // shift spent past +10
+    expect(encumbranceTier(53, limit, heavyShiftKg(['sc_packmule']))).toBe('overloaded'); // r = 1.325 > 1.3
+    expect(encumbranceTier(45, limit, 0)).toBe('heavy'); // default unchanged
   });
 });
 
