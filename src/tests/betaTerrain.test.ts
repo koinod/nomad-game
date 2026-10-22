@@ -4,8 +4,12 @@ import {
   BETA_WORLD, BETA_CELL_M, BETA_COLS, BETA_ROWS,
   buildBetaGrid, betaHeightAt, betaSlopeAt, betaNodeX, betaNodeZ,
   buildBetaTerrainChunks, buildBetaRapierHeightfield,
+  betaWaistChannelDistance,
 } from '../game/betaTerrain';
-import { BETA_SECTORS, BETA_EXTRA_PADS, BETA_ROADS, BETA_PLAYER_SPAWN } from '../data/betaLayout';
+import {
+  BETA_SECTORS, BETA_EXTRA_PADS, BETA_ROADS, BETA_PLAYER_SPAWN,
+  BETA_WAIST_CROSSINGS,
+} from '../data/betaLayout';
 
 // ─── BETA TERRAIN — the foundation law, proven ──────────────────────────────
 // One authored grid is the only terrain truth: the mesh's vertices ARE
@@ -156,6 +160,8 @@ describe('Rapier identity (mesh == physics == sampler)', () => {
     for (const s of BETA_SECTORS) probes.push([s.x + OX, s.z + OZ]);
     probes.push([-430 + OX, -168 + OZ], [-230 + OX, -190 + OZ], [272 + OX, -196 + OZ]); // extra pads
     probes.push([-603 + OX, 287 + OZ], [-517 + OX, 162 + OZ], [-455 + OX, 143 + OZ], [-548 + OX, 199 + OZ]); // channel (new western-sound line)
+    probes.push([130 + OX, -80 + OZ], [-245 + OX, -95 + OZ], [-425 + OX, 151 + OZ]); // waist channel (v2 cut)
+    probes.push([200 + OX, -67 + OZ], [-420 + OX, 196 + OZ]); // the two crossing decks
     probes.push([-330 + OX, -165 + OZ], [-505 + OX, -230 + OZ]); // bluff face + high shoulder
     for (const r of BETA_ROADS) for (const [x, z] of r.points) probes.push([x + OX, z + OZ]);
     for (let j = 12; j < BETA_ROWS - 12; j += 53) {
@@ -342,44 +348,94 @@ describe('waterline sanity (spec §1.1 geography)', () => {
     }
   });
 
-  it('the island waist is dry land — the Ridge connects to the main island (Phase 1.5 shape law)', () => {
-    // The deleted strait's interior midpoints: where the old cut ran
-    // at −4.2 m, the landform now reads as the dry saddle it always
-    // was underneath — the spur climbs it overland the whole way.
-    // (The southern midpoint sits in tidal marsh: dry at marsh
-    // height, ~0.4 m, not saddle height.)
-    for (const [x, z] of [[-20, -177.5], [-127.5, -100], [-223.5, -14], [-292, 72]] as const) {
-      expect(betaHeightAt(x, z)).toBeGreaterThan(0);
+  it('the waist channel reads navigable depth along its line (aerial v2 cut)', () => {
+    // Segment midpoints of the v2 line, on reaches whose pre-carve
+    // field stood above the dredge depth (land and marsh shore):
+    // east reach, the E–W waist reach, the west bend, the south bend.
+    // Probes stay clear of the two crossing decks and the mouths
+    // (open water there is deeper than the dredge by nature).
+    for (const [x, z] of [
+      [375, -12.5], [130, -80], [-50, -107.5], [-127.5, -100],
+      [-245, -95], [-386.5, -38], [-434, 93.5], [-425, 151.5],
+    ] as const) {
+      const h = betaHeightAt(x, z);
+      expect(h, `${x},${z}`).toBeLessThan(-3.6);
+      expect(h, `${x},${z}`).toBeGreaterThan(-4.8);
     }
-    expect(betaHeightAt(-127.5, -100)).toBeGreaterThan(1);
-    expect(betaHeightAt(-223.5, -14)).toBeGreaterThan(1);
-    // And the transect the shape gate rendered: no water anywhere
-    // across the waist band between the west block and the centre.
+  });
+
+  it('the waist is cut — but ground OFF the v2 line keeps its old read', () => {
+    // DELIBERATE REPLACEMENT (2026-10-22 waist-channel revision,
+    // Ian's finish-the-path order): Phase 1.5 pinned a dry waist
+    // ("the Ridge connects to the main island"); aerial v2 canon
+    // supersedes it — the waist is water now (depth test above), and
+    // the Ridge connects by road around the north coast instead.
+    // What survives of the old test: every probe OFF the channel
+    // line keeps the ground it always had.
+    expect(betaHeightAt(-20, -177.5)).toBeGreaterThan(0);   // north shore saddle
+    expect(betaHeightAt(-223.5, -14)).toBeGreaterThan(1);    // forest ground W of the bend (186 m clear)
+    expect(betaHeightAt(-292, 72)).toBeGreaterThan(0);       // west marsh, clear of the south bend
+    // The transect the Phase 1.5 shape gate rendered: the band
+    // between the west block and the centre stays dry — the carve's
+    // feather (33 m reach) does not reach it.
     for (let x = -330; x <= -90; x += 15) {
       expect(betaHeightAt(x, -40)).toBeGreaterThan(0);
       expect(betaHeightAt(x, 20)).toBeGreaterThan(-0.1);
     }
   });
 
-  it('no road runs into water — every centerline stays dry (Phase 1.5 shape law)', () => {
-    // Phase 1's strait flooded two roads (the spur bottomed at
-    // −4.2 m, the west fork at −2.9 m). The only water crossing in
-    // the spec is the Citadel causeway, and §2 draws it as a LAND
-    // bridge — so the law is absolute: dry centerlines everywhere.
-    // (If a future route ever needs a true bridge, it gets flagged
-    // as a bridge site in the layout, not a road through water.)
+  it('the two crossing decks carry their roads at deck height', () => {
+    for (const c of BETA_WAIST_CROSSINGS) {
+      const mx = (c.a[0] + c.b[0]) / 2;
+      const mz = (c.a[1] + c.b[1]) / 2;
+      const h = betaHeightAt(mx, mz);
+      expect(h, c.id).toBeGreaterThan(c.deckY - 0.5);
+      expect(h, c.id).toBeLessThan(c.deckY + 0.6);
+      // Quarter points of the span stay founded and dry too.
+      for (const t of [0.25, 0.75]) {
+        const qx = c.a[0] + (c.b[0] - c.a[0]) * t;
+        const qz = c.a[1] + (c.b[1] - c.a[1]) * t;
+        expect(betaHeightAt(qx, qz), `${c.id} @${t}`).toBeGreaterThan(0.9);
+      }
+    }
+  });
+
+  it('no road in water EXCEPT on a founded deck at the two named crossings', () => {
+    // DELIBERATE REPLACEMENT (2026-10-22 revision): the Phase 1.5
+    // absolute law ("dry centerlines, no road touches water, the
+    // spec's only crossing is a land bridge") is superseded by
+    // aerial v2, which draws open water through the waist crossed at
+    // named points. The law now, in the old test's own escape hatch
+    // ("a true bridge gets flagged as a bridge site in the layout"):
+    //   (1) every centerline still reads DRY — the decks carry the
+    //       two crossing roads, and no other road nears the water;
+    //   (2) any centerline sample inside the channel's carved reach
+    //       (< 20 m from the line: full depth + inner feather) must
+    //       stand on a named crossing's span, on its own road.
+    const segDist = (x: number, z: number, a: [number, number], b: [number, number]): number => {
+      const dx = b[0] - a[0];
+      const dz = b[1] - a[1];
+      const t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[1]) * dz) / (dx * dx + dz * dz)));
+      return Math.hypot(x - (a[0] + dx * t), z - (a[1] + dz * t));
+    };
     for (const road of BETA_ROADS) {
-      let min = Infinity;
       for (let s = 0; s + 1 < road.points.length; s++) {
         const [ax, az] = road.points[s];
         const [bx, bz] = road.points[s + 1];
         const len = Math.hypot(bx - ax, bz - az);
         const steps = Math.ceil(len / 5);
         for (let k = 0; k <= steps; k++) {
-          min = Math.min(min, betaHeightAt(ax + (bx - ax) * (k / steps), az + (bz - az) * (k / steps)));
+          const x = ax + (bx - ax) * (k / steps);
+          const z = az + (bz - az) * (k / steps);
+          expect(betaHeightAt(x, z), `${road.id} @ ${x.toFixed(0)},${z.toFixed(0)}`).toBeGreaterThan(0);
+          if (betaWaistChannelDistance(x, z) < 20) {
+            const onDeck = BETA_WAIST_CROSSINGS.some(
+              (c) => c.road === road.id && segDist(x, z, c.a, c.b) <= 6,
+            );
+            expect(onDeck, `${road.id} @ ${x.toFixed(0)},${z.toFixed(0)} is in the channel off a deck`).toBe(true);
+          }
         }
       }
-      expect(min).toBeGreaterThan(0);
     }
   });
 

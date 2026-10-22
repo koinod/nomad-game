@@ -51,9 +51,10 @@ const EXPECTED_FEATURES: Record<string, string[]> = {
   citadel: [
     'citadel_fortress_t1', 'citadel_fortress_t2', 'citadel_fortress_t3',
     'citadel_gantry', 'citadel_refinery', 'citadel_floodlight_a', 'citadel_floodlight_b',
+    'citadel_causeway_deck',
   ],
   refuge: ['refuge_palisade_n', 'refuge_palisade_s', 'refuge_palisade_w', 'refuge_palisade_e', 'refuge_filtration'],
-  pier_hq: ['pier_slip_a', 'pier_slip_b', 'pier_palisade'],
+  pier_hq: ['pier_slip_a', 'pier_slip_b', 'pier_palisade', 'pier_crossing_deck'],
 };
 
 /** Open-air decks: floored, railed, walkable — but not interiors, so
@@ -181,6 +182,10 @@ describe('sector stronghold kits (Spec §3.2)', () => {
     };
     for (const f of built.features) {
       if (f.kind === 'boat_slip') continue; // water by design, pinned below
+      // The waist crossing decks stand in the channel BY DESIGN
+      // (waist-channel revision) — founded beds + abutments, pinned
+      // by the terrain deck tests in betaTerrain.test.ts.
+      if (f.kind === 'causeway_deck') continue;
       // the helipad dresses its own pad; the refinery, the yard
       // floodlights and the greeble yard clutter stand in the
       // citadel yard, not the fortress pad

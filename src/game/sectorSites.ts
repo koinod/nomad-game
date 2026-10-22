@@ -46,7 +46,9 @@ export function sectorSpotWorld(spot: SectorBuildingSpot): [number, number] {
 export const SECTOR_BUILDINGS: SectorBuildingSpot[] = [
   // ── The Ridge Protocol Redoubt (NW bluffs, pad y 60) ──────────────
   // Bunker headhouse NW, watchtower NE, ops canopy E — the spur's
-  // final leg terminates at the pad's south-center, kept clear.
+  // final leg (waist-channel revision: in from the pad's west edge
+  // across the plateau) terminates at the pad's south-center, kept
+  // clear.
   { id: 'ridge_bunker', sector: 'ridge', dx: -28, dz: -24, rot: 0 },
   { id: 'ridge_tower', sector: 'ridge', dx: 30, dz: -22, rot: 0 },
   { id: 'ridge_ops', sector: 'ridge', dx: 26, dz: 16, rot: 0 },

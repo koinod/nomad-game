@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import {
   BETA_SECTORS, BETA_EXTRA_PADS, BETA_ROADS, BETA_SOUND_CHANNEL,
-  BETA_CHANNEL_DEPTH, BETA_CHANNEL_HALFWIDTH, type BetaRoad,
+  BETA_CHANNEL_DEPTH, BETA_CHANNEL_HALFWIDTH,
+  BETA_WAIST_CHANNEL, BETA_WAIST_HALFWIDTH, BETA_WAIST_CROSSINGS,
+  type BetaRoad,
 } from '../data/betaLayout';
 
 // ─── BETA TERRAIN (map restart, Phase 1 — Ian's order 2026-10-21) ──────────
@@ -231,6 +233,17 @@ function landformAt(x: number, z: number): number {
     const w = 1 - smoothstep(BETA_CHANNEL_HALFWIDTH, BETA_CHANNEL_HALFWIDTH + 27, cd);
     h = lerp(h, BETA_CHANNEL_DEPTH, w);
   }
+  // The waist channel (aerial v2 canon; 2026-10-22 revision): same
+  // dredge depth, a tighter bank feather (+18 m) so the marsh shelves
+  // stay narrow shelves, not a bathtub cut — and so the surveyed POIs
+  // standing near the line keep dry ground. Where the south bend meets
+  // the sound, the two carves compose (both pull toward the same
+  // depth; the second lerp is a no-op at depth).
+  const wd = polylineDist(BETA_WAIST_CHANNEL, x, z);
+  if (h > BETA_CHANNEL_DEPTH) {
+    const w = 1 - smoothstep(BETA_WAIST_HALFWIDTH, BETA_WAIST_HALFWIDTH + 18, wd);
+    h = lerp(h, BETA_CHANNEL_DEPTH, w);
+  }
   return h;
 }
 
@@ -323,12 +336,58 @@ function stampBetaPads(g: Float32Array, roadAwareRing = false): void {
   }
 }
 
+/** The founded deck beds of the two waist crossings
+ *  (BETA_WAIST_CROSSINGS): a capsule strip along each crossing's span,
+ *  full weight within 8 m of the centerline, easing out over 7 m more,
+ *  stamped at the crossing's surveyed deck height. RAISE-ONLY: a
+ *  founded bed fills the channel up to deck height; it never
+ *  excavates a bank or a pad corner that already stands higher (the
+ *  pier deck's span ends inside the Pier pad — the pad keeps its
+ *  surveyed 2.2 m, and the road ramps the last metres up to it).
+ *  Stamped BEFORE the roads grade: the road's profile reads the
+ *  founded bed across the span and clamps its descent onto it, so
+ *  the roadbed rides the deck instead of diving to the channel floor
+ *  (an 8% grade cannot fall 1.5 → −4.2 → 1.5 inside the wet arc, and
+ *  must not). The visible deck — slab, rails, founded piers — is kit
+ *  geometry in Sectors.ts; this stamp is the ground it stands on and
+ *  the cars drive. */
+function stampBetaDecks(g: Float32Array): void {
+  const CORE = 8;
+  const FEATHER = 7;
+  for (const c of BETA_WAIST_CROSSINGS) {
+    const [ax, az] = c.a;
+    const [bx, bz] = c.b;
+    const reach = CORE + FEATHER + 2;
+    const x0 = Math.min(ax, bx) - reach;
+    const x1 = Math.max(ax, bx) + reach;
+    const z0 = Math.min(az, bz) - reach;
+    const z1 = Math.max(az, bz) + reach;
+    const i0 = Math.max(0, Math.floor(((x0 - BETA_WORLD.xMin) / BETA_CELL_M)));
+    const i1 = Math.min(BETA_COLS, Math.ceil(((x1 - BETA_WORLD.xMin) / BETA_CELL_M)));
+    const j0 = Math.max(0, Math.floor(((z0 - BETA_WORLD.zMin) / BETA_CELL_M)));
+    const j1 = Math.min(BETA_ROWS, Math.ceil(((z1 - BETA_WORLD.zMin) / BETA_CELL_M)));
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        const x = betaNodeX(i);
+        const z = betaNodeZ(j);
+        const d = polylineDist([c.a, c.b], x, z);
+        if (d >= CORE + FEATHER) continue;
+        const idx = j * STRIDE + i;
+        if (g[idx] >= c.deckY) continue; // raise-only: never excavate
+        const w = 1 - smootherstep(CORE, CORE + FEATHER, Math.max(d, CORE));
+        g[idx] = lerp(g[idx], c.deckY, w);
+      }
+    }
+  }
+}
+
 /** Generate the authored grid (idempotent; ~575k nodes, deterministic).
- *  Order matters: landform → pads → roads → pads. Road profiles read
- *  the surveyed flats, so a road ramps INTO a pad's height instead of
- *  fighting it; the second pad pass then re-asserts every interior
- *  exactly, so a road crossing a pad (the Citadel gate) can never dent
- *  the flat it serves. */
+ *  Order matters: landform → pads → decks → roads → pads. Road profiles
+ *  read the surveyed flats, so a road ramps INTO a pad's height instead
+ *  of fighting it; across the waist channel they read the founded deck
+ *  beds (stampBetaDecks) the same way. The second pad pass then
+ *  re-asserts every interior exactly, so a road crossing a pad (the
+ *  Citadel gate) can never dent the flat it serves. */
 export function buildBetaGrid(): Float32Array {
   if (grid) return grid;
   const g = new Float32Array(STRIDE * (BETA_ROWS + 1));
@@ -338,6 +397,7 @@ export function buildBetaGrid(): Float32Array {
     }
   }
   stampBetaPads(g);
+  stampBetaDecks(g);
   gradeBetaRoads(g);
   stampBetaPads(g, true);
   grid = g;
@@ -518,6 +578,11 @@ export function betaRoadDistance(x: number, z: number): number {
 /** Distance to the dredged channel centerline. */
 export function betaChannelDistance(x: number, z: number): number {
   return polylineDist(BETA_SOUND_CHANNEL, x, z);
+}
+
+/** Distance to the waist channel centerline (the aerial v2 cut). */
+export function betaWaistChannelDistance(x: number, z: number): number {
+  return polylineDist(BETA_WAIST_CHANNEL, x, z);
 }
 
 // ── Material zones (spec §1.1 palette) ───────────────────────────────────────

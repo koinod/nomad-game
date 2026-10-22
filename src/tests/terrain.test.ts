@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { heightAt, slopeAt } from '../game/World';
 import { AIRBASE_SITE } from '../game/airbaseSite';
-import { betaSector } from '../data/betaLayout';
+import { betaSector, BETA_CHANNEL_DEPTH } from '../data/betaLayout';
 
 // Beta Island terrain facts (map integration, 2026-10-21 — this file
 // pinned the OLD analytic island's topography; the deliberate changes
@@ -29,8 +29,22 @@ describe('beta terrain topography', () => {
   });
 
   it('the shorelines still meet the water (heights fall off)', () => {
-    // Atlantic side: dry sand at x 600, deep water by x 660
-    expect(heightAt(600, 40)).toBeGreaterThan(0.5);
+    // Atlantic side, NORTH of the waist channel's mouth: dry sand at
+    // x 600, deep water by x 660. This transect used to run at z 40;
+    // the waist-channel revision (aerial v2 canon) cut the channel's
+    // Atlantic mouth through that line — BETA_WAIST_CHANNEL exits the
+    // east shore along (700, 55) → (640, 45) → (520, 25), so (600, 40)
+    // now sits ~2 m off the centerline, inside the dredge cut. z −60
+    // is the same Atlantic shore ~98 m north of the mouth line, far
+    // outside the carve's full influence (15 m halfwidth + 18 m
+    // feather); its heights are byte-identical pre/post channel
+    // (2.42 dry / −13.50 deep, probed against the pre-lane tree).
+    expect(heightAt(600, -60)).toBeGreaterThan(0.5);
+    expect(heightAt(660, -60)).toBeLessThan(-5);
+    // The mouth itself, asserted as the NEW canon: the old z-40
+    // transect crosses the dredged cut at full depth where the dry
+    // sand used to be, and still reaches the deep Atlantic past it.
+    expect(heightAt(600, 40)).toBeCloseTo(BETA_CHANNEL_DEPTH, 1);
     expect(heightAt(660, 40)).toBeLessThan(-5);
     // the south sound: marsh edge at z 240, open water by z 300
     expect(heightAt(0, 240)).toBeGreaterThan(0);
