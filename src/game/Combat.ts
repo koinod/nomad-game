@@ -231,6 +231,15 @@ export interface MeleeResult {
   stats: MeleeStats;
 }
 
+/** The stats a swing STARTS with — the same selection tryMelee
+ *  resolves with (gun bash when a gun is in hand and no melee weapon
+ *  is equipped), so the state machine times the swing the resolution
+ *  will actually use. */
+export function swingStatsFor(itemId: string | null): MeleeStats {
+  if (itemId == null && equippedRangedDef()) return GUN_BASH_STATS;
+  return meleeStatsFor(itemId);
+}
+
 /** Swing: cleaves through every husk inside the arc, nearest-first. */
 export function tryMelee(h: CombatHooks): MeleeResult {
   const itemId = equippedMeleeId();
@@ -245,7 +254,7 @@ export function tryMelee(h: CombatHooks): MeleeResult {
     return { swung: true, hits: 0, kills: 0, specialKills: 0, stats: meleeStatsFor(itemId) };
   }
   // no melee weapon but a gun in hand: bash with the gun itself
-  const stats = itemId == null && equippedRangedDef() ? GUN_BASH_STATS : meleeStatsFor(itemId);
+  const stats = swingStatsFor(itemId);
   const empty: MeleeResult = { swung: false, hits: 0, kills: 0, specialKills: 0, stats };
   // a weapon worn to nothing is scrap until the bench sees it
   const meleeInst = (() => {
