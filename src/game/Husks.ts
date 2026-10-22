@@ -110,6 +110,86 @@ function hashId(id: string): () => number {
 const JACKETS = [0x5a4632, 0x3c5a6e, 0x6e3c3c, 0x4a5a3c, 0x555555, 0x6b5a2e, 0x2e4a4e];
 const PANTS = [0x35322c, 0x2c3540, 0x404040, 0x3a3230, 0x4a3b2c];
 
+/**
+ * AUTHORED FIGURES: the base pose each kind's procedural builder
+ * (figureKit buildHuskFigure) applies, mirrored onto an authored rig —
+ * pose bases are behavior (flinch/walk relax back to them), so the
+ * authored figure must start from exactly the same stance. The vrnd
+ * sequence is replayed from the husk's seed advanced past the two
+ * wardrobe picks buildMesh consumed, so a poseSlump kind lands on the
+ * same loll/hang values its interim mesh had. (Wave 1's shambler
+ * shipped with this same 2-advance replay; preserved as-is.)
+ */
+function applyAuthoredPose(rig: FigureRig, kind: HuskKind, id: string): void {
+  const vrnd = hashId(id);
+  vrnd();
+  vrnd();
+  switch (kind) {
+    case 'shambler':
+      poseSlump(rig, 0.14, vrnd);
+      break;
+    case 'stalker':
+      poseSlump(rig, 0.2, vrnd);
+      break;
+    case 'armored':
+      poseSlump(rig, 0.14, vrnd);
+      break;
+    case 'spitter':
+      poseSlump(rig, 0.14, vrnd);
+      break;
+    case 'bloater':
+      poseSlump(rig, 0.1, vrnd);
+      // arms splay around the sac — but keep the AUTHORED pivots: the
+      // kit's ±0.17 outboard shift (huskBloater) floated the authored
+      // arms fully detached beside the belly (joint-continuity pass,
+      // 2026-10-21); the splay alone rotates the shoulder balls clear
+      // of the authored mass.
+      rig.armL.rotation.z = 0.38;
+      rig.armR.rotation.z = -0.38;
+      break;
+    case 'screamer':
+      // huskScreamer's bespoke stance: head thrown back, arms low
+      rig.torso.rotation.x = 0.06;
+      rig.pose.torsoX = 0.06;
+      rig.head.rotation.x = -0.25;
+      rig.armL.rotation.x = -0.42;
+      rig.armR.rotation.x = -0.34;
+      rig.pose.armLX = -0.42;
+      rig.pose.armRX = -0.34;
+      break;
+    case 'brute':
+      // huskBrute: broader than any human frame, head sunk, torso pitched
+      rig.group.scale.set(1.22, 1, 1.12);
+      rig.torso.rotation.x = 0.24;
+      rig.pose.torsoX = 0.24;
+      rig.head.rotation.x = 0.28;
+      rig.armL.rotation.x = -0.3;
+      rig.armR.rotation.x = -0.3;
+      rig.pose.armLX = -0.3;
+      rig.pose.armRX = -0.3;
+      break;
+    case 'crawler':
+      // huskCrawler: the rig re-posed quadruped — torso flat and slung
+      // low, head counter-pitched, hindlimbs trailed to the body's line
+      rig.torso.position.y = 0.4;
+      rig.torso.rotation.x = 1.35;
+      rig.pose.torsoX = 1.35;
+      rig.head.rotation.x = -1.1;
+      rig.armL.rotation.x = -1.85;
+      rig.armR.rotation.x = -1.75;
+      rig.pose.armLX = -1.85;
+      rig.pose.armRX = -1.75;
+      rig.legL.position.set(-0.17, 0.44, -0.2);
+      rig.legR.position.set(0.17, 0.44, -0.2);
+      rig.legL.rotation.x = 0.95;
+      rig.legR.rotation.x = 0.88;
+      rig.pose.legLX = 0.95;
+      rig.pose.legRX = 0.88;
+      rig.group.scale.y = 0.96;
+      break;
+  }
+}
+
 export class Husk {
   readonly id: string;
   readonly kind: HuskKind;
@@ -216,16 +296,27 @@ export class Husk {
   private authoredRig = false;
 
   /**
-   * AUTHORED FIGURES WAVE 1: swap this husk's procedural rig for the
-   * authored shambler GLB (loaded once by the manager) bound through
-   * figureKit's bindFigureGLB — same named pivots, same poseSlump base,
-   * same rewire buildMesh performs, so every behavior path (walk swing,
-   * flinch, jaw, damage flash) poses it identically. Shambler only:
-   * every other kind keeps its interim kit mesh, and any failure keeps
-   * the interim mesh too — the game never waits on art.
+   * AUTHORED FIGURES (waves 1–2): swap this husk's procedural rig for
+   * its kind's authored GLB (loaded once by the manager) bound through
+   * figureKit's bindFigureGLB — same named pivots, same base pose the
+   * procedural builder applies (applyAuthoredPose below), same rewire
+   * buildMesh performs, so every behavior path (walk swing, flinch,
+   * jaw, sac, damage flash) poses it identically. Any failure keeps the
+   * interim mesh — the game never waits on art.
    */
   useAuthoredShambler(template: THREE.Object3D): boolean {
-    if (this.kind !== 'shambler' || this.authoredRig) return false;
+    if (this.kind !== 'shambler') return false;
+    return this.swapAuthored(template);
+  }
+
+  /** The wave-2 entry: any kind with an authored GLB swaps through the
+   *  same mechanism; kinds without one are never offered a template. */
+  useAuthoredFigure(template: THREE.Object3D): boolean {
+    return this.swapAuthored(template);
+  }
+
+  private swapAuthored(template: THREE.Object3D): boolean {
+    if (this.authoredRig) return false;
     const root = template.clone(true);
     // per-husk materials: the damage flash and eye pulse are per-husk
     root.traverse((o) => {
@@ -237,12 +328,7 @@ export class Husk {
     } catch {
       return false;
     }
-    // the identical slump the procedural build applies, from the same
-    // per-husk seed (advanced past the two wardrobe rolls it consumed)
-    const vrnd = hashId(this.id);
-    vrnd();
-    vrnd();
-    poseSlump(rig, 0.14, vrnd);
+    applyAuthoredPose(rig, this.kind, this.id);
     if (this.rig) this.group.remove(this.rig.group);
     this.rig = rig;
     this.authoredRig = true;
@@ -791,34 +877,44 @@ interface SpitGlob {
 }
 
 /**
- * AUTHORED FIGURES WAVE 1 — the authored shambler GLB, loaded once per
- * session (browser only; the interim kit mesh is the standing fallback,
- * so a failed/slow load changes nothing but the mesh tier). Every
- * manager registers; when the template lands, live shamblers swap and
- * later spawns swap at birth.
+ * AUTHORED FIGURES (waves 1–2) — each kind's authored GLB, loaded once
+ * per session (browser only; the interim kit mesh is the standing
+ * fallback, so a failed/slow load changes nothing but the mesh tier).
+ * Every manager registers; when a kind's template lands, live husks of
+ * that kind swap and later spawns swap at birth. Kinds enter this map
+ * one class per wave-2 commit, as their GLBs ship.
  */
-let authoredShamblerTemplate: THREE.Object3D | null = null;
-let authoredShamblerLoading = false;
-const authoredShamblerWaiters: HuskManager[] = [];
+const AUTHORED_GLB_BY_KIND: Partial<Record<HuskKind, string>> = {
+  shambler: 'husk_shambler_authored',
+  crawler: 'husk_crawler_authored',
+  spitter: 'husk_spitter_authored',
+  screamer: 'husk_screamer_authored',
+  bloater: 'husk_bloater_authored',
+  stalker: 'husk_stalker_authored',
+  armored: 'husk_armored_authored',
+  brute: 'husk_brute_authored',
+};
+const authoredTemplates = new Map<HuskKind, THREE.Object3D>();
+const authoredLoading = new Set<HuskKind>();
+const authoredWaiters: HuskManager[] = [];
 
-function ensureAuthoredShambler(mgr: HuskManager): void {
-  if (authoredShamblerTemplate) {
-    mgr.applyAuthoredShambler();
-    return;
+function ensureAuthoredFigures(mgr: HuskManager): void {
+  if (!authoredWaiters.includes(mgr)) authoredWaiters.push(mgr);
+  mgr.applyAuthoredFigures();
+  if (typeof window === 'undefined') return;
+  for (const [kind, file] of Object.entries(AUTHORED_GLB_BY_KIND) as [HuskKind, string][]) {
+    if (authoredTemplates.has(kind) || authoredLoading.has(kind)) continue;
+    authoredLoading.add(kind);
+    import('three/addons/loaders/GLTFLoader.js')
+      .then(({ GLTFLoader }) => new GLTFLoader().loadAsync(`/${figureGLBUrl(file)}`))
+      .then((gltf) => {
+        authoredTemplates.set(kind, gltf.scene);
+        for (const m of authoredWaiters) m.applyAuthoredFigures();
+      })
+      .catch(() => {
+        /* art load failed — interim meshes stand; behavior is untouched */
+      });
   }
-  authoredShamblerWaiters.push(mgr);
-  if (authoredShamblerLoading || typeof window === 'undefined') return;
-  authoredShamblerLoading = true;
-  import('three/addons/loaders/GLTFLoader.js')
-    .then(({ GLTFLoader }) => new GLTFLoader().loadAsync(`/${figureGLBUrl('husk_shambler_authored')}`))
-    .then((gltf) => {
-      authoredShamblerTemplate = gltf.scene;
-      for (const m of authoredShamblerWaiters) m.applyAuthoredShambler();
-      authoredShamblerWaiters.length = 0;
-    })
-    .catch(() => {
-      /* art load failed — interim meshes stand; behavior is untouched */
-    });
 }
 
 export class HuskManager {
@@ -844,13 +940,16 @@ export class HuskManager {
     this.scene = scene;
     this.zones = zones;
     this.rng = mulberry32(seed ^ 0xbeef01);
-    ensureAuthoredShambler(this);
+    ensureAuthoredFigures(this);
   }
 
-  /** Swap every live shambler onto the authored rig (wave 1). */
-  applyAuthoredShambler(): void {
-    if (!authoredShamblerTemplate) return;
-    for (const h of this.husks) h.useAuthoredShambler(authoredShamblerTemplate);
+  /** Swap every live husk whose kind's authored GLB has landed. */
+  applyAuthoredFigures(): void {
+    if (authoredTemplates.size === 0) return;
+    for (const h of this.husks) {
+      const t = authoredTemplates.get(h.kind);
+      if (t) h.useAuthoredFigure(t);
+    }
   }
 
   private landPoint(zone: SpawnZone, groundY: (x: number, z: number) => number): [number, number] | null {
@@ -866,7 +965,8 @@ export class HuskManager {
 
   private addHusk(id: string, kind: HuskKind, x: number, z: number, zoneId: string, groundY: (x: number, z: number) => number): void {
     const h = new Husk(id, kind, x, z, zoneId, groundY);
-    if (authoredShamblerTemplate) h.useAuthoredShambler(authoredShamblerTemplate);
+    const t = authoredTemplates.get(kind);
+    if (t) h.useAuthoredFigure(t);
     this.husks.push(h);
     this.scene.add(h.group);
   }

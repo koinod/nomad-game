@@ -480,3 +480,358 @@ describe('arm IK (Item 7)', () => {
     expect(dir.angleTo(toT)).toBeLessThan(0.35);
   });
 });
+// ------------------------------------------------ authored figures, wave 2 ---
+
+/** A synthetic template in the authored shape (the bind contract). */
+function syntheticAuthoredTemplate(withSac = false): THREE.Group {
+  const tmpl = new THREE.Group();
+  const mk = (name: string, parent: THREE.Object3D) => {
+    const o = new THREE.Group();
+    o.name = name;
+    parent.add(o);
+    return o;
+  };
+  const torso = mk('torso', tmpl);
+  const head = mk('head', torso);
+  mk('jaw', head);
+  mk('armL', torso);
+  mk('armR', torso);
+  mk('legL', tmpl);
+  mk('legR', tmpl);
+  const tm = new THREE.Mesh(
+    new THREE.BoxGeometry(0.3, 0.6, 0.2),
+    new THREE.MeshStandardMaterial({ color: 0x776655 }),
+  );
+  tm.name = 'torsoMesh';
+  torso.add(tm);
+  const em = new THREE.Mesh(
+    new THREE.SphereGeometry(0.02, 6, 6),
+    new THREE.MeshBasicMaterial({ color: 0xffd76a }),
+  );
+  em.name = 'eyes';
+  head.add(em);
+  if (withSac) {
+    const sac = new THREE.Mesh(
+      new THREE.SphereGeometry(0.14, 8, 8),
+      new THREE.MeshStandardMaterial({ color: 0x7d9b3a }),
+    );
+    sac.name = 'sac';
+    torso.add(sac);
+  }
+  return tmpl;
+}
+
+/** Per-class artifact expectations. skullY is the UNPOSED skull-center
+ *  height the class builder targets: the HitProfile headY for every
+ *  kind except the crawler, whose kit build stands at 1.62 and is
+ *  re-posed quadruped at runtime. Rows land one class per commit. */
+const AUTHORED2: { kind: HuskKind; file: string; skullY: number; hipY: number; legX: number; extra: string[] }[] = [
+  { kind: 'crawler', file: 'husk_crawler_authored.glb', skullY: 1.62, hipY: 0.864, legX: 0.0851, extra: [] },
+  { kind: 'spitter', file: 'husk_spitter_authored.glb', skullY: 1.76, hipY: 0.888, legX: 0.0875, extra: ['sac'] },
+  { kind: 'screamer', file: 'husk_screamer_authored.glb', skullY: 2.0, hipY: 1.008, legX: 0.0993, extra: [] },
+  { kind: 'bloater', file: 'husk_bloater_authored.glb', skullY: 1.76, hipY: 0.888, legX: 0.1201, extra: [] },
+  { kind: 'stalker', file: 'husk_stalker_authored.glb', skullY: 1.85, hipY: 0.936, legX: 0.0922, extra: [] },
+  { kind: 'armored', file: 'husk_armored_authored.glb', skullY: 1.82, hipY: 0.9216, legX: 0.1246, extra: [] },
+  { kind: 'brute', file: 'husk_brute_authored.glb', skullY: 2.26, hipY: 1.152, legX: 0.1558, extra: [] },
+];
+
+describe('authored husk GLBs (wave 2)', () => {
+  for (const row of AUTHORED2) {
+    it(`${row.kind}: the shipped artifact honors the bindFigureGLB node contract`, () => {
+      const path = join(
+        dirname(fileURLToPath(import.meta.url)), '..', '..',
+        'public', 'figures', row.file,
+      );
+      const g = gltfJson(path);
+      const names = g.nodes.map((n) => n.name);
+      for (const req of ['torso', 'head', 'jaw', 'armL', 'armR', 'legL', 'legR', 'torsoMesh', 'eyes', 'skull', ...row.extra]) {
+        expect(names, req).toContain(req);
+      }
+      const parent = new Map<number, number>();
+      g.nodes.forEach((n, i) => (n.children ?? []).forEach((c) => parent.set(c, i)));
+      const idx = (name: string) => names.indexOf(name);
+      expect(g.nodes[parent.get(idx('head'))!].name).toBe('torso');
+      expect(g.nodes[parent.get(idx('jaw'))!].name).toBe('head');
+      expect(g.nodes[parent.get(idx('armL'))!].name).toBe('torso');
+      // the skull rides the translation chain onto the class window
+      let y = 0;
+      let i: number | undefined = idx('skull');
+      while (i !== undefined) {
+        y += g.nodes[i].translation?.[1] ?? 0;
+        i = parent.get(i);
+      }
+      expect(Math.abs(y - row.skullY)).toBeLessThan(0.03);
+      // pivots where the kit puts them (hip line, bi-acetabular width)
+      const torsoT = g.nodes[idx('torso')].translation!;
+      expect(Math.abs(torsoT[1] - row.hipY)).toBeLessThan(0.01);
+      for (const leg of ['legL', 'legR']) {
+        const t = g.nodes[idx(leg)].translation!;
+        expect(Math.abs(Math.abs(t[0]) - row.legX)).toBeLessThan(0.006);
+        expect(Math.abs(t[1] - row.hipY)).toBeLessThan(0.01);
+      }
+      // eyes load as MeshBasicMaterial (unlit); the torso stays lit
+      const matOf = (name: string) => g.materials[g.meshes[g.nodes[idx(name)].mesh!].primitives[0].material!];
+      expect(matOf('eyes').extensions?.KHR_materials_unlit).toBeDefined();
+      expect(matOf('torsoMesh').extensions?.KHR_materials_unlit).toBeUndefined();
+      // grime vertex colors ride the visible shells
+      for (const name of ['skull', 'torsoMesh', 'torsoSkin']) {
+        expect(g.meshes[g.nodes[idx(name)].mesh!].primitives[0].attributes.COLOR_0, name).toBeDefined();
+      }
+    });
+  }
+
+  it('crawler swap applies the quadruped re-pose the kit builder applies', () => {
+    const cr = new Husk('auth2_cr', 'crawler', 0, 0, 'test', groundY);
+    expect(cr.useAuthoredFigure(syntheticAuthoredTemplate())).toBe(true);
+    expect(cr.useAuthoredFigure(syntheticAuthoredTemplate())).toBe(false); // one swap only
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rig = (cr as any).rig as FigureRig;
+    expect(rig.torso.position.y).toBe(0.4);
+    expect(rig.torso.rotation.x).toBe(1.35);
+    expect(rig.pose.torsoX).toBe(1.35);
+    expect(rig.head.rotation.x).toBe(-1.1);
+    expect(rig.armL.rotation.x).toBe(-1.85);
+    expect(rig.legL.rotation.x).toBe(0.95);
+    expect(rig.legR.position.z).toBe(-0.2);
+    expect(rig.group.scale.y).toBe(0.96);
+  });
+
+  it('spitter swap binds the authored sac and lands on the kit slump', () => {
+    const sp = new Husk('auth2_sp', 'spitter', 0, 0, 'test', groundY);
+    expect(sp.useAuthoredFigure(syntheticAuthoredTemplate(true))).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rig = (sp as any).rig as FigureRig;
+    expect(rig.sac).not.toBeNull();
+    expect(rig.sac!.name).toBe('sac');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((sp as any).sacMesh).toBe(rig.sac); // the telegraph pulses THIS mesh
+    expect(rig.pose.torsoX).toBe(0.14);
+    expect(rig.torso.rotation.x).toBe(0.14);
+  });
+
+  it('screamer swap applies the kit builder\u2019s bespoke stance (no slump)', () => {
+    const sc = new Husk('auth2_sc', 'screamer', 0, 0, 'test', groundY);
+    expect(sc.useAuthoredFigure(syntheticAuthoredTemplate())).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rig = (sc as any).rig as FigureRig;
+    expect(rig.torso.rotation.x).toBe(0.06);
+    expect(rig.pose.torsoX).toBe(0.06);
+    expect(rig.head.rotation.x).toBe(-0.25); // thrown back — the wind-up deepens it
+    expect(rig.armL.rotation.x).toBe(-0.42);
+    expect(rig.armR.rotation.x).toBe(-0.34);
+  });
+
+  it('bloater swap slumps and splays — authored pivots stay put', () => {
+    const bl = new Husk('auth2_bl', 'bloater', 0, 0, 'test', groundY);
+    const tmpl = syntheticAuthoredTemplate();
+    expect(bl.useAuthoredFigure(tmpl)).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rig = (bl as any).rig as FigureRig;
+    expect(rig.pose.torsoX).toBe(0.1); // the bloater's shallower slump
+    // Joint-continuity pass (2026-10-21): the kit's ±0.17 outboard
+    // shift is GONE for authored figures — it floated the arms
+    // detached beside the belly. Pivots authored at x=0 in the
+    // template stay at x=0; the 0.38 splay alone clears the mass.
+    expect(rig.armL.position.x).toBeCloseTo(0);
+    expect(rig.armR.position.x).toBeCloseTo(0);
+    expect(rig.armL.rotation.z).toBe(0.38);
+    expect(rig.armR.rotation.z).toBe(-0.38);
+  });
+
+  it('stalker swap applies its deeper 0.2 slump', () => {
+    const st = new Husk('auth2_st', 'stalker', 0, 0, 'test', groundY);
+    expect(st.useAuthoredFigure(syntheticAuthoredTemplate())).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rig = (st as any).rig as FigureRig;
+    expect(rig.pose.torsoX).toBe(0.2);
+    expect(rig.torso.rotation.x).toBe(0.2);
+  });
+
+  it('armored swap applies its shallow 0.14 slump', () => {
+    const ar = new Husk('auth2_ar', 'armored', 0, 0, 'test', groundY);
+    expect(ar.useAuthoredFigure(syntheticAuthoredTemplate())).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rig = (ar as any).rig as FigureRig;
+    expect(rig.pose.torsoX).toBe(0.14);
+    expect(rig.torso.rotation.x).toBe(0.14);
+  });
+
+  it('brute swap applies the heavy stance AND the kit group breadth', () => {
+    const br = new Husk('auth2_br', 'brute', 0, 0, 'test', groundY);
+    expect(br.useAuthoredFigure(syntheticAuthoredTemplate())).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rig = (br as any).rig as FigureRig;
+    expect(rig.pose.torsoX).toBe(0.24);
+    expect(rig.head.rotation.x).toBe(0.28);
+    expect(rig.armL.rotation.x).toBe(-0.3);
+    // the runtime adds the breadth — the authored clay is built unscaled
+    expect(rig.group.scale.x).toBeCloseTo(1.22);
+    expect(rig.group.scale.z).toBeCloseTo(1.12);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * JOINT CONTINUITY (2026-10-21) — Ian's playtest verdict on the wave-2
+ * crawler proof: "legs disconnected — legs and arms should bend". The
+ * Python verifier (tools/figures/joint_check.py) pins the same numbers
+ * at build time; this block pins them on the SHIPPED artifacts: per
+ * limb pivot, in pivot-local space (glTF Y-up, +Z = figure front) —
+ *   telescope:  the limb's own clay reaches >= 0.028 above the pivot;
+ *   bend:       clay below -0.45 hangs displaced toward flexion
+ *               (arms forward: centroid Z >= +0.022; legs back: <= -0.008);
+ *   coverage:   parent-side clay fills >= 7 of 8 octants around the
+ *               pivot with >= 30 verts in the shell (0.25x–1.3x the
+ *               joint-mass radius) — a pivot backed on one side only
+ *               fails (the pre-pass loft wall: 4/8).
+ * ------------------------------------------------------------------ */
+type Mat4 = number[][]; // row-major 4x4
+
+function matMul(a: Mat4, b: Mat4): Mat4 {
+  return a.map((row, i) => row.map((_, j) => a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j] + a[i][3] * b[3][j]));
+}
+function matInv(m: Mat4): Mat4 {
+  const [a, b, c] = [m[0][0], m[0][1], m[0][2]];
+  const [d, e, f] = [m[1][0], m[1][1], m[1][2]];
+  const [g, h, i] = [m[2][0], m[2][1], m[2][2]];
+  const A = e * i - f * h, B = -(d * i - f * g), C = d * h - e * g;
+  const det = a * A + b * B + c * C;
+  const inv = [
+    [A / det, (c * h - b * i) / det, (b * f - c * e) / det],
+    [B / det, (a * i - c * g) / det, (c * d - a * f) / det],
+    [C / det, (b * g - a * h) / det, (a * e - b * d) / det],
+  ];
+  const t = [m[0][3], m[1][3], m[2][3]];
+  const ti = inv.map((r) => -(r[0] * t[0] + r[1] * t[1] + r[2] * t[2]));
+  return [[...inv[0], ti[0]], [...inv[1], ti[1]], [...inv[2], ti[2]], [0, 0, 0, 1]];
+}
+
+interface GlbFull {
+  nodes: { name?: string; children?: number[]; translation?: number[]; rotation?: number[]; scale?: number[]; mesh?: number }[];
+  meshes: { primitives: { attributes: Record<string, number> }[] }[];
+  accessors: { bufferView: number; byteOffset?: number; count: number }[];
+  bufferViews: { byteOffset?: number; byteStride?: number }[];
+}
+
+function pivotMetrics(path: string) {
+  const buf = readFileSync(path);
+  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const jlen = dv.getUint32(12, true);
+  const g = JSON.parse(new TextDecoder().decode(buf.subarray(20, 20 + jlen))) as GlbFull;
+  const binOff = 20 + jlen + 8;
+  const parent = new Map<number, number>();
+  g.nodes.forEach((n, i) => (n.children ?? []).forEach((c) => parent.set(c, i)));
+  const local = (n: GlbFull['nodes'][number]): Mat4 => {
+    const t = n.translation ?? [0, 0, 0], s = n.scale ?? [1, 1, 1];
+    const [x, y, z, w] = n.rotation ?? [0, 0, 0, 1];
+    const R = [
+      [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+      [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+      [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+    ];
+    return [
+      [R[0][0] * s[0], R[0][1] * s[1], R[0][2] * s[2], t[0]],
+      [R[1][0] * s[0], R[1][1] * s[1], R[1][2] * s[2], t[1]],
+      [R[2][0] * s[0], R[2][1] * s[1], R[2][2] * s[2], t[2]],
+      [0, 0, 0, 1],
+    ];
+  };
+  const worldCache = new Map<number, Mat4>();
+  const world = (i: number): Mat4 => {
+    let m = worldCache.get(i);
+    if (!m) {
+      m = local(g.nodes[i]);
+      const p = parent.get(i);
+      if (p !== undefined) m = matMul(world(p), m);
+      worldCache.set(i, m);
+    }
+    return m;
+  };
+  const xf = (m: Mat4, v: number[]) => [
+    m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2] + m[0][3],
+    m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2] + m[1][3],
+    m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2] + m[2][3],
+  ];
+  const idx = (name: string) => g.nodes.findIndex((n) => n.name === name);
+  const subtree = (root: number) => {
+    const out = new Set<number>();
+    const stack = [root];
+    while (stack.length) {
+      const i = stack.pop()!;
+      out.add(i);
+      stack.push(...(g.nodes[i].children ?? []));
+    }
+    return out;
+  };
+  const verts = (set: Set<number>) => {
+    const out: number[][] = [];
+    for (const i of set) {
+      const node = g.nodes[i];
+      if (node.mesh === undefined) continue;
+      for (const prim of g.meshes[node.mesh].primitives) {
+        const acc = g.accessors[prim.attributes.POSITION];
+        const bv = g.bufferViews[acc.bufferView];
+        const off = binOff + (bv.byteOffset ?? 0) + (acc.byteOffset ?? 0);
+        const stride = bv.byteStride ?? 12;
+        const w = world(i);
+        for (let k = 0; k < acc.count; k++) {
+          out.push(xf(w, [
+            dv.getFloat32(off + k * stride, true),
+            dv.getFloat32(off + k * stride + 4, true),
+            dv.getFloat32(off + k * stride + 8, true),
+          ]));
+        }
+      }
+    }
+    return out;
+  };
+  const sib: Record<string, string> = { armL: 'armR', armR: 'armL', legL: 'legR', legR: 'legL' };
+  const meshNodes = new Set(g.nodes.map((_n, i) => i).filter((i) => g.nodes[i].mesh !== undefined));
+  const out: Record<string, { extUp: number; lowCz: number; near: number; octs: number }> = {};
+  for (const piv of ['armL', 'armR', 'legL', 'legR']) {
+    const pi = idx(piv);
+    const inv = matInv(world(pi));
+    const sub = subtree(pi);
+    const own = verts(sub).map((v) => xf(inv, v));
+    const low = own.filter((v) => v[1] < -0.45);
+    // the coverage shell scales with the joint-mass radius, read off
+    // the limb's own above-pivot verts (the brute's shoulder ball is
+    // 2x a standard class's; below-pivot verts would include the
+    // elbow/knee ball and inflate the radius)
+    const rBall = Math.max(...own.filter((v) => v[1] > -0.01).map((v) => Math.hypot(v[0], v[1], v[2])));
+    const excl = new Set([...sub, ...subtree(idx(sib[piv])), ...subtree(idx('head'))]);
+    const pv = verts(new Set([...meshNodes].filter((i) => !excl.has(i)))).map((v) => xf(inv, v));
+    const nearV = pv.filter((v) => {
+      const d = Math.hypot(v[0], v[1], v[2]);
+      return d > rBall * 0.25 && d <= rBall * 1.3;
+    });
+    const octs = new Set(nearV.map((v) => `${Math.sign(v[0])},${Math.sign(v[1])},${Math.sign(v[2])}`));
+    out[piv] = {
+      extUp: Math.max(...own.map((v) => v[1])),
+      lowCz: low.reduce((a, v) => a + v[2], 0) / Math.max(1, low.length),
+      near: nearV.length,
+      octs: octs.size,
+    };
+  }
+  return out;
+}
+
+describe('authored GLB joint continuity (all 8 classes)', () => {
+  const all = [
+    { kind: 'shambler', file: 'husk_shambler_authored.glb' },
+    ...AUTHORED2.map((r) => ({ kind: r.kind as string, file: r.file })),
+  ];
+  for (const row of all) {
+    it(`${row.kind}: joints telescope, limbs bend, pivots are backed on all sides`, () => {
+      const path = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'public', 'figures', row.file);
+      const m = pivotMetrics(path);
+      for (const piv of ['armL', 'armR', 'legL', 'legR']) {
+        const mm = m[piv];
+        expect(mm.extUp, `${piv} telescope`).toBeGreaterThanOrEqual(0.028);
+        if (piv.startsWith('arm')) expect(mm.lowCz, `${piv} elbow bend`).toBeGreaterThanOrEqual(0.022);
+        else expect(mm.lowCz, `${piv} knee bend`).toBeLessThanOrEqual(-0.008);
+        expect(mm.near, `${piv} parent coverage count`).toBeGreaterThanOrEqual(30);
+        expect(mm.octs, `${piv} parent coverage octants`).toBeGreaterThanOrEqual(7);
+      }
+    });
+  }
+});
