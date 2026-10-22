@@ -13,6 +13,7 @@ import { applyUpkeep, dailyMoraleTick, moraleEvent, FOOD_ITEMS, WATER_ITEMS } fr
 import {
   comfortScore, claimChecklist, claimReady, applyClaim, applyRelocation, powerBudget,
 } from '../systems/baseClaims';
+import { presenceSignature, type FacilityPresence } from '../systems/facilityPresence';
 import { DEFAULT_APPEARANCE, DIFFICULTIES, defaultSurvivorRuntime } from './types';
 import type {
   Appearance, DifficultyId, Equipped, FleetEntry, InvItem, NearbyEntry, PhoneTab, QuestProgress, QuestStepType,
@@ -133,6 +134,11 @@ interface GameState {
   weatherNow: { state: string; wetPct: number };
   setWeatherNow: (w: { state: string; wetPct: number }) => void;
   setNearStation: (s: import('../data/items').StationId | null) => void;
+  /** ORDER #4 C5: the claimed base the player is standing in and the
+   *  stations it hosts (systems/facilityPresence), mirrored by Game
+   *  beside nearStation. Runtime-only — never persisted. */
+  atBase: FacilityPresence | null;
+  setAtBase: (p: FacilityPresence | null) => void;
 
   // noise: loudest recent noise radius at the player (0–100, decays). HUD meter.
   noiseLevel: number;
@@ -711,6 +717,7 @@ export const useGameStore = create<GameState>()((set, get) => {
     meleeTarget: false,
     hitmark: null,
     nearStation: null,
+    atBase: null,
     weatherNow: { state: 'clear', wetPct: 0 },
     setWeatherNow: (weatherNow) => set({ weatherNow }),
 
@@ -1618,6 +1625,11 @@ export const useGameStore = create<GameState>()((set, get) => {
     setHitmark: (kind) => set({ hitmark: { kind, at: Date.now() } }),
     setNearStation: (s) => {
       if (get().nearStation !== s) set({ nearStation: s });
+    },
+    setAtBase: (p) => {
+      // guarded like setNearStation: Game recomputes every frame, the
+      // store only writes when the presence signature actually changes
+      if (presenceSignature(get().atBase) !== presenceSignature(p)) set({ atBase: p });
     },
     setNoiseLevel: (n) => {
       const v = Math.max(0, Math.min(100, n));
