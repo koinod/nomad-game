@@ -12,7 +12,8 @@ export const STORAGE_RADIUS_M = 3.6;
 import { useGameStore } from '../store/gameStore';
 import { ITEMS, HUSK_LOOT, HUSK_KIND_LOOT, LOG_LOOT, BUSH_LOOT, rollLoot, weightedChance } from '../data/items';
 import { DESIGNED_RECRUITS, SURVIVOR_LOOKS, NPC_LOOKS, type SurvivorLook } from '../data/survivors';
-import { buildHumanFigure } from './figureKit';
+import { buildHumanFigure, type FigureRig } from './figureKit';
+import { applyIdlePose, idlePose } from './figureAnim';
 import { CLAIMABLE, CLAIM_SITES } from '../data/base';
 import { buildGroundMesh } from './weaponMeshes';
 import { buildItemModel } from './itemModels';
@@ -95,9 +96,12 @@ export interface Interactable {
  * husk. The old box-stacked builder is deleted; looks (skin / jacket /
  * pants / build / hair) come from SURVIVOR_LOOKS / NPC_LOOKS data.
  */
-function personMesh(
-  look: Pick<SurvivorLook, 'skin' | 'jacket'> & Partial<Omit<SurvivorLook, 'skin' | 'jacket'>>,
-): THREE.Group {
+type PersonLook = Pick<SurvivorLook, 'skin' | 'jacket'> & Partial<Omit<SurvivorLook, 'skin' | 'jacket'>>;
+
+/** ORDER #6: the rig, not just the group — placed people are registered
+ *  with the system so update() can give them idle life (and retire a
+ *  recruit's statue the moment the living companion takes over). */
+function personFigure(look: PersonLook) {
   return buildHumanFigure({
     palette: {
       skin: look.skin,
@@ -107,7 +111,7 @@ function personMesh(
     },
     build: look.build,
     hairStyle: look.hairStyle,
-  }).group;
+  });
 }
 
 /** Distinct physical mesh per item — see weaponMeshes.ts. */
@@ -132,6 +136,11 @@ function buildPickupMesh(itemId: string, qty: number): THREE.Group {
 
 export class InteractSystem {
   readonly interactables: Interactable[] = [];
+  /** ORDER #6: every placed person's rig, for idle life in update().
+   *  Recruit statues carry their survivor id — when the store says the
+   *  survivor has joined, the statue retires (the companion system owns
+   *  the living figure from then on) and its interactable is dropped. */
+  private people: { rig: FigureRig; seed: number; recruitId?: string; retired?: boolean }[] = [];
   /** POI alarm engine (§4.4): trips queue events here for Game to
    *  execute (noise burst + scout pair); flags mirror each trip for
    *  consumers that only read the store. */
@@ -470,12 +479,14 @@ export class InteractSystem {
       const z = pz + r.dz;
       const y = hooks.groundY(x, z);
       const look = SURVIVOR_LOOKS[r.key];
-      const mesh = look
-        ? personMesh(look)
-        : personMesh({ jacket: r.jacket, skin: 0xa8785a });
+      const rig = look
+        ? personFigure(look)
+        : personFigure({ jacket: r.jacket, skin: 0xa8785a });
+      const mesh = rig.group;
       mesh.position.set(x, y, z);
       mesh.rotation.y = Math.PI * 0.3;
       hooks.scene.add(mesh);
+      this.people.push({ rig, seed: this.people.length * 0.37 + 0.11, recruitId: def.id });
       this.interactables.push({
         id: `recruit:${r.key}`,
         kind: 'npc',
@@ -642,12 +653,14 @@ export class InteractSystem {
       const mz = z + (n.dz ?? 1.5);
       const y = hooks.groundY(mx, mz);
       const nLook = NPC_LOOKS[n.id.replace('npc:', '')];
-      const mesh = nLook
-        ? personMesh(nLook)
-        : personMesh({ jacket: n.jacket, skin: 0xc9a180 });
+      const nRig = nLook
+        ? personFigure(nLook)
+        : personFigure({ jacket: n.jacket, skin: 0xc9a180 });
+      const mesh = nRig.group;
       mesh.position.set(mx, y, mz);
       mesh.rotation.y = Math.PI * 0.75;
       hooks.scene.add(mesh);
+      this.people.push({ rig: nRig, seed: this.people.length * 0.53 + 0.29 });
       const pos = mesh.position.clone();
       this.interactables.push({
         id: n.id,
@@ -816,6 +829,24 @@ export class InteractSystem {
     for (const mesh of this.pickupMeshes.values()) {
       mesh.position.y = (mesh.userData.baseY as number) + Math.sin(elapsed * 2 + (mesh.userData.phase as number)) * 0.06;
       mesh.rotation.y += _dt * 0.4;
+    }
+    // ORDER #6: placed people LIVE — breathing + a wandering gaze from
+    // the shared idle driver, seed-offset so no two statues sync. A
+    // recruited survivor's statue retires: the store check is cheap and
+    // the companion system renders the real person from here on.
+    if (this.people.length > 0) {
+      const crew = useGameStore.getState().survivors;
+      for (const p of this.people) {
+        if (p.retired) continue;
+        if (p.recruitId && crew.some((sv) => sv.id === p.recruitId)) {
+          p.retired = true;
+          p.rig.group.visible = false;
+          const ix = this.interactables.findIndex((i) => i.id === `recruit:${p.recruitId}`);
+          if (ix >= 0) this.interactables.splice(ix, 1);
+          continue;
+        }
+        applyIdlePose(p.rig, idlePose(elapsed, p.seed));
+      }
     }
     // respawn clocks tick on game time; a 2s real-time sweep is plenty
     this.respawnSweep += _dt;
