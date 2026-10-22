@@ -176,7 +176,7 @@ export class Game {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.06;
+    this.renderer.toneMappingExposure = 1.1; // ground-graphics lane: +0.04 for the stronger sun's highlight headroom under ACES
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(
