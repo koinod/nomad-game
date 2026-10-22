@@ -64,6 +64,19 @@ export function facilityTier(base: BaseInstance, defId: string): number {
   return facilityAt(base, defId)?.tier ?? 0;
 }
 
+/** Land a completed tiered build (build-order lane): upsert the
+ *  facility at its new tier, preserving staffing and paused state.
+ *  Pure — the store's claims build queue applies it when an order's
+ *  timer runs out, and every consumer (presence, production, power,
+ *  garage) reads the result with no extra wiring. */
+export function applyTieredBuild(base: BaseInstance, facilityId: string, tier: number): BaseInstance {
+  const existing = facilityAt(base, facilityId);
+  const facilities = existing
+    ? base.facilities.map((f) => (f.defId === facilityId ? { ...f, tier } : f))
+    : [...base.facilities, { defId: facilityId, tier, staffId: null, paused: false }];
+  return { ...base, facilities };
+}
+
 /** Command Post tier of a base (built-in on claim — a claimed base always has ≥T1). */
 export function commandPostTier(base: BaseInstance): number {
   return Math.max(1, facilityTier(base, 'command_post'));

@@ -3,7 +3,7 @@ import { ITEMS, FIELD_RECIPES, STATION_RECIPES, STATION_LABEL } from '../data/it
 import { PERKS as PERKS_ALL } from '../data/skills';
 import { FINISHES, MODS as MODS_ALL, magSizeOf } from '../data/mods';
 import { UPGRADES as UPGRADE_DEFS } from '../data/upgrades';
-import { FACILITIES as FACILITY_DEFS, baseHeat, buildMinutes, claimSite } from '../data/base';
+import { FACILITIES as FACILITY_DEFS, baseHeat, buildMinutes, claimSite, tieredFacility, tierDef } from '../data/base';
 import { dispatchDurationMin, poiName, resolveDispatch } from '../data/dispatch';
 import { TRAITS as TRAIT_DEFS } from '../data/survivors';
 import { QUESTS } from '../data/quests';
@@ -12,13 +12,14 @@ import { ENCLAVE_RADIO_BURST } from '../data/worldWiring';
 import { applyUpkeep, dailyMoraleTick, moraleEvent, FOOD_ITEMS, WATER_ITEMS } from '../systems/morale';
 import {
   comfortScore, claimChecklist, claimReady, applyClaim, applyRelocation, powerBudget,
+  allBases, applyTieredBuild, buildMenu, facilityCard,
 } from '../systems/baseClaims';
 import { presenceSignature, type FacilityPresence } from '../systems/facilityPresence';
 import { DEFAULT_APPEARANCE, DIFFICULTIES, defaultSurvivorRuntime } from './types';
 import type {
   Appearance, DifficultyId, Equipped, FleetEntry, InvItem, NearbyEntry, PhoneTab, QuestProgress, QuestStepType,
   SaveMeta, SaveSnapshot, Screen, SlotId, ToastMsg, TrailerFleetEntry, WeaponSlotId,
-  Dispatch, JournalEntry, ScoutReport, BaseBuildOrder, CraftJob, BaseExt,
+  Dispatch, JournalEntry, ScoutReport, BaseBuildOrder, TieredBuildOrder, CraftJob, BaseExt,
   ClaimsState, MoraleRuntime, BaseInstance,
 } from './types';
 import {
@@ -201,6 +202,8 @@ interface GameState {
   journal: JournalEntry[];
   scouted: Record<string, ScoutReport>;
   baseQueue: BaseBuildOrder[];
+  /** Build-order lane: queued tiered (claims-model) facility builds. */
+  claimsQueue: TieredBuildOrder[];
 
   // parallel cycle — Lane 5 field contract state (see types.ts). The
   // craft queue is Lane 7's job array, mirrored here for persistence and
@@ -248,6 +251,13 @@ interface GameState {
   ) => void;
   recallDispatch: (id: string) => void;
   cancelBuild: (facilityId: string) => void;
+  /** Build-order lane: order the next tier of a tiered facility at a
+   *  claimed site — the phone path C5 left open. Validates against the
+   *  §7.3 build-menu card (site, slots, crew gate), pays the tier def's
+   *  declared cost from the pack, and queues a timed landing. */
+  orderTieredBuild: (siteId: string, facilityId: string) => void;
+  /** Cancel a queued tiered build; the committed cost is refunded. */
+  cancelTieredBuild: (siteId: string, facilityId: string) => void;
   treatSurvivor: (survivorId: string) => void;
   moveInvItem: (uid: string, gx: number, gy: number, rot: boolean) => void;
   arrangeInventory: (order: 'size' | 'category') => void;
@@ -639,6 +649,46 @@ export const useGameStore = create<GameState>()((set, get) => {
     sfx.play('quest', { volume: 0.5 });
   };
 
+  /** Build-order lane: finish any tiered claims builds whose timers
+   *  have run out — the legacy queue's contract over ClaimsState. The
+   *  facility lands via applyTieredBuild, so presence, production,
+   *  power and the garage pick it up with no extra wiring. An order
+   *  whose site is no longer held (the home relocated away) lapses. */
+  const tickClaimsQueue = () => {
+    const s = get();
+    if (s.claimsQueue.length === 0) return;
+    const now = s.daysElapsed * 1440 + s.timeMinutes;
+    const done = s.claimsQueue.filter((q) => now >= q.readyMin);
+    if (done.length === 0) return;
+    let claims = s.claims;
+    const landed: TieredBuildOrder[] = [];
+    for (const q of done) {
+      const base = allBases(claims).find((b) => b.siteId === q.siteId);
+      if (!base) {
+        get().addToast('A build order lapsed — that base is no longer held.');
+        continue;
+      }
+      const next = applyTieredBuild(base, q.facilityId, q.tier);
+      claims = claims.home?.siteId === q.siteId
+        ? { ...claims, home: next }
+        : { ...claims, outposts: claims.outposts.map((o) => (o.siteId === q.siteId ? next : o)) };
+      landed.push(q);
+    }
+    set({
+      claims,
+      claimsQueue: s.claimsQueue.filter((q) => now < q.readyMin),
+    });
+    for (const q of landed) {
+      const def = tieredFacility(q.facilityId);
+      const td = tierDef(q.facilityId, q.tier);
+      get().addJournal(`Built — ${def?.name ?? q.facilityId} T${q.tier}`, [
+        `Construction finished at ${claimSite(q.siteId)?.name ?? q.siteId}. ${td?.effectText ?? ''}`,
+      ]);
+      get().addToast(`Built: ${def?.name ?? q.facilityId} T${q.tier}.`);
+    }
+    if (landed.length > 0) sfx.play('quest', { volume: 0.5 });
+  };
+
   const api: GameState = {
     screen: 'title',
     difficulty: 'survivor',
@@ -784,7 +834,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         secondWindDay: -1,
         survivors: [],
         base: null,
-        dispatches: [], journal: [], scouted: {}, baseQueue: [],
+        dispatches: [], journal: [], scouted: {}, baseQueue: [], claimsQueue: [],
         craftQueue: [], storyChoices: {}, baseExt: {},
         claims: { home: null, outposts: [] },
         claimHostiles: {},
@@ -1010,6 +1060,7 @@ export const useGameStore = create<GameState>()((set, get) => {
       set({ timeMinutes: (s.timeMinutes + minutes) % 1440, restedMinutesLeft: rested });
       resolveDueDispatches();
       tickBaseQueue();
+      tickClaimsQueue();
     },
 
     advanceDay: () => {
@@ -2008,6 +2059,104 @@ export const useGameStore = create<GameState>()((set, get) => {
       );
     },
 
+    orderTieredBuild: (siteId, facilityId) => {
+      const s = get();
+      const def = tieredFacility(facilityId);
+      if (!def) return;
+      // The Base tab's own fallback rule: tiered claims state, with the
+      // legacy flat base folded in when claims were never materialized
+      // this session. Ordering against the folded state persists it.
+      const claims = s.claims.home || s.claims.outposts.length > 0
+        ? s.claims
+        : claimsFromLegacyBase(s.base);
+      const base = claims.home?.siteId === siteId
+        ? claims.home
+        : claims.outposts.find((o) => o.siteId === siteId) ?? null;
+      if (!base) {
+        s.addToast('Not your base — claim it first.');
+        return;
+      }
+      // The §7.3 card is the single source of truth for what may be
+      // ordered: buildMenu applies site restrictions, slot pressure and
+      // the crew gates (builder / specialist / blueprint) exactly as
+      // the Base tab renders them — no second rulebook here.
+      const crew = {
+        builders: s.survivors.filter((sv) => sv.job === 'Builder').length,
+        jobsPresent: [...new Set(s.survivors.map((sv) => sv.job ?? 'Idle'))],
+        blueprints: [...new Set(s.inventory.filter((i) => i.itemId.startsWith('bp_')).map((i) => i.itemId))],
+      };
+      const card = buildMenu(siteId, base, crew).find((c) => c.facilityId === facilityId);
+      if (!card) {
+        // Off the menu for a structural reason — name it.
+        const fc = facilityCard(siteId, base, facilityId, crew);
+        if (!fc) {
+          s.addToast(`${def.name} is already at max tier.`);
+          return;
+        }
+        if (!fc.siteAllowed) {
+          s.addToast(`${def.name} can't be built at ${claimSite(siteId)?.name ?? siteId}.`);
+          return;
+        }
+        return;
+      }
+      if (!card.gateMet) {
+        s.addToast(card.gateText);
+        return;
+      }
+      if (s.claimsQueue.some((q) => q.siteId === siteId && q.facilityId === facilityId)) {
+        s.addToast(`${def.name} is already under construction.`);
+        return;
+      }
+      // Same payment contract as the legacy build queue: the tier
+      // def's declared cost, committed from the pack up front.
+      for (const c of card.cost) {
+        if (s.countItem(c.itemId) < c.qty) {
+          s.addToast(`Needs ${c.qty}× ${ITEMS[c.itemId]?.name ?? c.itemId}.`);
+          return;
+        }
+      }
+      for (const c of card.cost) {
+        let left = c.qty;
+        while (left > 0) {
+          const it = [...get().inventory].reverse().find((i) => i.itemId === c.itemId);
+          if (!it) break;
+          const take = Math.min(it.qty, left);
+          s.removeItem(it.uid, take);
+          left -= take;
+        }
+      }
+      // §3.5 build time: the card's crew hours with a Builder on the
+      // roster, the ×1.5 solo hours without one.
+      const hours = crew.builders >= 1 ? card.buildHours : card.buildHoursSolo;
+      const readyMin = s.daysElapsed * 1440 + s.timeMinutes + Math.round(hours * 60);
+      set({
+        claims,
+        claimsQueue: [...s.claimsQueue, { siteId, facilityId, tier: card.tier, readyMin }],
+      });
+      s.addToast(`Construction started: ${def.name} T${card.tier} — ready in ~${Math.round(hours * 10) / 10}h of game time.`);
+      s.addSkillXp('leadership', 2);
+      sfx.play('craft', { volume: 0.5 });
+    },
+
+    cancelTieredBuild: (siteId, facilityId) => {
+      const s = get();
+      const order = s.claimsQueue.find((q) => q.siteId === siteId && q.facilityId === facilityId);
+      if (!order) return;
+      const def = tieredFacility(facilityId);
+      const label = `${def?.name ?? facilityId} T${order.tier}`;
+      set({ claimsQueue: s.claimsQueue.filter((q) => q !== order) });
+      // materials come back, same as the legacy queue's cancel
+      let refunded = true;
+      for (const c of tierDef(facilityId, order.tier)?.cost ?? []) {
+        if (!s.addItem(c.itemId, c.qty, true)) refunded = false;
+      }
+      s.addToast(
+        refunded
+          ? `Construction cancelled: ${label} — materials returned.`
+          : `Construction cancelled: ${label} — some materials would not fit back in the pack.`,
+      );
+    },
+
     treatSurvivor: (survivorId) => {
       const s = get();
       const sv = s.survivors.find((x) => x.id === survivorId);
@@ -2079,6 +2228,7 @@ export const useGameStore = create<GameState>()((set, get) => {
     journal: [],
     scouted: {},
     baseQueue: [],
+    claimsQueue: [],
     dayStats: { kills: 0, crafts: 0, pickups: 0 },
 
     // ---- parallel cycle: Lane 5 field-contract state ----
@@ -2527,6 +2677,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         journal: s.journal,
         scouted: s.scouted,
         baseQueue: s.baseQueue,
+        claimsQueue: s.claimsQueue,
         appearance: s.appearance,
         craftQueue: [...craftJobs],
         storyChoices: s.storyChoices,
@@ -2603,6 +2754,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         journal: snap.journal ?? [],
         scouted: snap.scouted ?? {},
         baseQueue: snap.baseQueue ?? [],
+        claimsQueue: snap.claimsQueue ?? [],
         // wave 4: appearance — absent on older v3 saves, keep the current look
         appearance: snap.appearance ?? get().appearance,
         appearanceCustomized: snap.appearance !== undefined,
