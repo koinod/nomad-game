@@ -8,6 +8,10 @@ export default function PauseMenu() {
   const setScreen = useGameStore((s) => s.setScreen);
   const saveToSlot = useGameStore((s) => s.saveToSlot);
   const difficulty = useGameStore((s) => s.difficulty);
+  const audioMuted = useGameStore((s) => s.audioMuted);
+  const audioVolume = useGameStore((s) => s.audioVolume);
+  const setAudioMuted = useGameStore((s) => s.setAudioMuted);
+  const setAudioVolume = useGameStore((s) => s.setAudioVolume);
   const canSave = DIFFICULTIES[difficulty].saveAnywhere;
 
   if (!paused) return null;
@@ -46,6 +50,30 @@ export default function PauseMenu() {
           ) : (
             <p className="text-center text-xs text-[#8a94a3]">Save at campfires.</p>
           )}
+          <div className="flex flex-col gap-2">
+            <div className="text-center text-xs text-[#8a94a3]">Sound</div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={tap(() => setAudioMuted(!audioMuted))}
+                className="flex-1 rounded border border-[#232b36] bg-[#0b0e12] px-3 py-2 text-sm text-[#d7dde5] transition-colors hover:border-[#e8b34b]"
+              >
+                {audioMuted ? 'Unmute' : 'Mute'}
+              </button>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round(audioVolume * 100)}
+                disabled={audioMuted}
+                onChange={(e) => setAudioVolume(Number(e.target.value) / 100)}
+                className="flex-1 accent-[#e8b34b] disabled:opacity-40"
+                aria-label="Master volume"
+              />
+              <span className="w-10 text-right text-xs text-[#8a94a3]">
+                {audioMuted ? 'off' : `${Math.round(audioVolume * 100)}%`}
+              </span>
+            </div>
+          </div>
           <button
             onClick={tap(() => setScreen('title'))}
             className="rounded border border-[#232b36] bg-[#0b0e12] px-6 py-2.5 text-sm text-[#d9534f] transition-colors hover:border-[#d9534f]"

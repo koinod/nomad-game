@@ -69,6 +69,12 @@ interface GameState {
   setAppearance: (patch: Partial<Appearance>) => void;
   seed: number;
   paused: boolean;
+  /** Audio settings — client-level (localStorage 'nomad-audio'), not
+   *  per-save: your ears don't change between slots. */
+  audioMuted: boolean;
+  audioVolume: number; // 0..1
+  setAudioMuted: (m: boolean) => void;
+  setAudioVolume: (v: number) => void;
 
   // player vitals (mirrored from engine at ~10Hz)
   hp: number;
@@ -267,6 +273,7 @@ interface GameState {
   setScreen: (s: Screen) => void;
   startNewGame: (d: DifficultyId) => void;
   setPaused: (p: boolean) => void;
+  // (audio setting actions are declared with their state fields above)
 
   syncPlayer: (pos: [number, number, number], hp: number, stamina: number) => void;
   damagePlayer: (amount: number, cause: string, opts?: { blockBreak?: boolean }) => void;
@@ -469,6 +476,31 @@ export function claimsFromLegacyBase(
   return { home, outposts: [] };
 }
 
+/** Audio settings live outside the save system (localStorage, same
+ *  pattern as 'nomad-body'): they describe the player's client, not
+ *  the run. Defaults: unmuted, full volume. */
+const AUDIO_SETTINGS_KEY = 'nomad-audio';
+function readAudioSettings(): { muted: boolean; volume: number } {
+  try {
+    if (typeof localStorage === 'undefined') return { muted: false, volume: 1 };
+    const raw = localStorage.getItem(AUDIO_SETTINGS_KEY);
+    if (!raw) return { muted: false, volume: 1 };
+    const parsed = JSON.parse(raw) as { muted?: unknown; volume?: unknown };
+    return {
+      muted: parsed.muted === true,
+      volume: typeof parsed.volume === 'number' ? Math.max(0, Math.min(1, parsed.volume)) : 1,
+    };
+  } catch {
+    return { muted: false, volume: 1 };
+  }
+}
+function persistAudioSettings(muted: boolean, volume: number): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(AUDIO_SETTINGS_KEY, JSON.stringify({ muted, volume }));
+  } catch { /* private mode */ }
+}
+
 export const useGameStore = create<GameState>()((set, get) => {
   /** Wave 3: settle every dispatch whose ETA has passed. Runs off
    *  advanceTime, so it ticks while playing, fast-forwarding, or sleeping.
@@ -628,6 +660,19 @@ export const useGameStore = create<GameState>()((set, get) => {
     },
     seed: 1337,
     paused: false,
+    audioMuted: readAudioSettings().muted,
+    audioVolume: readAudioSettings().volume,
+    setAudioMuted: (m) => {
+      set({ audioMuted: m });
+      persistAudioSettings(m, get().audioVolume);
+      sfx.setMuted(m);
+    },
+    setAudioVolume: (v) => {
+      const vol = Math.max(0, Math.min(1, v));
+      set({ audioVolume: vol });
+      persistAudioSettings(get().audioMuted, vol);
+      sfx.setVolume(vol);
+    },
 
     hp: 100, maxHp: 100, stamina: 100, maxStamina: 100,
     pos: [0, 0, 0],
@@ -2593,6 +2638,14 @@ export const useGameStore = create<GameState>()((set, get) => {
 
   return api;
 });
+
+// Push the persisted audio settings into the engine once, at load —
+// before any UI interaction can play a sound.
+{
+  const s = useGameStore.getState();
+  sfx.setMuted(s.audioMuted);
+  sfx.setVolume(s.audioVolume);
+}
 
 // Re-export for engine convenience
 export type { QuestStepType };
