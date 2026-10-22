@@ -9,13 +9,14 @@ import { getGame } from './instance';
 import type { AnimalManager, AnimalKill } from './Animals';
 import { resolveCollisions, type Collider } from './Colliders';
 import { DIFFICULTIES, HAIR_COLORS, SKIN_TONES } from '../store/types';
-import { sfx } from '../systems/audio';
+import { sfx, StepClock } from '../systems/audio';
 import type { HuskManager } from './Husks';
 import { clamp, lerp } from './rng';
 import {
-  accelRate, bobPhaseDelta, expDamp, groundContactY, sprintFovKick, sprintLatch,
+  BOB_CYCLE_M, accelRate, bobPhaseDelta, expDamp, groundContactY, sprintFovKick, sprintLatch,
   wadeBlocksJump, wadeBlocksSprint, wadeFactor,
 } from './moveMath';
+import { betaZoneAt } from './betaTerrain';
 
 /** Per-frame multiplicative decay (x *= 0.9 style), made frame-rate
  *  independent: the factor the value would have kept after ONE second
@@ -160,7 +161,8 @@ export class Player {
   rangedCd = 0;
   private adrenalineT = 0; // br_adrenaline: seconds of fast swings left after a kill
   private prevHp: number | null = null; // block-cost detection (hp drop while guarding)
-  private stepAcc = 0;
+  /** Footstep clock wound on the bob cycle itself (audio pass). */
+  private stepClock = new StepClock(BOB_CYCLE_M);
   private walkNoiseT = 0;
   private sprintNoiseT = 0;
   private muzzle!: THREE.PointLight;
@@ -692,11 +694,15 @@ export class Player {
       this.rig.rotation.x = this.leanF;
       this.rig.rotation.z = this.leanS;
 
-      // footsteps + locomotion noise (crouching is quiet)
-      this.stepAcc += this.vel.length() * dt;
-      if (this.stepAcc > 2.4) {
-        this.stepAcc = 0;
-        sfx.play('step', { volume: sprinting ? 0.5 : this.crouching ? 0.12 : 0.28 });
+      // footsteps + locomotion noise (crouching is quiet). The steps
+      // fire off a StepClock wound on BOB_CYCLE_M — the same distance
+      // cycle the bob and limb swing consume (footfalls land where
+      // |cos(walkPhase)| peaks) — and sound like the ground underfoot.
+      const stepsDue = this.stepClock.advance(this.vel.length() * dt);
+      for (let i = 0; i < stepsDue; i++) {
+        sfx.step(betaZoneAt(this.pos.x, this.pos.z), {
+          volume: sprinting ? 0.9 : this.crouching ? 0.22 : 0.5,
+        });
       }
       this.walkNoiseT -= dt;
       this.sprintNoiseT -= dt;

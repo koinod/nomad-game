@@ -6,7 +6,15 @@
 import * as THREE from 'three';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../systems/audio', () => ({ sfx: { play: () => undefined } }));
+vi.mock('../systems/audio', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../systems/audio')>();
+  return {
+    ...actual,
+    // silence the one-shots; everything else (gunClassForItem, the
+    // store's setMuted/setVolume init calls) stays real
+    sfx: { ...actual.sfx, play: () => undefined, gunshot: () => undefined },
+  };
+});
 
 import { tryMelee, tryRanged, type CombatHooks } from '../game/Combat';
 import {

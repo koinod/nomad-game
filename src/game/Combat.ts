@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { ITEMS } from '../data/items';
 import { useGameStore } from '../store/gameStore';
 import { walkCarried } from '../store/containers';
-import { sfx } from '../systems/audio';
+import { sfx, gunClassForItem } from '../systems/audio';
 import type { HuskManager } from './Husks';
 import { modSpreadMult } from '../data/mods';
 import { bloomSpread, convergedDir, moveSpread, rangeFalloff, rayGroundDistance } from './gunMath';
@@ -261,7 +261,7 @@ export function tryRanged(h: CombatHooks): RangedResult {
     s.removeItem(ammoUid, 1);
   }
 
-  sfx.play('shot', { volume: 1 });
+  sfx.gunshot(gunClassForItem(def.id));
   h.flashMuzzle();
   h.emitNoise(h.playerPos.x, h.playerPos.z, gunshotRadius(def.noiseRadius, mods)); // suppressor: the loud problem, solved
 
