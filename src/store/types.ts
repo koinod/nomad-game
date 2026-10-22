@@ -410,6 +410,19 @@ export interface BaseBuildOrder {
   readyMin: number;
 }
 
+/** One queued TIERED facility build (build-order lane): the claims
+ *  model's counterpart to BaseBuildOrder — an order names the claimed
+ *  site it lands at and the tier it lands on. Same contract as the
+ *  legacy queue: cost committed up front, cancel refunds in full. */
+export interface TieredBuildOrder {
+  siteId: string;
+  facilityId: string;
+  /** The tier this build lands (current tier + 1 at order time). */
+  tier: number;
+  /** Absolute game minutes when construction completes. */
+  readyMin: number;
+}
+
 // ---- parallel cycle: Lane 5 field contract ----
 // These shapes are the published schema sibling lanes code against.
 // All are OPTIONAL on the v3 snapshot (passthrough-safe, see save.ts):
@@ -589,6 +602,9 @@ export interface SaveSnapshot {
   // beacon_dark flags when absent — hardmode's seed reads this field,
   // never the flags.
   claims?: ClaimsState;
+  /** Build-order lane: queued tiered facility builds (see
+   *  TieredBuildOrder) — optional on v3, same defaulting rule. */
+  claimsQueue?: TieredBuildOrder[];
   moraleRuntime?: MoraleRuntime;
   beaconChoice?: 'light' | 'dark' | null;
   // ORDER #6 — optional on v3, same rule: per-survivor runtime (orders,

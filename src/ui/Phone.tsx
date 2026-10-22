@@ -295,8 +295,10 @@ function WorldMap() {
  * store's claimClaimSite) and §7.8 garage (over Lane 13's stamped
  * fleet fuel absolutes + the atHome stamp).
  * onBuild routes shared facility ids through the shipped legacy build
- * queue; tier-only facilities (workbench, machine shop…) have no phone
- * order path yet — the claims build queue is a later step.
+ * queue; tier-only facilities (workbench, machine shop…) order through
+ * the claims build queue (orderTieredBuild — the build-order lane):
+ * the §7.3 card's gates and declared cost, paid up front, timed
+ * landing in ClaimsState, cancel refunds.
  */
 const TIERED_TO_FLAT_FACILITY: Record<string, string> = {
   water: 'rain_collector',
@@ -313,7 +315,9 @@ function BaseTab() {
   const baseQueue = useGameStore((s) => s.baseQueue);
   const cancelBuild = useGameStore((s) => s.cancelBuild);
   const buildFacility = useGameStore((s) => s.buildFacility);
-  const addToast = useGameStore((s) => s.addToast);
+  const claimsQueue = useGameStore((s) => s.claimsQueue);
+  const orderTieredBuild = useGameStore((s) => s.orderTieredBuild);
+  const cancelTieredBuild = useGameStore((s) => s.cancelTieredBuild);
   const rep = useGameStore((s) => s.rep);
   const claimHostiles = useGameStore((s) => s.claimHostiles);
   const claimClaimSite = useGameStore((s) => s.claimClaimSite);
@@ -377,7 +381,11 @@ function BaseTab() {
       sfx.play('ui');
       buildFacility(flatId);
     } else {
-      addToast('That facility is built on site, not from the phone — yet.');
+      // Tier-only facilities (workbench, storage, radio, generator,
+      // fish traps…) have no legacy flat counterpart — they order
+      // through the claims build queue at the home base.
+      sfx.play('ui');
+      orderTieredBuild(home.siteId, facilityId);
     }
   };
   return (
@@ -401,7 +409,7 @@ function BaseTab() {
         onClaim={onClaim}
         onBuild={onBuild}
       />
-      {baseQueue.length > 0 && (
+      {(baseQueue.length > 0 || claimsQueue.length > 0) && (
         <section>
           <h3 className="mb-2 text-xs font-semibold text-[#8a94a3]">Build orders in progress</h3>
           {baseQueue.map((q) => (
@@ -412,6 +420,20 @@ function BaseTab() {
               </span>
               <button
                 onClick={() => { sfx.play('ui'); cancelBuild(q.facilityId); }}
+                className="rounded border border-[#232b36] bg-[#0b0e12] px-2 py-1 text-[12px] text-[#d7dde5] transition-colors hover:border-[#e5484d]"
+              >
+                Cancel
+              </button>
+            </div>
+          ))}
+          {claimsQueue.map((q) => (
+            <div key={`${q.siteId}:${q.facilityId}`} className="mb-1.5 flex items-center justify-between rounded border border-[#e8b34b] bg-[#12161c] px-2.5 py-2 text-sm">
+              <span className="text-[#d7dde5]">
+                {tieredFacility(q.facilityId)?.name ?? q.facilityId} T{q.tier}
+                <span className="ml-2 font-mono text-[11px] text-[#8a94a3]">ready {fmtAbs(q.readyMin)}</span>
+              </span>
+              <button
+                onClick={() => { sfx.play('ui'); cancelTieredBuild(q.siteId, q.facilityId); }}
                 className="rounded border border-[#232b36] bg-[#0b0e12] px-2 py-1 text-[12px] text-[#d7dde5] transition-colors hover:border-[#e5484d]"
               >
                 Cancel
