@@ -282,7 +282,7 @@ describe('the waist channel (aerial v2 canon, 2026-10-22 revision)', () => {
       expect(rectLineDist(pad.x, pad.z, pad.half[0], pad.half[1]), `extra pad ${pad.id}`).toBeGreaterThan(0);
     }
     for (const p of BETA_POI_PLACEMENTS) {
-      if (p.water) continue;
+      if (p.poiId === 'carrier') continue; // the one water placement (sound channel)
       expect(lineDist(p.x, p.z), p.poiId).toBeGreaterThan(reach);
     }
   });
