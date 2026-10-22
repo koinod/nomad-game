@@ -148,23 +148,31 @@ export const BETA_ROADS: BetaRoad[] = [
   },
   {
     // NC-12 west fork (§2 diagram's SW arm): Refuge → Pier HQ, running
-    // the marsh shore down to the harbor — east of the channel's
-    // estuary reach, never across it (Phase 1.5: no road touches water).
+    // the marsh shore down to the harbor. It crosses the WAIST channel
+    // on the founded pier_crossing deck (BETA_WAIST_CROSSINGS, below)
+    // and ends on the Pier pad, east of the sound channel's estuary
+    // reach. (The Phase 1.5 "no road touches water" law is superseded
+    // by the waist-channel revision: decks at the two named crossings
+    // are the only wet roadbeds on the map — see BETA_WAIST_CROSSINGS.)
     id: 'nc12_west_fork', maxGrade: 0.08, halfWidth: 4.2,
     points: [[-92, 2], [-160, 34], [-224, 74], [-272, 108], [-318, 142], [-366, 166], [-402, 186], [-446, 210]],
   },
   {
-    // Inland Highway Spur (§2 diagram): the Ridge climb — a ~900 m
-    // contour traverse of the massif's south face: an approach from
-    // the Refuge's south gate, long legs along the face's contour
-    // bands (holding elevation while they run E–W), and short climbs
-    // between bands, so the graded profile tracks the field and
-    // arrives at the pad already at pad height. 4 m → 60 m at a 14%
-    // mountain grade (steep alpine switchbacks run 12–15%).
+    // Inland Highway Spur (§2 diagram): the Ridge climb. Re-routed by
+    // the waist-channel revision: the original south-face traverse left
+    // the Refuge and crossed the ground the waist channel now cuts, so
+    // the spur runs the NORTH side instead — out of the Citadel west
+    // along the north coast, around the north-bay inlet on its south
+    // shore, a call at the relay knoll pad, then the climb up the
+    // face's NW shoulder to the Ridge pad's east-center. The legs hold
+    // the shore and contour bands so the graded profile tracks the
+    // field; 14% mountain grade (steep alpine switchbacks run 12–15%).
     id: 'inland_spur', maxGrade: 0.14, halfWidth: 4.2,
     points: [
-      [-70, -44], [-140, -34], [-230, -24], [-320, -30], [-420, -38],
-      [-540, -24], [-520, -70], [-600, -80], [-520, -178],
+      [268, -252], [185, -246], [80, -215], [-20, -190], [-90, -175],
+      [-150, -160], [-200, -165], [-230, -190], [-285, -218],
+      [-330, -238], [-385, -228], [-430, -205], [-475, -192],
+      [-520, -178],
     ],
   },
   {
@@ -180,15 +188,17 @@ export const BETA_ROADS: BetaRoad[] = [
 // maintained cut runs from the south sound entrance, across the shoal
 // bar, up the sound to the Pier HQ harbor mouth, then turns into the
 // marsh as the dredged estuary approach, ending at the estuary head
-// NE of the wreck. It never crosses the island — the dry waist between
-// the west block and the central mass is land the whole way (the
-// inland spur climbs it overland; no road on the map touches water),
-// and the north bay is reached by open water around the coasts, not
-// by a cut through the island. (Phase 1.5 shape pass, Ty's gate: the
-// original line ran from the north bay diagonally through the island's
-// waist and read from the air as a strait severing the Ridge from the
-// main island — and the spur AND the west fork both graded down into
-// it. That route is deleted, not patched.)
+// NE of the wreck. This channel never crosses the island; the cut
+// that DOES cross the waist is the separate waist channel below
+// (BETA_WAIST_CHANNEL — aerial v2 canon), and the north bay is
+// reached by open water around the coasts. (Phase 1.5 shape pass,
+// Ty's gate: the original sound line ran from the north bay diagonally
+// through the island's waist and read from the air as a strait
+// severing the Ridge from the main island — and the spur AND the west
+// fork both graded down into it. That route is deleted, not patched;
+// the waist channel that replaced it in the 2026-10-22 revision runs
+// Atlantic → south sound on the v2 line, crossed only at the two
+// founded decks.)
 // Dredged to −4.2 m against the −1 m-class shoals so the Salt Skiff
 // and the Heavy Logistics Carrier can move. betaTerrain carves it
 // into the height data; daymarkers (below) line it.
@@ -200,6 +210,82 @@ export const BETA_SOUND_CHANNEL: [number, number][] = [
 export const BETA_CHANNEL_DEPTH = -4.2;
 /** Full-depth halfwidth of the dredge cut (m); banks feather beyond it. */
 export const BETA_CHANNEL_HALFWIDTH = 17;
+
+// ─── The waist channel (aerial v2 canon) ─────────────────────────────────────
+//
+// Ian's canonical world reference (beta-island-aerial-v2.png, spec §2)
+// draws OPEN WATER cutting the island's waist: a turquoise channel
+// from the Atlantic shore south across the island into the southern
+// sound, separating the northern sectors (Ridge / Convoy Citadel /
+// Lighthouse) from the southern (Refuge / Pier HQ / Tern Rock). The
+// Phase 1.5 island shipped a dry marsh waist instead; the 2026-10-22
+// waist-channel revision (Ian: finish the development path to canon)
+// re-carves the waist to the v2 line. Same dredge standard as the
+// sound channel — BETA_CHANNEL_DEPTH, navigable by the Salt Skiff and
+// the Heavy Logistics Carrier per §3.3 — but a tighter bank feather
+// (+18 m beyond the full-depth halfwidth in betaTerrain) so the marsh
+// shelves stay narrow and the surveyed POIs near the line (Jonah's
+// camp, the beached wreck, the shore camp) stay dry.
+//
+// The line threads the surveyed ground: east reach along the central
+// mass's south shore (south of the airbase pad and the shore camp),
+// the E–W waist reach through the old marsh, then the south bend down
+// the west block's east shore to the sound, passing EAST of the Pier
+// pad. No POI or pad footprint is crossed — the carve's full influence
+// radius (halfwidth + feather = 33 m) clears every one.
+//
+// Roads cross the water at exactly TWO founded decks, pinned as data
+// in BETA_WAIST_CROSSINGS below; the terrain law (betaTerrain.test)
+// is: no road in water EXCEPT on a founded deck at a named crossing.
+// Note on the Citadel's north side: the SDF land bridge under the
+// causeway road (Citadel → off-map north) is NOT part of this channel
+// — the aerial's northern water is the bay, and the kit's gate towers
+// and gantry guard that causeway corridor. The corridor's crossing of
+// THIS channel is its south leg: the citadel_causeway deck below,
+// where NC-12 leaves the fortress for the Refuge.
+
+/** Centerline, Atlantic mouth (east edge) → south sound exit. */
+export const BETA_WAIST_CHANNEL: [number, number][] = [
+  [700, 55], [640, 45], [520, 25], [420, 0], [330, -25], [250, -58],
+  [170, -72], [90, -88], [0, -105], [-100, -110], [-200, -102],
+  [-290, -88], [-355, -62], [-418, -14], [-438, 62], [-430, 125],
+  [-420, 178], [-420, 230], [-445, 285], [-478, 320],
+];
+/** Full-depth halfwidth of the waist cut (m); banks feather +18 m. */
+export const BETA_WAIST_HALFWIDTH = 15;
+
+export interface BetaWaistCrossing {
+  id: string;
+  /** The BETA_ROADS id whose centerline crosses on this deck. */
+  road: string;
+  /** Deck bed height (m above the waterline) stamped into the grid
+   *  before the road grades over it — the founded bed the deck kit
+   *  geometry (Sectors.ts) dresses. */
+  deckY: number;
+  /** Deck span endpoints, ON the road centerline, spanning the
+   *  carve's full influence so the roadbed never leaves the deck
+   *  while the water is under it. */
+  a: [number, number];
+  b: [number, number];
+}
+
+/** The ONLY two places a road may stand in the water: founded decks
+ *  over the waist channel. Any other wet roadbed fails the gate. */
+export const BETA_WAIST_CROSSINGS: BetaWaistCrossing[] = [
+  {
+    // NC-12 south out of the Citadel, over the channel's E–W reach.
+    id: 'citadel_causeway', road: 'nc12_corridor', deckY: 1.8,
+    a: [231, -84], b: [170, -49],
+  },
+  {
+    // The west fork's final approach to the Pier pad, over the
+    // channel's south bend — road deck, distinct from the Pier HQ
+    // boardwalk kit, which fronts the SOUND channel off the pad's
+    // west edge.
+    id: 'pier_crossing', road: 'nc12_west_fork', deckY: 1.6,
+    a: [-396, 183], b: [-443, 208],
+  },
+];
 
 export interface BetaDaymarker {
   id: string;

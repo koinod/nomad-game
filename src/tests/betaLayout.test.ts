@@ -3,6 +3,7 @@ import {
   BETA_SECTORS, BETA_EXTRA_PADS, BETA_ROADS, BETA_SOUND_CHANNEL,
   BETA_CHANNEL_DEPTH, BETA_DAYMARKERS, BETA_FLEET_HOMES, BETA_PLAYER_SPAWN,
   BETA_POI_PLACEMENTS, BETA_RESERVED_SITES, BETA_STRUCTURE_SETS, BETA_SCATTER,
+  BETA_WAIST_CHANNEL, BETA_WAIST_CROSSINGS, BETA_WAIST_HALFWIDTH,
   betaSector,
 } from '../data/betaLayout';
 import { betaHeightAt, betaChannelDistance, betaMarshMask, BETA_ZONE_COLORS } from '../game/betaTerrain';
@@ -197,6 +198,92 @@ describe('spec §3.3 channel + daymarkers', () => {
       // edge, or a dayboard on the channel-side bank — never inland.
       expect(h < 0.2 || (d <= 27 && h < 1.8)).toBe(true);
       if (n > 0) expect(m.side).not.toBe(BETA_DAYMARKERS[n - 1].side);
+    }
+  });
+});
+
+describe('the waist channel (aerial v2 canon, 2026-10-22 revision)', () => {
+  it('runs Atlantic mouth → south sound exit, across the waist only', () => {
+    expect(BETA_WAIST_CHANNEL.length).toBeGreaterThanOrEqual(12);
+    const first = BETA_WAIST_CHANNEL[0];
+    const last = BETA_WAIST_CHANNEL[BETA_WAIST_CHANNEL.length - 1];
+    // Atlantic mouth at the east world edge.
+    expect(first[0]).toBeGreaterThanOrEqual(690);
+    // South sound exit below the Pier, at the south world edge.
+    expect(last[1]).toBeGreaterThanOrEqual(315);
+    // Every point stays inside the world the grid authors.
+    for (const [x, z] of BETA_WAIST_CHANNEL) {
+      expect(Math.abs(x)).toBeLessThanOrEqual(700);
+      expect(Math.abs(z)).toBeLessThanOrEqual(320);
+    }
+    // Same dredge standard as the sound channel (§3.3 navigable).
+    expect(BETA_WAIST_HALFWIDTH).toBeGreaterThan(0);
+    expect(BETA_WAIST_HALFWIDTH).toBeLessThanOrEqual(BETA_CHANNEL_DEPTH * -4);
+  });
+
+  it('exactly two crossings, each pinned to a real road and lying ON its centerline', () => {
+    expect(BETA_WAIST_CROSSINGS.map((c) => c.id).sort())
+      .toEqual(['citadel_causeway', 'pier_crossing']);
+    for (const c of BETA_WAIST_CROSSINGS) {
+      // The deck span lies on the road it carries (roadDist measures
+      // to the road's own polyline — a span floating off its road
+      // would stamp a dry bed the road never drives).
+      expect(roadDist(c.road, c.a[0], c.a[1]), c.id).toBeLessThan(1);
+      expect(roadDist(c.road, c.b[0], c.b[1]), c.id).toBeLessThan(1);
+      // A founded deck above the waterline, below pad heights.
+      expect(c.deckY, c.id).toBeGreaterThan(0.8);
+      expect(c.deckY, c.id).toBeLessThan(2.6);
+      // The span is long enough to carry the carve's full influence.
+      expect(Math.hypot(c.b[0] - c.a[0], c.b[1] - c.a[1]), c.id).toBeGreaterThan(30);
+    }
+  });
+
+  it('the carve clears every surveyed pad and POI footprint', () => {
+    // POIs do not move for this revision; if a future line edit
+    // breaks this, the line moves, not the POI. Land POIs must sit
+    // beyond the carve's full influence radius (halfwidth + 18 m
+    // feather); pad rects must not be crossed by the line at all.
+    const reach = BETA_WAIST_HALFWIDTH + 18;
+    const segDist = (x: number, z: number, ax: number, az: number, bx: number, bz: number): number => {
+      const dx = bx - ax;
+      const dz = bz - az;
+      const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz)));
+      return Math.hypot(x - (ax + dx * t), z - (az + dz * t));
+    };
+    const lineDist = (x: number, z: number): number => {
+      let d = Infinity;
+      for (let s = 0; s + 1 < BETA_WAIST_CHANNEL.length; s++) {
+        const [ax, az] = BETA_WAIST_CHANNEL[s];
+        const [bx, bz] = BETA_WAIST_CHANNEL[s + 1];
+        d = Math.min(d, segDist(x, z, ax, az, bx, bz));
+      }
+      return d;
+    };
+    // Rect-to-line distance: 0 if a segment endpoint is inside the
+    // rect (distToRect covers it) or a rect corner touches the line;
+    // otherwise the min of endpoints-to-rect and corners-to-segment.
+    const rectLineDist = (cx: number, cz: number, hw: number, hd: number): number => {
+      let d = Infinity;
+      const corners: [number, number][] = [
+        [cx - hw, cz - hd], [cx + hw, cz - hd], [cx - hw, cz + hd], [cx + hw, cz + hd],
+      ];
+      for (let s = 0; s + 1 < BETA_WAIST_CHANNEL.length; s++) {
+        const [ax, az] = BETA_WAIST_CHANNEL[s];
+        const [bx, bz] = BETA_WAIST_CHANNEL[s + 1];
+        d = Math.min(d, distToRect(ax, az, cx, cz, hw, hd), distToRect(bx, bz, cx, cz, hw, hd));
+        for (const [px, pz] of corners) d = Math.min(d, segDist(px, pz, ax, az, bx, bz));
+      }
+      return d;
+    };
+    for (const s of BETA_SECTORS) {
+      expect(rectLineDist(s.x, s.z, s.padHalf[0], s.padHalf[1]), `${s.id} pad`).toBeGreaterThan(0);
+    }
+    for (const pad of BETA_EXTRA_PADS) {
+      expect(rectLineDist(pad.x, pad.z, pad.half[0], pad.half[1]), `extra pad ${pad.id}`).toBeGreaterThan(0);
+    }
+    for (const p of BETA_POI_PLACEMENTS) {
+      if (p.water) continue;
+      expect(lineDist(p.x, p.z), p.poiId).toBeGreaterThan(reach);
     }
   });
 });
