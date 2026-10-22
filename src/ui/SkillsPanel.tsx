@@ -17,7 +17,7 @@
 // per-frame exposure — <LightIndicator exposure={vis.exposure} />.
 
 import { PERKS, SKILLS, TREES, perkById, xpToNext } from '../data/skills';
-import { canBuyPerk, capstoneOwned } from '../systems/skills';
+import { capstoneOwned, perkRowState } from '../systems/skills';
 import { lightIndicator } from '../game/visibility';
 import { useGameStore } from '../store/gameStore';
 import { sfx } from '../systems/audio';
@@ -82,8 +82,11 @@ export default function SkillsPanel() {
           <p className="mb-2 text-[11px]" style={{ color: DIM }}>{tree.blurb}</p>
           <div className="flex flex-col gap-1.5">
             {PERKS.filter((p) => p.tree === tree.id).map((p) => {
-              const owned = perks.includes(p.id);
-              const check = owned ? null : canBuyPerk(perks, perkPoints, p.id);
+              // Order #5: row state comes from the ONE pure derivation
+              // (systems/skills.perkRowState) — the display can never
+              // disagree with the buy gate again.
+              const row = perkRowState(perks, perkPoints, p.id);
+              const owned = row.state === 'owned';
               const reqNames = (p.requires ?? [])
                 .map((id) => perkById(id)?.name ?? id)
                 .join(' + ');
@@ -94,7 +97,7 @@ export default function SkillsPanel() {
                   style={{
                     borderColor: owned ? GOOD : LINE,
                     background: owned ? '#101812' : PANEL,
-                    opacity: !owned && check && !check.ok && perkPoints > 0 ? 0.75 : 1,
+                    opacity: row.state === 'locked' && perkPoints > 0 ? 0.75 : 1,
                   }}
                 >
                   <div>
@@ -108,14 +111,14 @@ export default function SkillsPanel() {
                     {!owned && reqNames && (
                       <div className="text-[10px]" style={{ color: DIM }}>Requires: {reqNames}</div>
                     )}
-                    {!owned && check && !check.ok && (
-                      <div className="text-[10px]" style={{ color: '#d9534f' }}>{check.reason}</div>
+                    {row.state === 'locked' && (
+                      <div className="text-[10px]" style={{ color: '#d9534f' }}>{row.reason}</div>
                     )}
                   </div>
                   {!owned && (
                     <button
                       onClick={() => { sfx.play('ui'); buyPerk(p.id); }}
-                      disabled={!check?.ok}
+                      disabled={row.state !== 'available'}
                       className="shrink-0 rounded border px-2 py-1 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-40"
                       style={{ borderColor: LINE, color: AMBER }}
                     >

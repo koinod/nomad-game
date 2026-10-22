@@ -11,6 +11,7 @@ import {
   useCraftQueue, type CraftContext,
 } from '../systems/crafting';
 import { xpToNext } from '../data/skills';
+import { perkRowState } from '../systems/skills';
 
 const S = () => useGameStore.getState();
 
@@ -262,6 +263,29 @@ describe('craft durations — Tinkerer / Fabricator reach the queue', () => {
     expect(jobs).toHaveLength(1);
     expect(jobs[0].durationMin).toBeCloseTo(8);
     useCraftQueue.setState({ jobs: [] });
+  });
+});
+
+describe('perkRowState — the one row derivation the tree renders', () => {
+  it('owned / available / locked, with the gate reason verbatim', () => {
+    expect(perkRowState(['sc_keen'], 0, 'sc_keen')).toEqual({ state: 'owned' });
+    expect(perkRowState([], 1, 'sc_keen')).toEqual({ state: 'available' });
+    const reqLocked = perkRowState([], 1, 'sc_salvager');
+    expect(reqLocked.state).toBe('locked');
+    if (reqLocked.state === 'locked') expect(reqLocked.reason).toContain('Keen Eye');
+    const broke = perkRowState(['sc_keen'], 0, 'sc_salvager');
+    expect(broke.state).toBe('locked');
+    if (broke.state === 'locked') expect(broke.reason).toContain('perk points');
+  });
+
+  it('a chosen capstone locks the other trees’ capstones with its name in the reason', () => {
+    const owned = [
+      'gh_soft', 'gh_shadow', 'gh_backstab', 'gh_patient', 'gh_vanish', 'gh_unseen',
+      'br_heavy', 'br_blocker', 'br_executioner', 'br_unstoppable', 'br_secondwind',
+    ];
+    const row = perkRowState(owned, 3, 'br_juggernaut');
+    expect(row.state).toBe('locked');
+    if (row.state === 'locked') expect(row.reason).toContain('Unseen');
   });
 });
 
