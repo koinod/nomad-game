@@ -33,6 +33,19 @@ export interface BasePanelProps {
   claims?: { site: ClaimSiteDef; checks: ClaimCheck[] }[];
   /** §7.9 relocation quote (shown when a home exists and another home is targeted). */
   relocation?: RelocationQuote;
+  /**
+   * §7.5 interactive stockpile moves (systems-completeness lane:
+   * deposit/withdraw used to be engine-only — production flowed in,
+   * upkeep drew out, and the player could do neither). Presence is
+   * enforced by the store; `atBase` here only drives the hint copy.
+   */
+  stockpileMoves?: {
+    atBase: boolean;
+    /** Carried stacks that can be deposited (whole stack each). */
+    packStacks: { uid: string; name: string; qty: number }[];
+    onDeposit: (uid: string) => void;
+    onWithdraw: (itemId: string) => void;
+  };
   onClaim?: (siteId: string) => void;
   onBuild?: (facilityId: string) => void;
 }
@@ -134,13 +147,46 @@ export default function BasePanel(props: BasePanelProps) {
             <div key={cat.id} className="mb-2">
               <div className={h}>{cat.id}</div>
               {cat.items.map((it) => (
-                <div key={it.itemId} className="flex justify-between text-xs text-[#d7dde5]">
+                <div key={it.itemId} className="flex items-center justify-between text-xs text-[#d7dde5]">
                   <span>{it.name} ×{it.qty}</span>
-                  <span className={dim}>heat {it.heatValue}/ea</span>
+                  <span className="flex items-center gap-2">
+                    <span className={dim}>heat {it.heatValue}/ea</span>
+                    {props.stockpileMoves && (
+                      <button
+                        disabled={!props.stockpileMoves.atBase}
+                        onClick={() => props.stockpileMoves!.onWithdraw(it.itemId)}
+                        className="rounded border border-[#232b36] px-1.5 py-0.5 text-[10px] text-[#d7dde5] hover:border-[#7fb0d9] disabled:cursor-not-allowed disabled:opacity-40"
+                      >Take</button>
+                    )}
+                  </span>
                 </div>
               ))}
             </div>
           ))}
+          {props.stockpileMoves && (
+            <div className="mt-2 border-t border-[#1a212c] pt-2">
+              {props.stockpileMoves.atBase ? (
+                props.stockpileMoves.packStacks.length === 0 ? (
+                  <div className={dim}>Nothing carried to deposit.</div>
+                ) : (
+                  <div className="flex flex-col gap-1">
+                    <div className={h}>Deposit from pack</div>
+                    {props.stockpileMoves.packStacks.map((st) => (
+                      <div key={st.uid} className="flex items-center justify-between text-xs text-[#d7dde5]">
+                        <span>{st.name} ×{st.qty}</span>
+                        <button
+                          onClick={() => props.stockpileMoves!.onDeposit(st.uid)}
+                          className="rounded border border-[#232b36] px-1.5 py-0.5 text-[10px] text-[#d7dde5] hover:border-[#7fb0d9]"
+                        >Deposit</button>
+                      </div>
+                    ))}
+                  </div>
+                )
+              ) : (
+                <div className={dim}>The pile is physical — travel to this base to move goods in or out.</div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

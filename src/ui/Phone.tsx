@@ -20,6 +20,7 @@ import { VEHICLE_DEFS } from '../game/Vehicles';
 import { carryLimitKg, encumbranceTier, totalWeightKg } from '../store/inventoryUtils';
 import { walkCarried } from '../store/containers';
 import { carryBonusKg, heavyShiftKg } from '../systems/perkEffects';
+import { facilityPresenceAt } from '../systems/facilityPresence';
 import InventoryDeck from './InventoryDeck';
 import SkillsPanel from './SkillsPanel';
 import { CraftPanel } from './CraftPanel';
@@ -322,6 +323,11 @@ function BaseTab() {
   const claimHostiles = useGameStore((s) => s.claimHostiles);
   const claimClaimSite = useGameStore((s) => s.claimClaimSite);
   const fleet = useGameStore((s) => s.fleet);
+  const equipped = useGameStore((s) => s.equipped);
+  const pos = useGameStore((s) => s.pos);
+  const poiPositions = useGameStore((s) => s.poiPositions);
+  const depositToStockpile = useGameStore((s) => s.depositToStockpile);
+  const withdrawFromStockpile = useGameStore((s) => s.withdrawFromStockpile);
 
   const home = claims.home ?? (base ? claimsFromLegacyBase(base).home : null);
   if (!home) return <BaseSection />;
@@ -388,6 +394,26 @@ function BaseTab() {
       orderTieredBuild(home.siteId, facilityId);
     }
   };
+  // §7.5 interactive stockpile moves (systems-completeness lane):
+  // presence is computed live so the hint + button states track the
+  // player; the store re-checks and enforces it on every call.
+  const presence = facilityPresenceAt(effectiveClaims, poiPositions, pos[0], pos[2]);
+  const atHomeBase = presence?.siteId === home.siteId;
+  const slottedUids = new Set(Object.values(equipped).filter((u): u is string => typeof u === 'string'));
+  const stockpileMoves = {
+    atBase: atHomeBase,
+    packStacks: walkCarried(inventory)
+      .filter((i) => !slottedUids.has(i.uid) && !(i.contents && i.contents.length > 0) && i.itemId !== 'phone')
+      .map((i) => ({ uid: i.uid, name: ITEMS[i.itemId]?.name ?? i.itemId, qty: i.qty })),
+    onDeposit: (uid: string) => {
+      const it = inventory.find((x) => x.uid === uid) ?? walkCarried(inventory).find((x) => x.uid === uid);
+      if (it) depositToStockpile(home.siteId, uid, it.qty);
+    },
+    onWithdraw: (itemId: string) => {
+      const st = home.stockpile.find((x) => x.itemId === itemId);
+      if (st) withdrawFromStockpile(home.siteId, itemId, st.qty);
+    },
+  };
   return (
     <div className="flex flex-col gap-3">
       <BasePanel
@@ -401,6 +427,7 @@ function BaseTab() {
         }))}
         buildMenu={buildMenu(home.siteId, home, crew)}
         stockpile={stockpileView(home)}
+        stockpileMoves={stockpileMoves}
         survivors={survivors}
         board={jobBoard(home, survivors, heat)}
         relocation={relocationQuote(effectiveClaims)}

@@ -355,6 +355,156 @@ export function transferCarried(
   return { ok: true, inventory: insertIntoDest(removed.list, dest, removed.removed, eq, perks) };
 }
 
+/** The carried dest an instance currently sits in — pockets, loose, or
+ *  its holder's contents grid. null when the instance is slotted/worn
+ *  (it lives in a slot, in no grid) — split/partial ops refuse those. */
+export function destOfCarried(inv: readonly InvItem[], eq: Equipped, uid: string): CarriedDest | null {
+  const found = findCarried(inv, uid);
+  if (!found) return null;
+  if (found.containerUid) return { type: 'container', uid: found.containerUid };
+  if (slotOfUid(eq, uid)) return null;
+  return found.item.loc === 'pockets' ? POCKETS : LOOSE;
+}
+
+export function sameCarriedDest(a: CarriedDest, b: CarriedDest): boolean {
+  if (a.type !== b.type) return false;
+  if (a.type === 'container' && b.type === 'container') return a.uid === b.uid;
+  return true;
+}
+
+export type QtyResult =
+  | { ok: true; inventory: InvItem[]; moved: number }
+  | { ok: false; inventory: InvItem[]; reason: string };
+
+/**
+ * Split `qty` units off a stack into a NEW stack in the SAME grid —
+ * the new stack needs its own free cell (spatial rules stay honest:
+ * a split is two footprints, not one). Refuses slotted items, stacks
+ * of 1, non-stackable defs, and content-carrying instances.
+ */
+export function splitCarriedStack(
+  inv: InvItem[],
+  eq: Equipped,
+  uid: string,
+  qty: number,
+  newUid: string,
+  perks?: readonly string[],
+): QtyResult {
+  const found = findCarried(inv, uid);
+  if (!found) return { ok: false, inventory: inv, reason: 'not-carried' };
+  const { item } = found;
+  const def = ITEMS[item.itemId];
+  if (!def || def.stack <= 1) return { ok: false, inventory: inv, reason: 'not-stackable' };
+  if ((item.contents?.length ?? 0) > 0) return { ok: false, inventory: inv, reason: 'has-contents' };
+  if (qty < 1 || qty >= item.qty) return { ok: false, inventory: inv, reason: 'bad-qty' };
+  const dest = destOfCarried(inv, eq, uid);
+  if (!dest) return { ok: false, inventory: inv, reason: 'slotted' };
+  // Reduce first, then fit-check the fresh stack against the reduced
+  // forest — the pair's total weight never changes, so the holder's kg
+  // cap is judged on the post-split state, not a phantom double-count.
+  const reduced = updateCarried(inv, uid, (i) => ({ ...i, qty: i.qty - qty }));
+  const fresh: InvItem = { uid: newUid, itemId: item.itemId, qty };
+  if (!fitInDest(reduced, dest, fresh, eq, perks)) {
+    return { ok: false, inventory: inv, reason: 'no-fit' };
+  }
+  return { ok: true, inventory: insertIntoDest(reduced, dest, fresh, eq, perks), moved: qty };
+}
+
+/**
+ * Move `qty` units of a stack to another carried grid — the partial
+ * quick-move behind the deck's quantity stepper and Send buttons.
+ * Semantics (all conservation-checked, nothing created or lost):
+ *   - qty >= the stack: the whole instance moves, exactly like
+ *     transferCarried (no merging — the instance keeps its identity);
+ *   - same dest: a split (see splitCarriedStack);
+ *   - otherwise the moved units MERGE FIRST into same-item stacks
+ *     already in the destination (up to their stack caps), and any
+ *     remainder lands as a fresh stack if it fits. If only part of the
+ *     request can move (weight cap / merge room / no free cell), the
+ *     movable part moves and `moved` reports how much — never a
+ *     silent all-or-nothing refusal when some can go.
+ */
+export function transferCarriedQty(
+  inv: InvItem[],
+  eq: Equipped,
+  uid: string,
+  dest: CarriedDest,
+  qty: number,
+  newUid: string,
+  perks?: readonly string[],
+): QtyResult {
+  const found = findCarried(inv, uid);
+  if (!found) return { ok: false, inventory: inv, reason: 'not-carried' };
+  if (slotOfUid(eq, uid)) return { ok: false, inventory: inv, reason: 'slotted' };
+  const { item } = found;
+  const def = ITEMS[item.itemId];
+  if (!def) return { ok: false, inventory: inv, reason: 'not-carried' };
+  if (qty < 1) return { ok: false, inventory: inv, reason: 'bad-qty' };
+  if (qty >= item.qty) {
+    const whole = transferCarried(inv, eq, uid, dest, perks);
+    if (whole.ok) return { ok: true, inventory: whole.inventory, moved: item.qty };
+    // Only a fit failure degrades into the partial path below (move
+    // what fits, report how much) — cycle/depth/slot refusals stand.
+    if (whole.reason !== 'no-fit') return { ok: false, inventory: inv, reason: whole.reason };
+    qty = item.qty;
+  }
+  if ((item.contents?.length ?? 0) > 0) return { ok: false, inventory: inv, reason: 'has-contents' };
+  const from = destOfCarried(inv, eq, uid);
+  if (!from) return { ok: false, inventory: inv, reason: 'slotted' };
+  if (sameCarriedDest(from, dest)) return splitCarriedStack(inv, eq, uid, qty, newUid, perks);
+
+  const spec = specForDest(inv, dest, perks);
+  if (!spec) return { ok: false, inventory: inv, reason: 'no-such-container' };
+  const unitW = Math.max(def.weight, 0.0001);
+  const destItems = listInDest(inv, dest, eq).filter((i) => i.uid !== uid);
+  const destKg = destItems.reduce((a, i) => a + itemWeightKg(i), 0);
+  let moveQty = qty;
+  if (Number.isFinite(spec.kg)) {
+    const byKg = Math.floor((spec.kg - destKg) / unitW + 1e-9);
+    moveQty = Math.min(moveQty, Math.max(0, byKg));
+  }
+  if (moveQty <= 0) return { ok: false, inventory: inv, reason: 'no-fit' };
+
+  // merge room across the destination's existing stacks of this item
+  const mergeTargets = destItems.filter(
+    (i) => i.itemId === item.itemId && (i.contents?.length ?? 0) === 0,
+  );
+  const mergeRoom = mergeTargets.reduce((a, i) => a + Math.max(0, def.stack - i.qty), 0);
+  const mergeQty = Math.min(moveQty, mergeRoom);
+  let freshQty = moveQty - mergeQty;
+
+  // apply the source reduction + merges, then fit-test any fresh stack
+  let next = updateCarried(inv, uid, (i) => ({ ...i, qty: i.qty - moveQty }));
+  let left = mergeQty;
+  for (const t of mergeTargets) {
+    if (left <= 0) break;
+    const take = Math.min(def.stack - t.qty, left);
+    if (take <= 0) continue;
+    next = updateCarried(next, t.uid, (i) => ({ ...i, qty: i.qty + take }));
+    left -= take;
+  }
+  if (freshQty > 0) {
+    const fresh: InvItem = { uid: newUid, itemId: item.itemId, qty: freshQty };
+    if (fitInDest(next, dest, fresh, eq, perks)) {
+      next = insertIntoDest(next, dest, fresh, eq, perks);
+    } else if (mergeQty > 0) {
+      // the merge part still lands; the source keeps the unplaceable rest
+      freshQty = 0;
+      next = updateCarried(next, uid, (i) => ({ ...i, qty: i.qty + (moveQty - mergeQty) }));
+      moveQty = mergeQty;
+    } else {
+      return { ok: false, inventory: inv, reason: 'no-fit' };
+    }
+  }
+  // a fall-through full move can drain the source to exactly zero —
+  // the instance leaves the forest instead of lingering at qty 0
+  const drained = findCarried(next, uid);
+  if (drained && drained.item.qty <= 0) {
+    next = removeCarried(next, uid, Number.MAX_SAFE_INTEGER).inventory;
+  }
+  return { ok: true, inventory: next, moved: moveQty };
+}
+
 /** Where new pickups land, in order: the worn backpack first (it is
  *  the main storage), then pockets, then the other worn garments —
  *  and LOOSE ("in arms") only when nothing worn can take it. */

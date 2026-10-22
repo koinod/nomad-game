@@ -3,7 +3,7 @@ import { ITEMS, FIELD_RECIPES, STATION_RECIPES, STATION_LABEL } from '../data/it
 import { PERKS as PERKS_ALL } from '../data/skills';
 import { FINISHES, MODS as MODS_ALL, magSizeOf } from '../data/mods';
 import { UPGRADES as UPGRADE_DEFS } from '../data/upgrades';
-import { FACILITIES as FACILITY_DEFS, baseHeat, buildMinutes, claimSite, tieredFacility, tierDef } from '../data/base';
+import { FACILITIES as FACILITY_DEFS, baseHeat, buildMinutes, claimSite, stockpileWeightKg, tieredFacility, tierDef } from '../data/base';
 import { dispatchDurationMin, poiName, resolveDispatch } from '../data/dispatch';
 import { TRAITS as TRAIT_DEFS } from '../data/survivors';
 import { QUESTS } from '../data/quests';
@@ -12,9 +12,9 @@ import { ENCLAVE_RADIO_BURST } from '../data/worldWiring';
 import { applyUpkeep, dailyMoraleTick, moraleEvent, FOOD_ITEMS, WATER_ITEMS } from '../systems/morale';
 import {
   comfortScore, claimChecklist, claimReady, applyClaim, applyRelocation, powerBudget,
-  allBases, applyTieredBuild, buildMenu, facilityCard,
+  allBases, applyTieredBuild, buildMenu, facilityCard, stockpileCapKg,
 } from '../systems/baseClaims';
-import { presenceSignature, type FacilityPresence } from '../systems/facilityPresence';
+import { facilityPresenceAt, presenceSignature, type FacilityPresence } from '../systems/facilityPresence';
 import { DEFAULT_APPEARANCE, DIFFICULTIES, defaultSurvivorRuntime } from './types';
 import type {
   Appearance, DifficultyId, Equipped, FleetEntry, InvItem, NearbyEntry, PhoneTab, QuestProgress, QuestStepType,
@@ -33,10 +33,11 @@ import {
 import {
   addToCarried, countCarried, findCarried, fitInDest, hasPhoneCarried,
   insertIntoDest, itemWeightKg, listInDest, normalizeCarried, POCKETS, receiveDests,
-  removeCarried, specForDest, transferCarried, updateCarried, walkCarried,
+  removeCarried, specForDest, splitCarriedStack, transferCarried, transferCarriedQty,
+  updateCarried, walkCarried,
   type CarriedDest,
 } from './containers';
-import { arrangeItems as arrangeGridItems } from './gridUtils';
+import { arrangeItems as arrangeGridItems, containerGridDims } from './gridUtils';
 import { applyXp, awardEvent, canBuyPerk, meetsSkillReq, skillReqLabel, SKILL_IDS, XP_EVENTS, type XpEventId } from '../systems/skills';
 import { blockThroughFactor, carryBonusKg, disassemblyYields, fieldRepairCap, heavyShiftKg, modPartCost, vehicleRepairCost } from '../systems/perkEffects';
 import { deleteSaveSlot, listSaveSlots, loadGameFromSlot, saveGameToSlot } from '../systems/save';
@@ -200,6 +201,14 @@ interface GameState {
   /** Remove up to qty of an item from a held base's stockpile; returns
    *  how many were actually taken (turret magazines reload this way). */
   takeFromStockpile: (siteId: string, itemId: string, qty: number) => number;
+  /** Player-facing stockpile moves (systems completeness): deposit a
+   *  carried stack (whole or partial qty) into a held base's stockpile,
+   *  or withdraw stockpile goods into the pack. Both are PRESENCE-gated
+   *  — the player must be standing at that base (the stockpile is a
+   *  physical pile, not a phone abstraction) — and return how many
+   *  units actually moved. */
+  depositToStockpile: (siteId: string, uid: string, qty: number) => number;
+  withdrawFromStockpile: (siteId: string, itemId: string, qty: number) => number;
 
   // wave 3: team dispatch (P5 v1), phone journal, scout intel, build queue
   dispatches: Dispatch[];
@@ -316,6 +325,15 @@ interface GameState {
   refreshStorage: () => void;
   storagePut: (invUid: string) => void;
   storageTake: (index: number) => void;
+  /** Quantity + bulk storage moves (systems completeness): partial
+   *  put/take of one stack, take-all / put-all sweeps, and grid
+   *  arrange/sort for the open storage — the same affordances the
+   *  carried grids already had, so a full trunk isn't click-hell. */
+  storagePutQty: (invUid: string, qty: number) => void;
+  storageTakeQty: (index: number, qty: number) => void;
+  storageTakeAll: () => void;
+  storagePutAll: () => void;
+  arrangeStorage: (order: 'size' | 'category') => void;
 
   // workshop actions driven from the phone, applied by the engine
   atWorkshop: () => boolean;
@@ -342,6 +360,11 @@ interface GameState {
    *  (pockets, or a container instance's contents — worn garments
    *  included). Vehicle storage goes through storagePut/storageTake. */
   transferItem: (uid: string, dest: CarriedDest) => void;
+  /** Split qty units off a stack into a new stack in the same grid. */
+  splitStack: (uid: string, qty: number) => void;
+  /** Move qty units of a stack to another carried grid (merge-first
+   *  partial quick-move; qty >= the stack moves the whole instance). */
+  transferItemQty: (uid: string, dest: CarriedDest, qty: number) => void;
   useItemUid: (uid: string) => void;
   dropUid: (uid: string) => void;
   assignHotbar: (index: number, uid: string | null) => void;
@@ -377,6 +400,8 @@ interface GameState {
   stageContainerLoot: (containerId: string, items: { itemId: string; qty: number }[]) => void;
   openStagedLoot: (containerId: string) => void;
   takeLootIndex: (containerId: string, index: number) => void;
+  /** Take only qty units of one loot stack (partial take). */
+  takeLootQty: (containerId: string, index: number, qty: number) => void;
   takeAllLoot: (containerId: string) => void;
   closeLoot: () => void;
 
@@ -938,6 +963,117 @@ export const useGameStore = create<GameState>()((set, get) => {
       sfx.play('pickup', { volume: 0.5 });
     },
 
+    storagePutQty: (invUid, qty) => {
+      const s = get();
+      if (!s.storageOpen) return;
+      const eng = getGame();
+      if (!eng) return;
+      const found = findCarried(s.inventory, invUid);
+      if (!found) return;
+      const inv = found.item;
+      if (slotOfUid(s.equipped, invUid) || s.hotbar.includes(invUid)) {
+        s.addToast('Unequip it first.');
+        return;
+      }
+      if ((inv.contents?.length ?? 0) > 0) {
+        s.addToast(`Empty the ${ITEMS[inv.itemId]?.name ?? 'container'} first — storage stacks by kind.`);
+        return;
+      }
+      const moveQty = Math.max(1, Math.min(qty, inv.qty));
+      const trial = removeCarried(s.inventory, invUid, moveQty);
+      if (!trial.ok) { s.addToast('Can’t store that.'); return; }
+      const err = eng.storagePutItem(s.storageOpen.kind, s.storageOpen.uid, { ...inv, qty: moveQty });
+      if (err) { s.addToast(err); return; }
+      set({ inventory: trial.inventory });
+      if (get().phoneOpen && !hasPhoneCarried(trial.inventory)) set({ phoneOpen: false });
+      s.refreshStorage();
+      sfx.play('pickup', { volume: 0.4 });
+    },
+
+    storageTakeQty: (index, qty) => {
+      const s = get();
+      if (!s.storageOpen) return;
+      const eng = getGame();
+      if (!eng) return;
+      const peek = eng.getStorageItems(s.storageOpen.kind, s.storageOpen.uid)?.[index];
+      if (!peek) return;
+      const def = ITEMS[peek.itemId];
+      if (!def) return;
+      const want = Math.max(1, Math.min(qty, peek.qty));
+      const limit = carryLimitKg(s.equipped, s.inventory, s.difficulty, carryBonusKg(s.perks));
+      if (encumbranceTier(totalWeightKg(s.inventory) + def.weight * want, limit, heavyShiftKg(s.perks)) === 'immobile') {
+        s.addToast('Too heavy — drop something first.');
+        return;
+      }
+      // the engine hands back whole stacks; take what's wanted and
+      // return the remainder to the same storage in the same breath
+      const taken = eng.storageTakeItem(s.storageOpen.kind, s.storageOpen.uid, index);
+      if (!taken) return;
+      if (!s.addItem(taken.itemId, want, true, { found: true })) {
+        eng.storagePutItem(s.storageOpen.kind, s.storageOpen.uid, taken); // hand it all back
+        s.addToast('No room in the pack.');
+        return;
+      }
+      if (taken.qty > want) {
+        eng.storagePutItem(s.storageOpen.kind, s.storageOpen.uid, { ...taken, qty: taken.qty - want });
+      }
+      s.refreshStorage();
+      sfx.play('pickup', { volume: 0.5 });
+    },
+
+    storageTakeAll: () => {
+      // last-in first: each success shrinks the list; a refusal (pack
+      // full / too heavy) leaves the length unchanged — stop there
+      // instead of spinning against the same wall.
+      let guard = 0;
+      while (guard++ < 300) {
+        const n = get().storageItems.length;
+        if (n === 0) break;
+        get().storageTake(n - 1);
+        if (get().storageItems.length >= n) break;
+      }
+    },
+
+    storagePutAll: () => {
+      const s = get();
+      if (!s.storageOpen) return;
+      // snapshot the carried uids first — every successful put mutates
+      // the forest. storagePut re-validates each (slotted, hotbar,
+      // non-empty containers are skipped with their own toasts).
+      const uids = walkCarried(s.inventory)
+        .filter((i) => !slotOfUid(s.equipped, i.uid) && !s.hotbar.includes(i.uid))
+        .map((i) => i.uid);
+      let guard = 0;
+      for (const uid of uids) {
+        if (guard++ > 300) break;
+        if (!get().storageOpen) break;
+        if (!findCarried(get().inventory, uid)) continue; // already gone (moved as part of a stack)
+        get().storagePut(uid);
+      }
+    },
+
+    arrangeStorage: (order) => {
+      const s = get();
+      if (!s.storageOpen) return;
+      const eng = getGame();
+      if (!eng) return;
+      let capKg: number | null = null;
+      if (s.storageOpen.kind === 'vehicle') capKg = s.fleet.find((f) => f.defId === s.storageOpen!.uid)?.storageCapKg ?? null;
+      if (s.storageOpen.kind === 'trailer') capKg = s.trailerFleet.find((t) => t.defId === s.storageOpen!.uid)?.storageCapKg ?? null;
+      if (s.storageOpen.kind === 'crate') capKg = 150;
+      const dims = containerGridDims(capKg ?? 150);
+      const { placed } = arrangeGridItems(s.storageItems, dims.cols, dims.rows, order);
+      const next = s.storageItems.map((it) => {
+        const p = placed.get(it.uid);
+        return p ? { ...it, gx: p.gx, gy: p.gy, rot: p.rot } : { ...it, gx: undefined, gy: undefined, rot: undefined };
+      });
+      next.forEach((it, idx) => {
+        eng.storageSetItem(s.storageOpen!.kind, s.storageOpen!.uid, idx, it);
+      });
+      set({ storageItems: next });
+      s.addToast(order === 'size' ? 'Storage arranged by size.' : 'Storage sorted by category.');
+    },
+
     repairVehicle: (uid, kind) => {
       const s = get();
       const eng = getGame();
@@ -1496,6 +1632,47 @@ export const useGameStore = create<GameState>()((set, get) => {
       sfx.play('pickup', { volume: 0.35 });
     },
 
+    splitStack: (uid, qty) => {
+      const s = get();
+      const res = splitCarriedStack(s.inventory, s.equipped, uid, qty, newUid(), s.perks);
+      if (!res.ok) {
+        const msgs: Record<string, string> = {
+          'not-stackable': 'That doesn’t stack — nothing to split.',
+          'bad-qty': 'Pick a split between 1 and the stack size.',
+          'no-fit': 'No free cell beside it — make room first.',
+          'slotted': 'Unequip it first.',
+          'has-contents': 'Empty it before splitting it.',
+          'not-carried': 'That item is gone.',
+        };
+        s.addToast(msgs[res.reason] ?? 'Can’t split that.');
+        return;
+      }
+      set({ inventory: res.inventory });
+      sfx.play('pickup', { volume: 0.35 });
+    },
+
+    transferItemQty: (uid, dest, qty) => {
+      const s = get();
+      const res = transferCarriedQty(s.inventory, s.equipped, uid, dest, qty, newUid(), s.perks);
+      if (!res.ok) {
+        const msgs: Record<string, string> = {
+          'cycle': 'A container can’t go inside itself.',
+          'too-deep': 'That’s nested too deep.',
+          'no-fit': 'No room there.',
+          'slotted': 'Unequip it first.',
+          'bad-qty': 'Nothing to move.',
+          'has-contents': 'Empty it before moving part of it.',
+          'no-such-container': 'That container is gone.',
+          'not-carried': 'That item is gone.',
+        };
+        s.addToast(msgs[res.reason] ?? 'Can’t move that there.');
+        return;
+      }
+      set({ inventory: res.inventory });
+      if (res.moved < qty) s.addToast(`Only ${res.moved} fit — the rest stayed.`);
+      sfx.play('pickup', { volume: 0.35 });
+    },
+
     useItemUid: (uid) => {
       const s = get();
       const it = findCarried(s.inventory, uid)?.item;
@@ -2012,6 +2189,96 @@ export const useGameStore = create<GameState>()((set, get) => {
           : { ...s.claims, outposts: s.claims.outposts.map((o) => (o.siteId === siteId ? next : o)) },
       });
       return taken;
+    },
+
+    depositToStockpile: (siteId, uid, qty) => {
+      const s = get();
+      const isHome = s.claims.home?.siteId === siteId;
+      const base = isHome ? s.claims.home : s.claims.outposts.find((o) => o.siteId === siteId);
+      if (!base || qty <= 0) return 0;
+      // presence gate — the same C5 rule the craft queue enforces:
+      // the pile is physical; you move goods where you stand.
+      const claims = s.claims.home || !s.base
+        ? s.claims
+        : { home: claimsFromLegacyBase(s.base).home, outposts: s.claims.outposts };
+      const presence = facilityPresenceAt(claims, s.poiPositions, s.pos[0], s.pos[2]);
+      if (!presence || presence.siteId !== siteId) {
+        s.addToast('You have to be at the base to stock its pile.');
+        return 0;
+      }
+      const found = findCarried(s.inventory, uid);
+      if (!found) return 0;
+      const item = found.item;
+      if (slotOfUid(s.equipped, uid)) { s.addToast('Unequip it first.'); return 0; }
+      if ((item.contents?.length ?? 0) > 0) {
+        s.addToast('Empty it first — the stockpile stores by kind.');
+        return 0;
+      }
+      const def = ITEMS[item.itemId];
+      if (!def) return 0;
+      const capRoom = Math.floor(
+        (stockpileCapKg(base) - stockpileWeightKg(base.stockpile)) / Math.max(def.weight, 0.0001) + 1e-9,
+      );
+      const moveQty = Math.min(qty, item.qty, Math.max(0, capRoom));
+      if (moveQty <= 0) { s.addToast('The stockpile is at capacity.'); return 0; }
+      const removed = removeCarried(s.inventory, uid, moveQty);
+      if (!removed.ok) { s.addToast('Can’t deposit that.'); return 0; }
+      const stock = [...base.stockpile];
+      const ix = stock.findIndex((st) => st.itemId === item.itemId);
+      if (ix >= 0) stock[ix] = { ...stock[ix], qty: stock[ix].qty + moveQty };
+      else stock.push({ itemId: item.itemId, qty: moveQty });
+      const next = { ...base, stockpile: stock };
+      set({
+        inventory: removed.inventory,
+        claims: isHome
+          ? { ...s.claims, home: next }
+          : { ...s.claims, outposts: s.claims.outposts.map((o) => (o.siteId === siteId ? next : o)) },
+      });
+      s.addToast(`Stockpiled ${moveQty > 1 ? `${moveQty}× ` : ''}${def.name}.`);
+      sfx.play('pickup', { volume: 0.4 });
+      return moveQty;
+    },
+
+    withdrawFromStockpile: (siteId, itemId, qty) => {
+      const s = get();
+      const isHome = s.claims.home?.siteId === siteId;
+      const base = isHome ? s.claims.home : s.claims.outposts.find((o) => o.siteId === siteId);
+      if (!base || qty <= 0) return 0;
+      const claims = s.claims.home || !s.base
+        ? s.claims
+        : { home: claimsFromLegacyBase(s.base).home, outposts: s.claims.outposts };
+      const presence = facilityPresenceAt(claims, s.poiPositions, s.pos[0], s.pos[2]);
+      if (!presence || presence.siteId !== siteId) {
+        s.addToast('You have to be at the base to draw from its pile.');
+        return 0;
+      }
+      const before = s.countItem(itemId);
+      const taken = s.takeFromStockpile(siteId, itemId, qty);
+      if (taken <= 0) return 0;
+      s.addItem(itemId, taken, true);
+      // addItem is best-effort under a full pack: whatever didn't land
+      // goes straight back on the pile — nothing evaporates.
+      const landed = s.countItem(itemId) - before;
+      if (landed < taken) {
+        const cur = get();
+        const b2 = isHome ? cur.claims.home : cur.claims.outposts.find((o) => o.siteId === siteId);
+        if (b2) {
+          const stock = [...b2.stockpile];
+          const ix = stock.findIndex((st) => st.itemId === itemId);
+          if (ix >= 0) stock[ix] = { ...stock[ix], qty: stock[ix].qty + (taken - landed) };
+          else stock.push({ itemId, qty: taken - landed });
+          const next = { ...b2, stockpile: stock };
+          set({
+            claims: isHome
+              ? { ...cur.claims, home: next }
+              : { ...cur.claims, outposts: cur.claims.outposts.map((o) => (o.siteId === siteId ? next : o)) },
+          });
+        }
+        if (landed <= 0) s.addToast('No room in the pack.');
+        else s.addToast(`Only ${landed} fit — the rest stayed on the pile.`);
+      }
+      if (landed > 0) sfx.play('pickup', { volume: 0.5 });
+      return landed;
     },
     buildFacility: (facilityId) => {
       const s = get();
@@ -2599,6 +2866,30 @@ export const useGameStore = create<GameState>()((set, get) => {
       set({ dayStats: { ...get().dayStats, pickups: get().dayStats.pickups + entry.qty } });
       s.questEvent('collect', entry.itemId, entry.qty);
       const rest = items.filter((_, i) => i !== index);
+      if (rest.length === 0) {
+        const stash = { ...s.lootStash };
+        delete stash[containerId];
+        set({ lootStash: stash, lootOpenId: null });
+        getGame()?.completeContainerLoot(containerId);
+      } else {
+        set({ lootStash: { ...s.lootStash, [containerId]: rest } });
+      }
+    },
+    takeLootQty: (containerId, index, qty) => {
+      const s = get();
+      const items = s.lootStash[containerId];
+      const entry = items?.[index];
+      if (!entry) return;
+      const take = Math.max(1, Math.min(qty, entry.qty));
+      if (!s.addItem(entry.itemId, take, true, { found: true })) {
+        s.addToast('Pack full — no room for that.');
+        return;
+      }
+      set({ dayStats: { ...get().dayStats, pickups: get().dayStats.pickups + take } });
+      s.questEvent('collect', entry.itemId, take);
+      const rest = items
+        .map((it, i) => (i === index ? { ...it, qty: it.qty - take } : it))
+        .filter((it) => it.qty > 0);
       if (rest.length === 0) {
         const stash = { ...s.lootStash };
         delete stash[containerId];
