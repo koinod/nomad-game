@@ -65,7 +65,7 @@ function park(v: Vehicle, patch: Partial<{
 describe('fleet save/load round trip', () => {
   it('every spawned vehicle restores its full state, matched by def id', () => {
     const fleet = spawnFleet();
-    expect(fleet.map((v) => v.def.id)).toEqual(['gt500', 'nomad_prime', 'sprinter_van']);
+    expect(fleet.map((v) => v.def.id)).toEqual(['gt500', 'nomad_prime', 'sprinter_van', 'dark_horse']);
     park(byDef(fleet, 'gt500'), {
       x: 12, y: 3, z: -44, heading: 0.7, fuel: 17.25, condition: 0.42, tiresFlat: 1,
       storage: [{ uid: 'g1', itemId: 'bandage', qty: 3 }], upgrades: ['engine_tune'],
@@ -82,7 +82,7 @@ describe('fleet save/load round trip', () => {
 
     const fresh = spawnFleet();
     const restored = restoreVehicleFleet(fresh, saves);
-    expect(restored).toEqual(['gt500', 'nomad_prime', 'sprinter_van']);
+    expect(restored).toEqual(['gt500', 'nomad_prime', 'sprinter_van', 'dark_horse']);
 
     const g = byDef(fresh, 'gt500');
     expect(g.group.position.toArray()).toEqual([12, 3, -44]);
@@ -158,7 +158,9 @@ describe('fleet save/load round trip', () => {
   it('unknown, deleted, and future def records are skipped — never fatal, never stamped', () => {
     const saves: VehicleSave[] = [
       { defId: 'tank', x: 1, y: 2, z: 3, heading: 0, fuel: 40, condition: 0.9, storage: [], upgrades: [], tiresFlat: 0 },
-      // a future def (the Dark Horse placeholder): no live vehicle yet
+      // was the "future def" placeholder when written — the Dark
+      // Horse landed 2026-10-21 (integration), so this record now
+      // restores onto the live car like any other fleet member's
       { defId: 'dark_horse', x: 7, y: 2, z: 7, heading: 1, fuel: 55, condition: 1, storage: [], upgrades: [], tiresFlat: 0 },
       // deleted content: juicy state that must land NOWHERE
       {
@@ -170,8 +172,11 @@ describe('fleet save/load round trip', () => {
     const fresh = spawnFleet();
     let restored: string[] = [];
     expect(() => { restored = restoreVehicleFleet(fresh, saves); }).not.toThrow();
-    expect(restored).toEqual(['gt500']);
+    // gt500 + dark_horse (its record is live content since the
+    // 2026-10-21 integration); tank + mustang still land nowhere
+    expect(restored).toEqual(['gt500', 'dark_horse']);
     expect(byDef(fresh, 'gt500').fuel).toBe(48);
+    expect(byDef(fresh, 'dark_horse').fuel).toBe(55);
     // the deleted Stallion's marker fuel appears on no live vehicle
     for (const v of fresh) expect(v.fuel).not.toBe(33.33);
   });

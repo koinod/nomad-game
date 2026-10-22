@@ -18,8 +18,9 @@ import {
 
 describe('registration', () => {
   it('the GT500 def is in VEHICLE_DEFS (as itself, after the Mustang)', () => {
-    // The fleet appended after it (2026-10-21): nomad_prime, sprinter_van.
-    expect(VEHICLE_DEFS.map((d) => d.id)).toEqual(['mustang', 'gt500', 'nomad_prime', 'sprinter_van']);
+    // The fleet appended after it (2026-10-21): nomad_prime,
+    // sprinter_van, and the Dark Horse (integration, later that day).
+    expect(VEHICLE_DEFS.map((d) => d.id)).toEqual(['mustang', 'gt500', 'nomad_prime', 'sprinter_van', 'dark_horse']);
     expect(VEHICLE_DEFS[1]).toBe(GT500_DEF);
   });
 
@@ -29,7 +30,7 @@ describe('registration', () => {
     // fleet spawns (Prime + Sprinter on their own airbase pads)
     // follow the GT500 in VEHICLE_SPAWNS; fleetIntegration.test.ts
     // pins those, airbase.test.ts pins spawn == pad exactly.
-    expect(VEHICLE_SPAWNS.map((s) => s.id)).toEqual(['gt500', 'nomad_prime', 'sprinter_van']);
+    expect(VEHICLE_SPAWNS.map((s) => s.id)).toEqual(['gt500', 'nomad_prime', 'sprinter_van', 'dark_horse']);
     expect(VEHICLE_SPAWNS[0]).toBe(GT500_SPAWN);
     expect(GT500_SPAWN.poi).toBe('airbase');
     expect(GT500_SPAWN.dx).toBe(7);

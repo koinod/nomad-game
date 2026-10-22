@@ -4,6 +4,7 @@ import { carParams, torqueAt, type CarParams } from './carSpec';
 import { GT500_PARAMS } from './gt500Def';
 import { PRIME_PARAMS } from './primeDef';
 import { SPRINTER_PARAMS } from './sprinterDef';
+import { darkHorseParams } from './darkhorseDef';
 import { BETA_COLS, BETA_ROWS, buildBetaRapierHeightfield } from './betaTerrain';
 import type { Vehicle } from './Vehicles';
 
@@ -154,6 +155,10 @@ const CHASSIS_GEOM: Record<string, ChassisGeom> = {
   nomad_prime: { half: [1.27, 0.45, 4.3], wheelX: 0.97, wheelZ: 2.79 },
   // Sprinter 170": 2.02 m wide, 6.97 m long, 4.32 m wheelbase
   sprinter_van: { half: [1.01, 0.35, 3.49], wheelX: 0.86, wheelZ: 2.16 },
+  // S650 Dark Horse: 1.92 m wide, 4.82 m long, 2.718 m wheelbase
+  // (GLB stations ±1.359); track averages the front/rear stations
+  // (0.791 / 0.828 half) — one physics track, like the S197.
+  dark_horse: { half: [0.96, 0.32, 2.41], wheelX: 0.81, wheelZ: 1.359 },
 };
 export function geomFor(defId: string): ChassisGeom {
   return CHASSIS_GEOM[defId] ?? CHASSIS_GEOM.mustang;
@@ -239,6 +244,12 @@ export const SUSP_TUNES: Record<string, SuspTune> = {
   // 1.020 m on the polished GLB (c9071da) over a 0.88 m wheel
   // (0.44R tires) -> 0.14 m of visual tuck.
   sprinter_van: { stiffness: 60, compression: 5, relaxation: 7, travel: 0.26, archTravelM: 0.14, archTopM: 1.02, maxForceN: 26000 },
+  // Dark Horse: Track-Pack-class tune on the GT500's pattern — stiff
+  // springs for a 1,915 kg (Stage 0, crewed) sports coupe. The arch
+  // invariant holds for the STOCK rolling set (2×0.345 + 0.17 =
+  // 0.86 ≤ 0.87); the Stage 2 MT set overlapping the stock arches
+  // is a documented build residual (lift is game-side), not pinned.
+  dark_horse: { stiffness: 48, compression: 4.5, relaxation: 6.5, travel: 0.24, archTravelM: 0.17, archTopM: 0.87 },
 };
 export function suspTuneFor(defId: string): SuspTune {
   return SUSP_TUNES[defId] ?? SUSP_TUNES.mustang;
@@ -268,6 +279,12 @@ export function paramsForDef(defId: string, upgrades: readonly string[], cargoKg
   }
   if (defId === 'sprinter_van') {
     return { ...SPRINTER_PARAMS, massKg: SPRINTER_PARAMS.massKg + Math.max(0, cargoKg) };
+  }
+  // The Dark Horse derives from its STAGE tiers (darkhorseDef):
+  // dh_stage1 / dh_stage2 move mass, torque, radius, grip for real;
+  // the FX upgrade tree does not restamp it (fleet ruling).
+  if (defId === 'dark_horse') {
+    return darkHorseParams(upgrades, cargoKg);
   }
   return carParams(upgrades, cargoKg);
 }

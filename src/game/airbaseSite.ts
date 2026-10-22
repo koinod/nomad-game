@@ -85,8 +85,9 @@ export const AIRBASE_PADS: AirbasePad[] = [
   // The Seahawk's pad — position is contract (seahawkPlacement.test):
   // site + (-18, -10) == (450, -138) under the Beta siting, nose west.
   { id: 'pad_seahawk', label: 'H', lx: -18, lz: -10, hx: 9.5, hz: 9.5, heading: -Math.PI / 2 },
-  // Reserved for the Dark Horse when it lands — marked, honestly empty.
-  { id: 'pad_dark_horse', label: 'DH', lx: -4, lz: -9, hx: 4.5, hz: 3.2, heading: Math.PI / 2 },
+  // The Dark Horse's pad — reserved since the site was built; the
+  // car landed 2026-10-21 (darkhorseDef.ts) and takes its mark here.
+  { id: 'pad_dark_horse', label: 'DH', lx: -4, lz: -9, hx: 4.5, hz: 3.2, heading: Math.PI / 2, vehicleId: 'dark_horse' },
   { id: 'pad_gt500', label: 'GT500', lx: 7, lz: -9, hx: 4.5, hz: 3.2, heading: Math.PI / 2, vehicleId: 'gt500' },
   { id: 'pad_sprinter', label: 'V-04', lx: 19, lz: -9, hx: 5.25, hz: 3.2, heading: Math.PI / 2, vehicleId: 'sprinter_van' },
   // The Prime is 8.55 long / 2.55 wide: a 13 x 6.8 pad gives swing room.
