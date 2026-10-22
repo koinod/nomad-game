@@ -23,6 +23,7 @@
 import type { CarParams } from './carSpec';
 import { DRIVER_KG, FUEL_KG } from './carSpec';
 import type { SpawnDef, VehicleDef } from './Vehicles';
+import { FLEET_HOME_POI, padSpawn } from './airbaseSite';
 
 export const GT500_GLB_PATH = '/gt500.glb';
 
@@ -73,15 +74,14 @@ export const GT500_PARAMS: CarParams = {
 };
 
 /**
- * Spawn proposal for the integration step: a second car on the
- * lighthouse grounds, clear of the Stallion's spot (dx -14, dz 16) —
- * the island's first two-car moment, and the fleet>=2 unlock for
- * dispatch. Not live until VEHICLE_SPAWNS gains this entry.
+ * Spawn: the GT500's marked pad on the airbase apron — FLEET RESPAWN
+ * (Ian, 2026-10-21): the whole fleet homes at the revamped airbase.
+ * The position derives from the pad (airbaseSite.ts AIRBASE_PADS), so
+ * the spawn moves when the pad moves. Before this order the GT500
+ * waited on the lighthouse grounds (lighthouse_base + 12/+20).
  */
 export const GT500_SPAWN: SpawnDef = {
   id: 'gt500',
-  poi: 'lighthouse_base',
-  dx: 12,
-  dz: 20,
-  heading: Math.PI * 0.3,
+  poi: FLEET_HOME_POI,
+  ...padSpawn('pad_gt500'),
 };

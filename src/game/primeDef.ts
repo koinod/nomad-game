@@ -25,6 +25,7 @@
 import type { CarParams } from './carSpec';
 import { DRIVER_KG } from './carSpec';
 import type { GlbWheelSpec, SpawnDef, VehicleDef } from './Vehicles';
+import { FLEET_HOME_POI, padSpawn } from './airbaseSite';
 
 export const PRIME_GLB_PATH = '/models/nomad-prime.glb';
 
@@ -92,15 +93,15 @@ export const PRIME_PARAMS: CarParams = {
 };
 
 /**
- * Spawn: the airbase apron/logistics row, east of the Seahawk pad
- * (462,-118) on the same graded line — (516,-120) sits on the 2.7
- * plateau grade, clear of the hangar footprint and the Seahawk.
- * Nose east, parked parallel to the apron.
+ * Spawn: the Prime's marked pad on the airbase apron, east of the
+ * Seahawk pad on the same graded line — (516,-120) on the 2.7 plateau
+ * grade, clear of the hangar footprint and the Seahawk's rotor disc.
+ * Nose east, parked parallel to the apron. The pad (airbaseSite.ts)
+ * formalizes the spot the integration wave chose: same numbers, now
+ * painted, with swing room. Fleet respawn, Ian 2026-10-21.
  */
 export const PRIME_SPAWN: SpawnDef = {
   id: 'nomad_prime',
-  poi: 'airbase',
-  dx: 36,
-  dz: -12,
-  heading: Math.PI / 2,
+  poi: FLEET_HOME_POI,
+  ...padSpawn('pad_prime'),
 };

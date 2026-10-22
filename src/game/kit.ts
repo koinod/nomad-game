@@ -84,6 +84,15 @@ export interface ExteriorWall {
   openings: { a0: number; a1: number }[]; // passable gaps (door/bay/slider), world along-axis
 }
 
+/** A glazed opening, recorded so the daylight audit (kitQa) can prove an
+ *  interior is lit by real apertures, not by assertion. World coords. */
+export interface WindowRecord {
+  axis: 'x' | 'z'; // the wall runs along this axis
+  fixed: number; // wall plane coordinate on the perpendicular axis (world)
+  a0: number; a1: number; // glazed span along the wall (world)
+  sillY: number; headY: number; // world heights of the glazed band
+}
+
 export interface KitBuilding {
   id: string;
   cx: number; cz: number; baseY: number;
@@ -96,6 +105,7 @@ export interface KitBuilding {
   stairs: StairRecord[];
   stairHoles: StairHole[];
   exteriorWalls: ExteriorWall[];
+  windows?: WindowRecord[];
   colliders: Collider[];
   floors: FloorRect[];
   containers: ContainerDef[];
@@ -141,6 +151,7 @@ export class Kit {
   private stairRecs: StairRecord[] = [];
   private stairHoles: StairHole[] = [];
   private extWalls: ExteriorWall[] = [];
+  private windowRecs: WindowRecord[] = [];
   private roomPoints: { x: number; z: number; label: string }[] = [];
   private npcPoints: { x: number; z: number }[] = [];
   private mats = new Map<string, THREE.Material>();
@@ -401,6 +412,20 @@ export class Kit {
         const [sx0, sz0] = along(opts.at - t / 2, o0);
         const [sx1, sz1] = along(opts.at + t / 2, o1);
         this.record('wall', Math.min(sx0, sx1), y0, Math.min(sz0, sz1), Math.max(sx0, sx1), sillY, Math.max(sz0, sz1));
+        // record the glazing for the daylight audit (world segment)
+        const wa2w = (a: number): number => {
+          const [alx, alz] = along(opts.at, a);
+          const [px, pz] = this.pt(alx, alz);
+          return worldAxis === 'x' ? px : pz;
+        };
+        const [wfx, wfz] = this.pt(...along(opts.at, o.at));
+        const wlo = wa2w(o0);
+        const whi = wa2w(o1);
+        this.windowRecs.push({
+          axis: worldAxis, fixed: worldAxis === 'x' ? wfz : wfx,
+          a0: Math.min(wlo, whi), a1: Math.max(wlo, whi),
+          sillY: this.wy(sillY), headY: this.wy(headY),
+        });
       } else {
         // door / slider / bay: lintel above the opening, jambs beside
         const oh = o.h ?? (o.type === 'bay' ? h - 0.35 : KIT.DOOR_H);
@@ -569,7 +594,8 @@ export class Kit {
     story?: number;
     color: number;
     trim?: number;
-    door?: { face: Face; at: number; w?: number; kind?: 'door' | 'slider'; leafColor?: number; swing?: 'L' | 'R' };
+    door?: { face: Face; at: number; w?: number; kind?: 'door' | 'slider'; leafColor?: number; swing?: 'L' | 'R' }
+      | { face: Face; at: number; w?: number; kind?: 'door' | 'slider'; leafColor?: number; swing?: 'L' | 'R' }[];
     windows?: { face: Face; at: number; w?: number; sill?: number; head?: number }[];
     open?: Face[]; // faces with NO wall (posts carry the roof instead)
     bays?: { face: Face; at: number; w: number; h?: number; shut?: boolean }[];
@@ -592,11 +618,12 @@ export class Kit {
     ): void => {
       if (open.has(face)) return;
       const openings: Opening[] = [];
-      if (opts.door && opts.door.face === face) {
+      for (const door of opts.door ? (Array.isArray(opts.door) ? opts.door : [opts.door]) : []) {
+        if (door.face !== face) continue;
         openings.push({
-          at: opts.door.at, w: opts.door.w ?? KIT.DOOR_W,
-          type: opts.door.kind ?? 'door', h: KIT.DOOR_H,
-          leafColor: opts.door.leafColor, swing: opts.door.swing,
+          at: door.at, w: door.w ?? KIT.DOOR_W,
+          type: door.kind ?? 'door', h: KIT.DOOR_H,
+          leafColor: door.leafColor, swing: door.swing,
         });
       }
       for (const wn of opts.windows ?? []) {
@@ -1059,8 +1086,10 @@ export class Kit {
   }
 
   /** Register an entrance with no leaf (open-front buildings) so the
-   *  reachability audit has a door to start from. */
-  openEntrance(face: Face, at: number, w: number): void {
+   *  reachability audit has a door to start from. `h` is the REAL clear
+   *  height under whatever carries the opening (beam, lintel) — the
+   *  record must never claim less (or more) than the physical aperture. */
+  openEntrance(face: Face, at: number, w: number, h: number = KIT.WALL_H): void {
     const hd = this.d / 2;
     const hw = this.w / 2;
     let lx = at;
@@ -1074,7 +1103,7 @@ export class Kit {
     const outward = this.dir(outwardLocal[0], outwardLocal[1]);
     const worldAxis: 'x' | 'z' = this.rotQ % 2 === 0 ? axis : axis === 'x' ? 'z' : 'x';
     this.doors.push({
-      cx, cz, axis: worldAxis, fixed: worldAxis === 'x' ? cz : cx, w, h: KIT.WALL_H,
+      cx, cz, axis: worldAxis, fixed: worldAxis === 'x' ? cz : cx, w, h,
       kind: 'open', hingeX: 0, hingeZ: 0, leafW: 0, outward, story: 0,
     });
   }
@@ -1098,6 +1127,7 @@ export class Kit {
       stairs: this.stairRecs,
       stairHoles: this.stairHoles,
       exteriorWalls: this.extWalls,
+      windows: this.windowRecs,
       colliders: this.colliders,
       floors: this.floors,
       containers: this.containers,

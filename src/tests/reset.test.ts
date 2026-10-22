@@ -56,14 +56,14 @@ describe('the reset fleet', () => {
     expect(VEHICLE_DEFS[3].kind).toBe('car');
   });
 
-  it('spawns: the GT500 at the lighthouse, the Prime at the airbase, the Sprinter at the marina', () => {
+  it('spawns: the whole fleet at the revamped airbase (Ian 2026-10-21 — a reset puts every vehicle on its pad)', () => {
     expect(VEHICLE_SPAWNS).toHaveLength(3);
     expect(VEHICLE_SPAWNS[0].id).toBe('gt500');
-    expect(VEHICLE_SPAWNS[0].poi).toBe('lighthouse_base');
+    expect(VEHICLE_SPAWNS[0].poi).toBe('airbase');
     expect(VEHICLE_SPAWNS[1].id).toBe('nomad_prime');
     expect(VEHICLE_SPAWNS[1].poi).toBe('airbase');
     expect(VEHICLE_SPAWNS[2].id).toBe('sprinter_van');
-    expect(VEHICLE_SPAWNS[2].poi).toBe('marina');
+    expect(VEHICLE_SPAWNS[2].poi).toBe('airbase');
     expect(DELETED_VEHICLE_IDS).toContain('mustang');
   });
 
