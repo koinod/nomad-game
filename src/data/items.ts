@@ -651,6 +651,14 @@ export const STATION_RECIPES: Record<string, FieldRecipe> = {
     resultId: 'carbine', resultQty: 1,
     skillReq: { skill: 'mechanics', level: 3 },
   },
+  r_gun_parts: {
+    // Order #5 / §6.2 me_masterfab capstone: a Master Fabricator mills
+    // gun_parts at any Weapons Bench. The PERK gate lives in
+    // RECIPE_META (systems/crafting) — enforced by checkCraft.
+    id: 'r_gun_parts', name: 'Gun parts (mill)', station: 'workbench',
+    components: [{ itemId: 'scrap', qty: 3 }, { itemId: 'wire', qty: 1 }],
+    resultId: 'gun_parts', resultQty: 1,
+  },
   r_reload_shells_t2: {
     // Lane 7's proposed T2 shell load, same component ladder as 9mm
     id: 'r_reload_shells_t2', name: 'Reload shells (components)', station: 'workbench',

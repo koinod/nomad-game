@@ -1976,24 +1976,31 @@ export class Game {
     return { ...taken };
   }
 
-  applyRepair(uid: string, kind: 'tire' | 'engine' | 'battery' | 'scrap'): string {
+  /** Repair one vehicle system. `capFrac` is the condition ceiling for
+   *  this repair (Order #5 me_juryrig: field repairs cap at 0.6, 0.8
+   *  with the perk; the store passes 1 at a workshop/garage). */
+  applyRepair(uid: string, kind: 'tire' | 'engine' | 'battery' | 'scrap', capFrac = 1): string {
     const v = this.vehicles.byId(uid);
     if (!v) return 'Vehicle not found.';
+    const capped = (msg: string) =>
+      capFrac < 1 && v.condition >= capFrac - 1e-9
+        ? `${msg} (Field repair limit — a workshop can finish her.)`
+        : msg;
     if (kind === 'tire') {
       v.tiresFlat = Math.max(0, v.tiresFlat - 1);
-      v.condition = Math.min(1, v.condition + 0.03);
+      v.condition = Math.min(capFrac, v.condition + 0.03);
       return v.tiresFlat > 0 ? `One flat swapped — ${v.tiresFlat} to go.` : 'Fresh rubber all round. She rolls true again.';
     }
     if (kind === 'engine') {
-      v.condition = Math.min(1, v.condition + 0.35);
-      return 'Engine work done — timing, seals, the lot.';
+      v.condition = Math.min(capFrac, v.condition + 0.35);
+      return capped('Engine work done — timing, seals, the lot.');
     }
     if (kind === 'battery') {
-      v.condition = Math.min(1, v.condition + 0.25);
-      return 'Fresh battery in. She cranks strong.';
+      v.condition = Math.min(capFrac, v.condition + 0.25);
+      return capped('Fresh battery in. She cranks strong.');
     }
-    v.condition = Math.min(1, v.condition + 0.12);
-    return 'Patched with scrap. It holds.';
+    v.condition = Math.min(capFrac, v.condition + 0.12);
+    return capped('Patched with scrap. It holds.');
   }
 
   canTakeUpgrade(uid: string, upgradeId: string): boolean {

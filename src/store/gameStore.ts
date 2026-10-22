@@ -35,8 +35,8 @@ import {
   type CarriedDest,
 } from './containers';
 import { arrangeItems as arrangeGridItems } from './gridUtils';
-import { applyXp, canBuyPerk, XP_EVENTS } from '../systems/skills';
-import { blockThroughFactor, disassemblyYields } from '../systems/perkEffects';
+import { applyXp, canBuyPerk, meetsSkillReq, skillReqLabel, XP_EVENTS } from '../systems/skills';
+import { blockThroughFactor, disassemblyYields, fieldRepairCap, modPartCost, vehicleRepairCost } from '../systems/perkEffects';
 import { deleteSaveSlot, listSaveSlots, loadGameFromSlot, saveGameToSlot } from '../systems/save';
 import { sfx } from '../systems/audio';
 import { getGame } from '../game/instance';
@@ -816,11 +816,13 @@ export const useGameStore = create<GameState>()((set, get) => {
       if (!row || row.dist > 9) { s.addToast('Get closer to the vehicle to work on it.'); return; }
       // garage bay discount: scrap patch costs 1 at your own base garage
       const atGarage = s.atWorkshop();
-      const cost: { itemId: string; qty: number } =
+      const baseCost: { itemId: string; qty: number } =
         kind === 'tire' ? { itemId: 'tire', qty: 1 }
         : kind === 'engine' ? { itemId: 'engine_part', qty: 1 }
         : kind === 'battery' ? { itemId: 'car_battery', qty: 1 }
         : { itemId: 'scrap', qty: atGarage ? 1 : 2 };
+      // me_grease: vehicle repairs cost 1 fewer part (min 1)
+      const cost = { ...baseCost, qty: vehicleRepairCost(baseCost.qty, s.perks) };
       if (kind === 'tire' && row.tiresFlat <= 0) { s.addToast('No flat tires on it.'); return; }
       if (kind !== 'tire' && row.condPct >= 99) { s.addToast('It\u2019s already in fine shape.'); return; }
       if (s.countItem(cost.itemId) < cost.qty) {
@@ -830,7 +832,10 @@ export const useGameStore = create<GameState>()((set, get) => {
       const it = walkCarried(s.inventory).find((i) => i.itemId === cost.itemId);
       if (!it || !s.removeItem(it.uid, cost.qty)) return;
       const condBefore = row.condPct;
-      const msg = eng.applyRepair(uid, kind);
+      // me_juryrig: field repairs (away from a workshop/garage) cap at
+      // 60% condition — 80% with Jury-Rig. At a workshop the cap is 1.
+      const cap = atGarage ? 1 : fieldRepairCap(s.perks);
+      const msg = eng.applyRepair(uid, kind, cap);
       // Lane 8 vehicle_repaired_full: a repair that tops the vehicle off
       // at 100% condition pays the driver award
       const condAfter = eng.getVehicleStates().find((v) => v.defId === uid)?.condition;
@@ -1223,8 +1228,7 @@ export const useGameStore = create<GameState>()((set, get) => {
         s.addToast(`The ${mdef.slot} mount is taken — detach the current one first.`);
         return;
       }
-      let cost = mdef.gunPartsCost;
-      if (s.perks.includes('me_gunsmith')) cost = Math.max(1, Math.ceil(cost * 0.5));
+      const cost = modPartCost(mdef.gunPartsCost, s.perks);
       if (s.countItem('gun_parts') < cost) {
         s.addToast(`Fitting costs ${cost} gun parts.`);
         return;
@@ -1259,7 +1263,12 @@ export const useGameStore = create<GameState>()((set, get) => {
         inventory: updateCarried(s.inventory, weaponUid, (i) => ({ ...i, mods: (i.mods ?? []).filter((x) => x !== modId) })),
       });
       s.addItem(modId, 1, true);
-      s.addToast(`Removed the ${MODS_ALL[modId]?.name ?? modId}.`);
+      // me_gunsmith ("detach returns the cost too" — the spec's
+      // deliberate double-dip): the fitting cost comes back in gun
+      // parts, computed by the same formula attach charges.
+      const refund = modPartCost(MODS_ALL[modId]?.gunPartsCost ?? 0, s.perks);
+      if (refund > 0) s.addItem('gun_parts', refund, true);
+      s.addToast(`Removed the ${MODS_ALL[modId]?.name ?? modId}${refund > 0 ? ` — ${refund} gun parts back` : ''}.`);
       sfx.play('ui', { volume: 0.4 });
     },
 
@@ -2177,6 +2186,16 @@ export const useGameStore = create<GameState>()((set, get) => {
       // workstation gate: the recipe's station must be within reach
       if (recipe.station && s.nearStation !== recipe.station) {
         s.addToast(`Needs a ${STATION_LABEL[recipe.station]}.`);
+        return;
+      }
+      // Order #5 gate unification: the instant path enforces the
+      // recipe's declared skillReq through the SAME reader the queue
+      // path and the phone's tree use — systems/skills.meetsSkillReq
+      // over the store's skills map (previously this path ignored
+      // skill gates entirely; see skills-audit.md).
+      const req = recipe.skillReq as { skill: import('../data/skills').SkillId; level: number } | undefined;
+      if (req && !meetsSkillReq(s, req)) {
+        s.addToast(`Needs ${skillReqLabel(req)}.`);
         return;
       }
       for (const c of recipe.components) {
