@@ -10,6 +10,7 @@ import * as THREE from 'three';
 import { mulberry32, clamp } from './rng';
 import { buildLighthouse } from './Lighthouse';
 import { buildAirbaseSite } from './airbase';
+import { buildSectors } from './Sectors';
 import { decalPlane } from './modelKit';
 import type { KitBuilding, KitResult } from './kit';
 import type { BiomeId } from './Game';
@@ -306,6 +307,13 @@ export class World {
   airfieldKits: KitResult[] = [];
   /** Apron prop colliders (floodlight poles, windsock). */
   airfieldPropColliders: Collider[] = [];
+  /** The SIX SECTOR STRONGHOLDS (Spec §3.2): kit buildings sited by
+   *  sectorSites.ts over the Beta pads + their ground works (fortress
+   *  containers, palisades, refinery, slips). Game merges these like
+   *  the airbase's. */
+  sectorKits: KitResult[] = [];
+  /** Ground-works prop colliders (fortress tiers, palisade runs…). */
+  sectorPropColliders: Collider[] = [];
   // physical crafting stations: { station, x, z } + their colliders
   stations: { station: StationId; x: number; z: number }[] = [];
   stationColliders: Collider[] = [];
@@ -426,6 +434,7 @@ export class World {
     this.buildCampfires();
     this.buildLighthouse();
     this.buildAirbase();
+    this.buildStrongholds();
     this.buildRelayRuin();
     this.buildRoads();
     this.buildDaymarkers();
@@ -952,6 +961,18 @@ export class World {
     const built = buildAirbaseSite((px, pz) => this.groundY(px, pz));
     this.airfieldKits = built.kits;
     this.airfieldPropColliders = built.propColliders;
+    for (const r of built.kits) this.scene.add(r.group);
+    this.scene.add(built.groundGroup);
+  }
+
+  /** The six sector strongholds (Spec §3.2): gated kit buildings +
+   *  ground works on the surveyed Beta pads. Groups join the scene
+   *  here; colliders/floors/containers ride the fields Game merges
+   *  (same pattern as the airbase kits). */
+  private buildStrongholds(): void {
+    const built = buildSectors((px, pz) => this.groundY(px, pz));
+    this.sectorKits = built.kits;
+    this.sectorPropColliders = built.propColliders;
     for (const r of built.kits) this.scene.add(r.group);
     this.scene.add(built.groundGroup);
   }
