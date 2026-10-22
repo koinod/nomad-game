@@ -26,6 +26,8 @@ import {
 import {
   computeVegPlacements, vegTreeAnchors, vegScatterVeto, VegetationLayer,
 } from './Vegetation';
+import { applyGroundDetail } from './groundDetail';
+import { computeGroundScatter, GroundScatterLayer } from './groundScatter';
 
 export const WORLD = {
   xMin: -700, xMax: 700,
@@ -104,7 +106,7 @@ export interface SkyState {
 const DAY_SKY = new THREE.Color(0x87b5d6);
 const SUNSET_SKY = new THREE.Color(0xd98a52);
 const NIGHT_SKY = new THREE.Color(0x05080f);
-const DAY_FOG = new THREE.Color(0x9db8c8);
+const DAY_FOG = new THREE.Color(0xa9c3d4); // toward the sky horizon (0xc3d7e8) — aerial perspective reads as one air, not a gray veil (ground-graphics lane)
 const NIGHT_FOG = new THREE.Color(0x070b12);
 
 /** Lighting baseline (2026-10-20, Ian's order — "a real sun"): the sky
@@ -422,6 +424,7 @@ export class World {
     this.buildSkyDome();
     this.buildStars();
     this.buildScatter();
+    this.buildGroundScatter();
     // TOTAL PURGE (2026-10-20): every building except the lighthouse is
     // demolished — V4 houses, all POI buildings (incl. the gas station),
     // the airbase complex and the carrier structure are gone. What
@@ -488,6 +491,9 @@ export class World {
     geo.setIndex(indices);
     geo.computeVertexNormals();
     const mat = new THREE.MeshStandardMaterial({ color: 0x6e5c40, roughness: 1 });
+    // same ground grain at a lighter touch — dirt reads at foot level
+    // too; no damp band (the ribbons ride proud of the terrain)
+    applyGroundDetail(mat, { strength: 0.7, normalStrength: 0.35, dampBand: false });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.name = 'roads';
     mesh.receiveShadow = true;
@@ -540,7 +546,7 @@ export class World {
   applyShadowFlags(): void {
     this.scene.traverse((o) => {
       if (!(o instanceof THREE.Mesh)) return;
-      if (o.name === 'terrain' || o.name === 'water' || o.name === 'beam') return;
+      if (o.name === 'terrain' || o.name === 'water' || o.name === 'beam' || o.name === 'ground-scatter') return;
       o.castShadow = true;
       o.receiveShadow = true;
     });
@@ -559,12 +565,26 @@ export class World {
       roughness: 0.95,
       metalness: 0,
     });
+    // Ground detail (2026-10-22 lane): procedural micro/macro octaves
+    // over the zone colors + micro-normal tilt + shoreline damp band
+    // — material-side only; not one height changes (groundDetail.ts).
+    applyGroundDetail(this.terrainMat);
     for (const geo of buildBetaTerrainChunks()) {
       const mesh = new THREE.Mesh(geo, this.terrainMat);
       mesh.name = 'terrain';
       mesh.receiveShadow = true;
       this.scene.add(mesh);
     }
+  }
+
+  /** Foot-level litter (ground-graphics lane): one InstancedMesh of
+   *  pebble/shell/tuft clusters around the sector grounds. Dressing
+   *  only — no colliders, no loot, no interaction (groundScatter.ts).
+   *  It must NOT cast shadows (perf), so applyShadowFlags skips it
+   *  by name below; receiveShadow is set by the layer itself. */
+  private buildGroundScatter(): void {
+    const layer = new GroundScatterLayer(computeGroundScatter(this.seed));
+    this.scene.add(layer.mesh);
   }
 
   private buildWater(): void {
@@ -597,7 +617,11 @@ export class World {
     this.sun.shadow.normalBias = 0.05;
     this.scene.add(this.sun);
     this.scene.add(this.sun.target);
-    this.hemi = new THREE.HemisphereLight(0xbdd3e6, 0x3a4a35, 0.85);
+    // Ground-graphics lane: warmer earth bounce (0x3a4a35 green-gray
+    // read as flat fill) + a touch more sky in the bounce, so lit
+    // ground separates from shadowed ground by COLOR as well as
+    // value. Intensity still comes from the sky palettes (pinned).
+    this.hemi = new THREE.HemisphereLight(0xc7dcee, 0x59503c, 0.85);
     this.scene.add(this.hemi);
     this.moonFill = new THREE.DirectionalLight(0x8fa8d8, 0.0);
     this.moonFill.position.set(-300, 400, -200);
@@ -1170,8 +1194,13 @@ export class World {
     // as dayness → 0) are mixed by the same factor.
     const blend = sunMoonBlend(elev);
     const dayness = clamp(elev * 2.2, 0, 1);
-    this.sun.intensity = (0.25 + dayness * 2.4) * this.skyAdj.sunScale * blend.sun;
-    this.sun.color.setHex(0xfff2dd).lerp(new THREE.Color(0xff9a4e), 1 - dayness);
+    // Ground-graphics lane: a stronger, harder sun (peak 2.65 → 3.25,
+    // still weather-scaled) so slopes actually MODEL — the old peak
+    // sat too close to the hemi+env fill and the ground washed flat.
+    // The ramp keeps a floor so dawn/dusk stay continuous (Item 3).
+    this.sun.intensity = (0.3 + dayness * 2.95) * this.skyAdj.sunScale * blend.sun;
+    // deeper amber at the golden hours to match the stronger key
+    this.sun.color.setHex(0xfff2dd).lerp(new THREE.Color(0xff9040), 1 - dayness);
     this.moonFill.intensity = 0.35 * blend.moon;
     const skyDay = NIGHT_SKY.clone()
       .lerp(SUNSET_SKY, clamp(1 - Math.abs(elev) * 4, 0, 1))
