@@ -181,10 +181,11 @@ describe('sector stronghold kits (Spec §3.2)', () => {
     };
     for (const f of built.features) {
       if (f.kind === 'boat_slip') continue; // water by design, pinned below
-      // the helipad dresses its own pad; the refinery and the yard
-      // floodlights stand in the citadel yard, not the fortress pad
-      const inYard = f.id === 'citadel_refinery' || f.id.startsWith('citadel_floodlight');
-      const pad = f.id === 'ridge_helipad' ? extra('helipad')
+      // the helipad dresses its own pad; the refinery, the yard
+      // floodlights and the greeble yard clutter stand in the
+      // citadel yard, not the fortress pad
+      const inYard = f.id === 'citadel_refinery' || f.id.startsWith('citadel_floodlight') || f.id.startsWith('citadel_yard');
+      const pad = f.id === 'ridge_helipad' || f.id === 'ridge_pad_wear' ? extra('helipad')
         : inYard ? extra('citadel_yard')
         : padRect(f.sector);
       const m = 2.0;

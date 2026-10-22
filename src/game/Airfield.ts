@@ -32,6 +32,7 @@
 // site data (airbaseSite.ts) — nothing here knows where the airbase
 // sits. Ground works (runway/apron/pads) live in airbase.ts.
 
+import * as THREE from 'three';
 import { FURNITURE_LOOT } from '../data/items';
 import { Kit, type KitResult } from './kit';
 import {
@@ -115,6 +116,23 @@ function buildHangar(cx: number, cz: number, rot: 0 | 1 | 2 | 3, groundY: Ground
   k.furnish({ kind: 'toolbox', lx: -15, lz: -11, id: 'hangar_toolbox', loot: FURNITURE_LOOT.toolbox.suburban });
   k.furnish({ kind: 'cabinets', lx: 15, lz: -11, id: 'hangar_cabinet', loot: FURNITURE_LOOT.cabinets.suburban, label: 'Search parts cabinet' });
   k.furnish({ kind: 'crate', lx: 10, lz: 8, id: 'hangar_crate', loot: FURNITURE_LOOT.crate.suburban });
+  // ── greeble (light): a workbench down the west wall and a tire
+  // stack by the mouth's east post — the drive lane stays clear
+  k.box(0.7, 0.08, 4.2, 0x6e5a41, -17.2, 0.95, -4);
+  k.box(0.6, 0.78, 4.1, STEEL_DARK, -17.25, 0.5, -4);
+  k.box(0.4, 0.2, 0.34, 0x8a2f2f, -17.2, 1.09, -5.2);
+  k.obstacle(-17.2, -4, 0.4, 2.15);
+  for (let t = 0; t < 3; t++) {
+    const tire = new THREE.Mesh(
+      new THREE.TorusGeometry(0.36, 0.14, 8, 18),
+      new THREE.MeshStandardMaterial({ color: 0x24262a, roughness: 0.95 }),
+    );
+    tire.rotation.x = Math.PI / 2;
+    tire.position.set(16.8, 0.28 + t * 0.28, 6);
+    tire.castShadow = true;
+    k.detail(tire);
+  }
+  k.obstacle(16.8, 6, 0.48, 0.48);
   k.roomPoint(0, 0, 'hangar floor');
   k.roomPoint(-12, -8, 'hangar stores');
   return k.finalize();
@@ -158,6 +176,14 @@ function buildOps(cx: number, cz: number, rot: 0 | 1 | 2 | 3, groundY: GroundY):
   k.furnish({ kind: 'bookshelf', lx: -6, lz: -6.2, id: 'depot_parts_shelf', loot: FURNITURE_LOOT.bookshelf.suburban, label: 'Search parts shelf' });
   k.furnish({ kind: 'cabinets', lx: 12.5, lz: -6.2, id: 'depot_cabinet', loot: FURNITURE_LOOT.cabinets.suburban, label: 'Search armory stores' });
   k.furnish({ kind: 'crate', lx: -13, lz: 4.5, id: 'depot_crate', loot: FURNITURE_LOOT.crate.suburban, label: 'Search crate' });
+  // ── greeble (light, per the pass's airbase scope): the parts
+  // shelving runs a second unit down the workshop's north wall,
+  // and a pallet stack waits by the bay
+  k.furnish({ kind: 'bookshelf', lx: -2.2, lz: -6.2, id: 'depot_parts_shelf_2', loot: FURNITURE_LOOT.bookshelf.suburban, label: 'Search parts shelf' });
+  k.box(1.2, 0.12, 1.0, 0x77644a, -13.5, 0.2, -5.5);
+  k.box(0.85, 0.85, 0.85, 0x6e5a3e, -13.5, 0.68, -5.5);
+  k.box(0.7, 0.7, 0.7, 0x63512f, -13.45, 1.46, -5.45);
+  k.obstacle(-13.5, -5.5, 0.75, 0.6);
   k.roomPoint(-7, 0, 'depot workshop');
   k.roomPoint(9, 2.5, 'ops office');
   return k.finalize();

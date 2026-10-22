@@ -102,6 +102,15 @@ function buildGroundWorks(site: AirbaseSite, groundY: GroundY): { group: THREE.G
     label.rotation.x = -Math.PI / 2;
     label.position.set(pad.lx, paintY + 0.012, pad.lz);
     g.add(label);
+    // greeble: low corner blocks mark each pad's corners at night
+    // and in the rain — flush enough to roll over, named for the gate
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        const marker = box(g, 0.34, 0.1, 0.34, mat, pad.lx + sx * (pad.hx - 0.4), gy + 0.11, pad.lz + sz * (pad.hz - 0.4));
+        marker.name = 'pad_marker';
+        marker.castShadow = false;
+      }
+    }
   }
 
   // --- floodlight poles (props — the sun does the work) ---
