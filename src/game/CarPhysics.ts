@@ -4,14 +4,19 @@ import { carParams, torqueAt, type CarParams } from './carSpec';
 import { GT500_PARAMS } from './gt500Def';
 import { PRIME_PARAMS } from './primeDef';
 import { SPRINTER_PARAMS } from './sprinterDef';
-import { GROUND_COLS, GROUND_ROWS } from './World';
+import { BETA_COLS, BETA_ROWS, buildBetaRapierHeightfield } from './betaTerrain';
 import type { Vehicle } from './Vehicles';
 
-/** The Rapier heightfield for the ground, built from the ground
- *  field's own nodes sampled through the same groundY the game passes
- *  in (post-bake, heightAt at a node IS the node). One source of
- *  truth — the physics surface and the rendered terrain mesh are the
- *  same field.
+export type RapierHeightfield = ReturnType<typeof buildBetaRapierHeightfield>;
+
+/** The Rapier heightfield for the ground, built by sampling a ground
+ *  function at the Beta grid's nodes (map integration, 2026-10-21:
+ *  the grid is 1120x512 at 1.25 m — betaTerrain.ts is the terrain
+ *  truth; the LIVE world never uses this sampler path, it passes
+ *  buildBetaRapierHeightfield()'s verbatim grid into create()).
+ *  This generic builder remains for tests that probe Rapier's layout
+ *  against synthetic grounds. One source of truth — the physics
+ *  surface and the rendered terrain mesh are the same field.
  *
  *  LAYOUT WARNING (probed twice, 2026-10-21): Rapier's heightfield
  *  swaps its subdivision arguments relative to the world axes — the
@@ -25,13 +30,13 @@ import type { Vehicle } from './Vehicles';
  *  silently again. */
 export function buildRapierHeightfield(
   groundY: (x: number, z: number) => number,
-  cols: number = GROUND_COLS,
-  rows: number = GROUND_ROWS,
+  cols: number = BETA_COLS,
+  rows: number = BETA_ROWS,
   xMin = -700,
   xMax = 700,
   zMin = -320,
   zMax = 320,
-): { heights: Float32Array; nsubdivx: number; nsubdivz: number } {
+): RapierHeightfield {
   const heights = new Float32Array((cols + 1) * (rows + 1));
   for (let ix = 0; ix <= cols; ix++) {
     for (let iz = 0; iz <= rows; iz++) {
@@ -41,7 +46,10 @@ export function buildRapierHeightfield(
     }
   }
   // Rapier: nsubdivx counts the Z nodes, nsubdivz counts the X nodes
-  return { heights, nsubdivx: rows, nsubdivz: cols };
+  return {
+    heights, nsubdivx: rows, nsubdivz: cols,
+    scale: { x: xMax - xMin, y: 1, z: zMax - zMin },
+  };
 }
 
 /**
@@ -296,6 +304,7 @@ export class CarPhysics {
 
   static async create(
     groundY: (x: number, z: number) => number,
+    heightfield?: RapierHeightfield,
   ): Promise<CarPhysics> {
     const cp = new CarPhysics();
     try {
@@ -304,21 +313,31 @@ export class CarPhysics {
       const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
       world.timestep = 1 / 120;
       cp.world = world;
-      // terrain heightfield: the ground field's nodes, verbatim — the
-      // same surface the mesh renders (World.bakeGroundField)
-      const hf = buildRapierHeightfield(groundY);
+      // terrain heightfield: the Beta grid's nodes, verbatim — the
+      // same surface the mesh renders and heightAt samples. The live
+      // game passes buildBetaRapierHeightfield() explicitly; tests
+      // with synthetic grounds fall back to sampling groundY at the
+      // grid's nodes via the generic builder.
+      const hf = heightfield ?? buildRapierHeightfield(groundY);
       const ground = RAPIER.ColliderDesc.heightfield(
-        hf.nsubdivx, hf.nsubdivz, hf.heights, new RAPIER.Vector3(1400, 1, 640),
+        hf.nsubdivx, hf.nsubdivz, hf.heights,
+        new RAPIER.Vector3(hf.scale?.x ?? 1400, hf.scale?.y ?? 1, hf.scale?.z ?? 640),
       );
       ground.setFriction(0.15);
       world.createCollider(ground);
       // seabed safety slab: the heightfield ends at the island rect,
-      // but the sea (and a car in it) does not — a floor just under the
-      // field's minimum (-1.6) spans the whole water plane so nothing
-      // can fall out of the world past the map edge. It sits 0.18 below
-      // the deepest field node, so it never touches on-island physics.
+      // but the sea (and a car in it) does not — a floor under the
+      // field's own minimum spans the whole water plane so nothing
+      // can fall out of the world past the map edge. Its depth is
+      // DERIVED from the field it guards (map integration, 2026-10-21:
+      // the Beta seabed runs to -13.5 m off the east shore and the
+      // dredged channel cuts to -4.2 — the old hard-coded -1.88 slab
+      // would have floored both). Slab top sits 0.2 below the deepest
+      // node, so it never touches on-field physics.
+      let fieldMin = Infinity;
+      for (const h of hf.heights) if (h < fieldMin) fieldMin = h;
       const seabed = RAPIER.ColliderDesc.cuboid(2100, 0.1, 1200)
-        .setTranslation(0, -1.88, 0)
+        .setTranslation(0, fieldMin - 0.3, 0)
         .setFriction(0.3);
       world.createCollider(seabed);
       // NO building/prop colliders are created — vehicle collision is
