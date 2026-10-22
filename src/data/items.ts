@@ -946,7 +946,7 @@ for (const [id, yields] of Object.entries(DISASSEMBLY)) {
 // for the same reason as disassembly: the table stays a pure stat sheet.
 // Long guns run 5×2, handguns 2×2, trauma kit 2×2, small goods 1×1. A stack
 // occupies ONE footprint regardless of qty (the count rides as a badge).
-const FOOTPRINTS: Record<string, [number, number]> = {
+export const FOOTPRINTS: Record<string, [number, number]> = {
   // long guns
   hunting_rifle: [5, 2], dmr: [5, 2], carbine: [5, 2], shotgun: [5, 2],
   smg: [4, 2], crossbow: [4, 2],
@@ -1022,6 +1022,8 @@ export const BARTER_VALUES: Record<string, number> = {
   armored_vest: 90, riot_helmet: 55, shin_guards: 30, plate_carrier: 180,
   // packs + the blueprint economy
   pack_t1: 35, pack_t2: 70, bp_turret: 150, turret: 400,
+  // worn garments + rigid containers (priced like the storage they are)
+  field_jacket: 45, cargo_pants: 30, hard_case: 55, ammo_can: 25,
 };
 
 /** Trader price for one unit; 0 = not tradable. */

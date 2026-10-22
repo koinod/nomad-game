@@ -30,6 +30,7 @@ import {
   type CraftStationId,
 } from '../data/stations';
 import { useGameStore, craftQueueBridge } from '../store/gameStore';
+import { walkCarried } from '../store/containers';
 
 // ---------------------------------------------------------------------------
 // Recipe metadata overlay (§4.1 timers + §4.2/§6.1 gates)
@@ -55,24 +56,41 @@ export const RECIPE_META: Record<string, RecipeMeta> = {
   r_fire_starter: { timeSec: 0 },
   r_flare: { timeSec: 0 },
   r_cooked_meat: { timeSec: 0 },
+  r_rock_lure: { timeSec: 0 },
+  r_produce_meal: { timeSec: 0 },
   // Weapons Bench
   r_reload_9mm: { timeSec: 60 },
   r_reload_shells: { timeSec: 60 },
+  r_reload_9mm_t2: { timeSec: 90 },
+  r_reload_shells_t2: { timeSec: 90 },
   r_bat: { timeSec: 120 },
   r_combat_knife: { timeSec: 180 },
+  r_shin_guards: { timeSec: 240 },
+  r_spear: { timeSec: 240 },
   r_reflex: { timeSec: 300, skillReq: { skill: 'mechanics', level: 1 } },
   r_suppressor: { timeSec: 600, skillReq: { skill: 'mechanics', level: 2 } },
   r_extmag: { timeSec: 300, skillReq: { skill: 'mechanics', level: 1 } },
   r_foregrip: { timeSec: 240 },
   r_laser: { timeSec: 300, skillReq: { skill: 'mechanics', level: 1 } },
+  r_choke: { timeSec: 300, skillReq: { skill: 'mechanics', level: 1 } },
+  r_flashlight: { timeSec: 240 },
+  // Bench firearms mirror the skill gates their recipe data declares
+  // (items.ts skillReq) so the queue enforces what the data promises.
+  r_revolver: { timeSec: 1200, skillReq: { skill: 'mechanics', level: 1 } },
+  r_smg: { timeSec: 2400, skillReq: { skill: 'mechanics', level: 2 } },
+  r_carbine: { timeSec: 3600, skillReq: { skill: 'mechanics', level: 3 } },
   // Chemistry Station
   r_medkit: { timeSec: 300, skillReq: { skill: 'medicine', level: 1 } },
   r_fuel_can: { timeSec: 240 },
+  r_gunpowder: { timeSec: 300 },
+  r_molotov: { timeSec: 180 },
+  r_smoke_grenade: { timeSec: 300, skillReq: { skill: 'mechanics', level: 1 } },
   // Machine Shop
   r_tire: { timeSec: 900 },
   r_engine_part: { timeSec: 3600, stationTier: 3 },
   r_car_battery: { timeSec: 1200 },
   r_armor_plate: { timeSec: 2400, stationTier: 3 },
+  r_circuit_board: { timeSec: 1200, stationTier: 3 },
   // Turret (§4.3) — the only blueprint-gated craft in the game.
   r_turret: {
     timeSec: 10 * 3600,
@@ -374,7 +392,12 @@ function consumeComponents(recipe: FieldRecipe): boolean {
   for (const c of recipe.components) {
     let left = c.qty;
     while (left > 0) {
-      const it = [...s.inventory].reverse().find((i) => i.itemId === c.itemId);
+      // Carried forest, not just the top level: components nested in a
+      // worn pack's contents count toward the craft (checkCraft counts
+      // them via countItem) — consuming only s.inventory here made the
+      // queue refuse/under-consume exactly those crafts (Order #4 C1).
+      // Same reverse-walk the instant path (gameStore.craftRecipe) uses.
+      const it = [...walkCarried(s.inventory)].reverse().find((i) => i.itemId === c.itemId);
       if (!it) break;
       const take = Math.min(it.qty, left);
       s.removeItem(it.uid, take);
