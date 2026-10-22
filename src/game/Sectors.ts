@@ -61,6 +61,44 @@ const GLASSY = 0x9fc4d8;
 
 // ------------------------------------------------------------- kit helpers
 
+/** A cylinder as kit detail (vents, tanks, drums inside rooms) —
+ *  visual only; pair with k.obstacle where it stands on the floor. */
+function kitCyl(k: Kit, r: number, h: number, color: number, x: number, y: number, z: number, opts: { seg?: number; rz?: number; rx?: number } = {}): THREE.Mesh {
+  const m = new THREE.Mesh(
+    new THREE.CylinderGeometry(r, r, h, opts.seg ?? 12),
+    new THREE.MeshStandardMaterial({ color, roughness: 0.85 }),
+  );
+  m.position.set(x, y, z);
+  if (opts.rz) m.rotation.z = opts.rz;
+  if (opts.rx) m.rotation.x = opts.rx;
+  m.castShadow = true;
+  k.detail(m);
+  return m;
+}
+
+/** A tire as kit detail (stacks in the workshops) — visual only. */
+function kitTire(k: Kit, x: number, y: number, z: number): void {
+  const m = new THREE.Mesh(
+    new THREE.TorusGeometry(0.33, 0.13, 8, 18),
+    new THREE.MeshStandardMaterial({ color: 0x24262a, roughness: 0.95 }),
+  );
+  m.rotation.x = Math.PI / 2;
+  m.position.set(x, y, z);
+  m.castShadow = true;
+  k.detail(m);
+}
+
+/** An emissive lamp face (detail mesh) — the fixture convention:
+ *  emissive only, never a real light source; the sun does the work. */
+function kitLampFace(k: Kit, w: number, h: number, x: number, y: number, z: number): void {
+  const m = new THREE.Mesh(
+    new THREE.BoxGeometry(w, h, 0.03),
+    new THREE.MeshStandardMaterial({ color: 0x38301e, emissive: 0xffca7a, emissiveIntensity: 1.2, roughness: 0.6 }),
+  );
+  m.position.set(x, y, z);
+  k.detail(m);
+}
+
 function baseAt(cx: number, cz: number, groundY: GroundY): number {
   // the pads are formula-flat; take the min corner so foundations seat
   return Math.min(
@@ -78,7 +116,7 @@ function baseAt(cx: number, cz: number, groundY: GroundY): number {
  */
 function buildContainerRoom(
   id: string, cx: number, cz: number, rot: 0 | 1 | 2 | 3, groundY: GroundY,
-  shell: number, opts: { npc?: boolean; label: string; lootKind: 'camp' | 'suburban' },
+  shell: number, opts: { npc?: boolean; label: string; lootKind: 'camp' | 'suburban'; dress: 'office' | 'store' | 'lab' },
 ): KitResult {
   const k = new Kit(id, cx, cz, rot, baseAt(cx, cz, groundY), 12.2, 2.9, 1);
   k.foundation(0x74706a);
@@ -112,6 +150,58 @@ function buildContainerRoom(
   k.obstacle(1.4, -1.05, 2.35, 0.35);
   k.furnish({ kind: 'cabinets', lx: -5.2, lz: -1.05, id: `${id}_cabinets`, loot: FURNITURE_LOOT.cabinets[opts.lootKind], label: `Search ${opts.label} cabinets` });
   k.furnish({ kind: 'crate', lx: 5.4, lz: 0.9, id: `${id}_crate`, loot: FURNITURE_LOOT.crate[opts.lootKind], label: `Search ${opts.label} crate` });
+  // ── greeble: the low shelf run under the south windows (kept under
+  // the sill line so the rooms' daylight throw survives), dressed per
+  // role below
+  k.box(3.2, 0.06, 0.5, TIMBER, 2.9, 0.5, 0.88);
+  k.box(3.2, 0.06, 0.5, TIMBER, 2.9, 0.88, 0.88);
+  k.box(0.06, 0.9, 0.5, TIMBER_DARK, 1.35, 0.45, 0.88);
+  k.box(0.06, 0.9, 0.5, TIMBER_DARK, 4.45, 0.45, 0.88);
+  k.obstacle(2.9, 0.88, 1.65, 0.28);
+  if (opts.dress === 'office') {
+    // the watch-keeper's bunk at the east end (clear of the door
+    // leaf's rest strip on the south wall): two-tier frame,
+    // army-blanket mattresses, a lantern over the door
+    for (const px of [4.95, 5.75]) {
+      for (const pz of [-1.6, 0.2]) k.box(0.08, 1.6, 0.08, TIMBER_DARK, px, 0.94, pz);
+    }
+    k.box(0.95, 0.09, 1.95, 0x707a5e, 5.35, 0.5, -0.7);
+    k.box(0.95, 0.09, 1.95, 0x707a5e, 5.35, 1.38, -0.7);
+    k.box(0.5, 0.07, 0.4, 0xd8d4c8, 5.35, 0.58, -1.35);
+    k.obstacle(5.35, -0.7, 0.55, 1.05);
+    k.box(0.34, 0.14, 0.2, STEEL_DARK, -3.6, 2.62, 1.32);
+    kitLampFace(k, 0.24, 0.08, -3.6, 2.6, 1.44);
+    // ledgers + a kettle on the shelf
+    k.box(0.3, 0.22, 0.24, 0x8a3b3b, 2.5, 1.02, 0.88);
+    k.box(0.26, 0.18, 0.2, 0x3b5a8a, 2.85, 1.0, 0.88);
+    kitCyl(k, 0.09, 0.16, STEEL_DARK, 3.6, 0.99, 0.88, { seg: 8 });
+  } else if (opts.dress === 'store') {
+    // freight staged at the west end, clear of the door opening
+    // and its leaf: a two-high crate stack + drums of smalls
+    k.box(0.92, 0.92, 0.92, 0x6e5a3e, -5.3, 0.6, 0.1);
+    k.box(0.92, 0.92, 0.92, 0x63512f, -5.3, 1.52, 0.1);
+    k.obstacle(-5.3, 0.1, 0.5, 0.5);
+    kitCyl(k, 0.3, 0.9, 0x51606e, 5.5, 0.59, -0.75);
+    kitCyl(k, 0.3, 0.9, 0x746a52, 4.85, 0.59, -0.85);
+    k.obstacle(5.2, -0.8, 0.7, 0.4);
+    // tins + sacks on the shelf boards
+    k.box(0.5, 0.3, 0.34, 0x8a7a3b, 1.9, 1.06, 0.88);
+    k.box(0.44, 0.26, 0.3, 0x9a8a76, 3.3, 1.04, 0.88);
+    k.box(0.4, 0.34, 0.3, 0x707a5e, 3.85, 1.08, 0.88);
+  } else {
+    // lab: standing gas tanks at the east end + sample jars riding
+    // the bench, reagent tins on the shelf
+    kitCyl(k, 0.34, 1.7, 0x7a8a72, 5.35, 0.99, -0.55);
+    kitCyl(k, 0.34, 1.7, 0x8a7a4a, 4.55, 0.99, -0.75);
+    k.box(0.72, 0.08, 0.3, STEEL_DARK, 4.95, 1.9, -0.65);
+    k.obstacle(4.95, -0.65, 0.85, 0.42);
+    for (let i = 0; i < 5; i++) {
+      kitCyl(k, 0.055, 0.2, i % 2 ? 0xbfd8c8 : 0xd8cfae, 0.1 + i * 0.75, 1.09, -1.05, { seg: 8 });
+    }
+    k.box(0.34, 0.26, 0.26, 0xb9bdc0, 2.2, 1.04, 0.88);
+    k.box(0.3, 0.2, 0.24, 0x8a4a3a, 2.65, 1.01, 0.88);
+    kitCyl(k, 0.08, 0.24, 0x3f7a8a, 3.4, 1.03, 0.88, { seg: 8 });
+  }
   if (opts.npc) k.npcPoint(0.5, 0.6);
   k.roomPoint(0, 0.4, opts.label);
   return k.finalize();
@@ -125,7 +215,7 @@ function buildContainerRoom(
  */
 function buildCanopyShelter(
   id: string, cx: number, cz: number, rot: 0 | 1 | 2 | 3, groundY: GroundY,
-  w: number, d: number, clearH: number, opts: { label: string; lootKind: 'camp' | 'suburban'; backWall?: boolean },
+  w: number, d: number, clearH: number, opts: { label: string; lootKind: 'camp' | 'suburban'; backWall?: boolean; dress?: 'ops' | 'shore' | 'gear' },
 ): KitResult {
   const baseY = baseAt(cx, cz, groundY);
   const k = new Kit(id, cx, cz, rot, baseY, w, d, 1);
@@ -145,6 +235,48 @@ function buildCanopyShelter(
   k.roofCanopy(0xb9bdc0, STEEL_DARK, clearH);
   k.furnish({ kind: 'crate', lx: -hw + 1.6, lz: -hd + 1.4, id: `${id}_crate`, loot: FURNITURE_LOOT.crate[opts.lootKind], label: `Search ${opts.label} crate` });
   k.furnish({ kind: 'toolbox', lx: hw - 1.7, lz: -hd + 1.3, id: `${id}_toolbox`, loot: FURNITURE_LOOT.toolbox[opts.lootKind], label: `Search ${opts.label} toolbox` });
+  // ── greeble: each shelter works a trade — drums + a bench for the
+  // ops yard, a tool wall for the shore shed, net gear for the harbor
+  if (opts.dress === 'ops') {
+    for (const [dx, dz, c] of [[-5.6, 0.6, 0x51606e], [-4.95, 1.05, 0x8a4a3a], [-5.45, 1.65, 0x424c52]] as [number, number, number][]) {
+      kitCyl(k, 0.3, 0.9, c, dx, 0.59, dz);
+    }
+    k.obstacle(-5.3, 1.05, 0.8, 0.85);
+    k.box(0.6, 0.08, 3.4, TIMBER, -6.35, 0.92, -0.8);
+    k.box(0.55, 0.78, 3.3, STEEL_DARK, -6.38, 0.5, -0.8);
+    k.obstacle(-6.35, -0.8, 0.35, 1.75);
+    k.box(0.3, 0.2, 0.24, 0x8a2f2f, -6.35, 1.06, -1.6);
+    k.box(0.24, 0.16, 0.2, 0x3a3d40, -6.35, 1.04, 0.1);
+  } else if (opts.dress === 'shore') {
+    // the tool wall: pegboard over a bench on the back wall, tools
+    // hung as dark shapes, a parts bin below
+    k.box(3.6, 1.1, 0.05, TIMBER_DARK, 0, 1.65, -2.18);
+    k.box(3.6, 0.08, 0.55, TIMBER, 0, 0.92, -1.9);
+    k.box(3.5, 0.8, 0.45, STEEL_DARK, 0, 0.45, -1.93);
+    k.obstacle(0, -1.9, 1.85, 0.32);
+    for (const [tx, tw, th] of [[-1.3, 0.1, 0.5], [-0.7, 0.16, 0.34], [0.1, 0.1, 0.55], [0.8, 0.2, 0.28], [1.35, 0.09, 0.44]] as [number, number, number][]) {
+      k.box(tw, th, 0.04, 0x2c2f33, tx, 1.7, -2.14);
+    }
+    k.box(0.5, 0.3, 0.34, 0xc8a03a, -1.2, 1.11, -1.9);
+    kitCyl(k, 0.26, 0.75, 0x746a52, 3.6, 0.51, 1.6);
+    k.obstacle(3.6, 1.6, 0.35, 0.35);
+  } else if (opts.dress === 'gear') {
+    // a net reel on stands + buoys hung off the back wall + a crate
+    // stack by the post
+    kitCyl(k, 0.55, 1.4, 0x2e4a34, -3.2, 0.85, 0.8, { rz: Math.PI / 2, seg: 14 });
+    k.box(0.14, 0.85, 0.7, TIMBER_DARK, -3.95, 0.42, 0.8);
+    k.box(0.14, 0.85, 0.7, TIMBER_DARK, -2.45, 0.42, 0.8);
+    k.obstacle(-3.2, 0.8, 0.85, 0.45);
+    for (const [bx, bc] of [[1.4, 0xd8622a], [2.1, 0xc23b2a], [2.8, 0xe8e4da]] as [number, number][]) {
+      const s = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), new THREE.MeshStandardMaterial({ color: bc, roughness: 0.7 }));
+      s.position.set(bx, 1.95, -2.62);
+      s.castShadow = true;
+      k.detail(s);
+    }
+    k.box(0.8, 0.8, 0.8, 0x6e5a3e, 3.9, 0.54, 1.9);
+    k.box(0.7, 0.7, 0.7, 0x77644a, 3.85, 1.29, 1.85);
+    k.obstacle(3.9, 1.9, 0.5, 0.5);
+  }
   k.openEntrance('S', 0, Math.min(8, w - 3), clearH);
   k.roomPoint(0, 0.5, opts.label);
   return k.finalize();
@@ -191,6 +323,23 @@ function buildWatchtower(
   });
   k.roofFlat(ROOF, TRIM);
   k.furnish({ kind: 'cabinets', lx: -2.2, lz: -2.2, story: stories - 1, id: `${id}_cabinet`, loot: FURNITURE_LOOT.cabinets[opts.lootKind], label: `Search ${opts.label} cabinet` });
+  // ── greeble: the cab works a watch desk under the south glass
+  // (story-2 floor top is local 6.14) with a radio on it; a toolbox
+  // waits by the ground-floor door swing's clear corner
+  const cabFloor = 6.14;
+  k.box(2.6, 0.06, 0.6, TIMBER, 0, cabFloor + 0.74, 2.45);
+  k.box(0.08, 0.72, 0.5, TIMBER_DARK, -1.2, cabFloor + 0.37, 2.45);
+  k.box(0.08, 0.72, 0.5, TIMBER_DARK, 1.2, cabFloor + 0.37, 2.45);
+  k.box(0.5, 0.24, 0.34, STEEL_DARK, -0.7, cabFloor + 0.89, 2.45);
+  const radioDot = new THREE.Mesh(
+    new THREE.BoxGeometry(0.05, 0.05, 0.03),
+    new THREE.MeshStandardMaterial({ color: 0x1e2a1e, emissive: 0x51ff7a, emissiveIntensity: 1.3 }),
+  );
+  radioDot.position.set(-0.55, cabFloor + 0.92, 2.27);
+  k.detail(radioDot);
+  k.box(0.42, 0.3, 0.3, 0xcfc8a8, 0.55, cabFloor + 0.92, 2.45);
+  k.obstacle(0, 2.45, 1.35, 0.35, stories - 1);
+  k.furnish({ kind: 'toolbox', lx: -1.9, lz: 1.9, id: `${id}_toolbox`, loot: FURNITURE_LOOT.toolbox[opts.lootKind], label: `Search ${opts.label} toolbox` });
   k.roomPoint(0, 0, `${opts.label} cab`);
   k.npcPoint(-1.5, 1.5);
   return k.finalize();
@@ -231,6 +380,41 @@ function buildRidgeBunker(cx: number, cz: number, rot: 0 | 1 | 2 | 3, groundY: G
   k.furnish({ kind: 'crate', lx: -6.8, lz: -4.4, id: 'ridge_bunker_crate_1', loot: FURNITURE_LOOT.crate.camp, label: 'Search bunker crate' });
   k.furnish({ kind: 'crate', lx: -6.8, lz: 3.8, id: 'ridge_bunker_crate_2', loot: FURNITURE_LOOT.crate.camp, label: 'Search bunker crate' });
   k.furnish({ kind: 'toolbox', lx: 6.6, lz: 4.2, id: 'ridge_bunker_toolbox', loot: FURNITURE_LOOT.toolbox.camp, label: 'Search bunker toolbox' });
+  // ── greeble: the ops room works — a map table mid-room, a comms
+  // rack on the east wall; the stores room sleeps two bunks + a
+  // dresser against the west wall
+  k.box(2.3, 0.07, 1.25, TIMBER, 4.4, 0.82, -1.3);
+  for (const [lx, lz] of [[3.4, -1.8], [5.4, -1.8], [3.4, -0.8], [5.4, -0.8]] as [number, number][]) {
+    k.box(0.09, 0.68, 0.09, TIMBER_DARK, lx, 0.48, lz);
+  }
+  k.box(1.9, 0.02, 1.0, 0xcfc8a8, 4.4, 0.87, -1.3);
+  k.box(0.22, 0.05, 0.16, 0xc23b2a, 3.9, 0.9, -1.5);
+  k.box(0.22, 0.05, 0.16, 0x3b5a8a, 4.8, 0.9, -1.05);
+  k.box(0.18, 0.05, 0.14, 0x8a7a3b, 4.45, 0.9, -1.62);
+  k.obstacle(4.4, -1.3, 1.2, 0.68);
+  k.box(0.55, 1.9, 1.1, STEEL_DARK, 7.35, 1.09, -1.6);
+  k.box(0.5, 0.06, 1.0, 0x2c2f33, 7.33, 0.6, -1.6);
+  k.box(0.5, 0.06, 1.0, 0x2c2f33, 7.33, 1.15, -1.6);
+  k.box(0.5, 0.06, 1.0, 0x2c2f33, 7.33, 1.7, -1.6);
+  for (let i = 0; i < 4; i++) {
+    const dot = new THREE.Mesh(
+      new THREE.BoxGeometry(0.03, 0.05, 0.09),
+      new THREE.MeshStandardMaterial({ color: 0x1e2a1e, emissive: i % 2 ? 0x51ff7a : 0xffca7a, emissiveIntensity: 1.3 }),
+    );
+    dot.position.set(7.05, 0.85 + i * 0.28, -1.85 + (i % 2) * 0.45);
+    k.detail(dot);
+  }
+  k.obstacle(7.35, -1.6, 0.35, 0.6);
+  for (const bx of [-4.4, -2.1]) {
+    for (const [px, pz] of [[bx - 0.95, -5.25], [bx + 0.95, -5.25], [bx - 0.95, -4.4], [bx + 0.95, -4.4]] as [number, number][]) {
+      k.box(0.08, 1.55, 0.08, TIMBER_DARK, px, 0.91, pz);
+    }
+    k.box(1.95, 0.09, 0.88, 0x707a5e, bx, 0.48, -4.82);
+    k.box(1.95, 0.09, 0.88, 0x707a5e, bx, 1.36, -4.82);
+    k.box(0.55, 0.07, 0.4, 0xd8d4c8, bx - 0.6, 0.56, -4.82);
+    k.obstacle(bx, -4.82, 1.02, 0.5);
+  }
+  k.furnish({ kind: 'dresser', lx: -7.35, lz: 0.9, rot: 1, id: 'ridge_bunker_dresser', loot: FURNITURE_LOOT.dresser.camp, label: 'Search bunker dresser' });
   k.npcPoint(5.2, -2.5);
   k.roomPoint(-4, 0, 'bunker stores');
   k.roomPoint(5, 1.5, 'bunker ops');
@@ -263,8 +447,29 @@ function buildGateTower(
   const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.5, 8), new THREE.MeshStandardMaterial({ color: 0xc23b2a, roughness: 0.5 }));
   lamp.position.set(0, 6.6, 0);
   k.detail(lamp);
+  // ── greeble: a floodlight fixture on the roof's road-side corner
+  // (emissive face only — no real light) + a lantern by the door
+  const fx = doorFace === 'E' ? 1.45 : -1.45;
+  const out = doorFace === 'E' ? 1 : -1;
+  k.box(0.09, 0.55, 0.09, STEEL_DARK, fx, 6.42, -1.2);
+  k.box(0.34, 0.24, 0.52, STEEL_DARK, fx + out * 0.14, 6.78, -1.2);
+  const floodFace = new THREE.Mesh(
+    new THREE.BoxGeometry(0.03, 0.16, 0.42),
+    new THREE.MeshStandardMaterial({ color: 0x38301e, emissive: 0xffca7a, emissiveIntensity: 1.2, roughness: 0.6 }),
+  );
+  floodFace.position.set(fx + out * 0.32, 6.78, -1.2);
+  k.detail(floodFace);
+  const lx2 = doorFace === 'E' ? 2.02 : -2.02;
+  k.box(0.1, 0.24, 0.2, STEEL_DARK, lx2, 2.5, 0.95);
+  const doorLamp = new THREE.Mesh(
+    new THREE.BoxGeometry(0.04, 0.15, 0.13),
+    new THREE.MeshStandardMaterial({ color: 0x38301e, emissive: 0xffca7a, emissiveIntensity: 1.2, roughness: 0.6 }),
+  );
+  doorLamp.position.set(lx2 + out * 0.05, 2.5, 0.95);
+  k.detail(doorLamp);
   // the crate stands in the corner AWAY from the door leaf's rest
   k.furnish({ kind: 'crate', lx: doorFace === 'E' ? -1.2 : 1.25, lz: doorFace === 'E' ? -1.2 : 1.25, id: `${id}_crate`, loot: FURNITURE_LOOT.crate.suburban, label: 'Search gate crate' });
+  k.furnish({ kind: 'toolbox', lx: doorFace === 'E' ? -1.25 : 1.25, lz: doorFace === 'E' ? 1.25 : -1.25, id: `${id}_toolbox`, loot: FURNITURE_LOOT.toolbox.suburban, label: 'Search gate toolbox' });
   k.roomPoint(0, 0, 'gate post');
   k.npcPoint(0.8, -0.8);
   return k.finalize();
@@ -306,6 +511,27 @@ function buildTruckHall(cx: number, cz: number, rot: 0 | 1 | 2 | 3, groundY: Gro
   k.furnish({ kind: 'toolbox', lx: -11.5, lz: -7.6, id: 'citadel_hall_toolbox', loot: FURNITURE_LOOT.toolbox.suburban, label: 'Search hall toolbox' });
   k.furnish({ kind: 'cabinets', lx: 11.5, lz: -7.8, id: 'citadel_hall_cabinets', loot: FURNITURE_LOOT.cabinets.suburban, label: 'Search hall parts cabinet' });
   k.furnish({ kind: 'crate', lx: -11.5, lz: 5.5, id: 'citadel_hall_crate', loot: FURNITURE_LOOT.crate.suburban, label: 'Search hall crate' });
+  // ── greeble: rolling tool chests flank the lifts, a workbench
+  // runs the north wall under the window, tires stack by the mouth,
+  // and the beam over the drive-in carries the hall's name
+  for (const sx of [-1, 1]) {
+    k.box(1.1, 1.05, 0.55, 0x8a2f2f, sx * 10.8, 0.66, -3.5);
+    k.box(1.14, 0.06, 0.58, STEEL_DARK, sx * 10.8, 1.21, -3.5);
+    for (let d = 0; d < 3; d++) k.box(1.0, 0.04, 0.02, 0x2c2f33, sx * 10.8, 0.45 + d * 0.25, -3.21);
+    k.obstacle(sx * 10.8, -3.5, 0.6, 0.33);
+  }
+  k.box(5.0, 0.08, 0.7, TIMBER, 0, 0.95, -8.35);
+  k.box(5.0, 0.8, 0.6, STEEL_DARK, 0, 0.5, -8.38);
+  k.box(0.34, 0.22, 0.3, 0x8a2f2f, -1.8, 1.1, -8.35);
+  k.box(0.5, 0.14, 0.36, 0x51606e, 1.5, 1.06, -8.35);
+  k.obstacle(0, -8.35, 2.55, 0.4);
+  kitTire(k, 11.9, 0.27, 6.8);
+  kitTire(k, 11.9, 0.53, 6.8);
+  kitTire(k, 11.85, 0.79, 6.75);
+  k.obstacle(11.9, 6.8, 0.45, 0.45);
+  const sign = decalPlane('FREIGHT', 2.6, 'rgba(232,200,74,0.95)', 44);
+  sign.position.set(0, 4.6, 9.08);
+  k.addDetail(sign);
   k.roomPoint(0, -2, 'truck hall');
   k.roomPoint(-9, -5, 'hall workshop');
   return k.finalize();
@@ -351,6 +577,23 @@ function buildRadarTower(cx: number, cz: number, rot: 0 | 1 | 2 | 3, groundY: Gr
   k.detail(arm);
   k.furnish({ kind: 'cabinets', lx: -1.8, lz: -1.85, id: 'lighthouse_radar_cabinets', loot: FURNITURE_LOOT.cabinets.suburban, label: 'Search radar stores' });
   k.furnish({ kind: 'crate', lx: 1.8, lz: 1.6, id: 'lighthouse_radar_crate', loot: FURNITURE_LOOT.crate.suburban, label: 'Search radar crate' });
+  // ── greeble: the watch console on the cab's south wall (story-1
+  // floor top is local 3.14) — a desk run, two stools, tilted scope
+  // screens glowing over it
+  k.box(2.6, 0.72, 0.6, STEEL_DARK, -0.5, 3.14 + 0.36, 1.85);
+  k.box(2.7, 0.05, 0.68, TIMBER_DARK, -0.5, 3.14 + 0.75, 1.85);
+  for (let i = 0; i < 3; i++) {
+    const scr = new THREE.Mesh(
+      new THREE.BoxGeometry(0.68, 0.44, 0.04),
+      new THREE.MeshStandardMaterial({ color: 0x10181a, emissive: 0x3f7a5e, emissiveIntensity: 0.9, roughness: 0.4 }),
+    );
+    scr.position.set(-1.35 + i * 0.85, 4.12, 1.66);
+    scr.rotation.x = -0.28;
+    k.detail(scr);
+  }
+  k.box(0.42, 0.45, 0.42, TIMBER_DARK, -1.1, 3.14 + 0.22, 1.0);
+  k.box(0.42, 0.45, 0.42, TIMBER_DARK, 0.1, 3.14 + 0.22, 1.0);
+  k.obstacle(-0.5, 1.85, 1.35, 0.35, 1);
   k.roomPoint(0, 0.4, 'radar shack');
   k.npcPoint(1.4, -1.2);
   return k.finalize();
@@ -392,6 +635,35 @@ function buildChapel(cx: number, cz: number, rot: 0 | 1 | 2 | 3, groundY: Ground
   bed(-5.2, 2.8);
   bed(-3.9, 2.8);
   bed(4.85, 2.8);
+  // ── greeble: curtains hang at the bay mouths (cloth — no
+  // collider, the bays stay walkable), pews fill the sanctuary in
+  // two rows off a clear center aisle, and a supply shelf works
+  // the infirmary's south wall between cabinet and cooler
+  for (const sx of [-2.2, 2.2]) {
+    kitCyl(k, 0.025, 1.9, STEEL_DARK, sx, 2.34, 2.55, { rx: Math.PI / 2, seg: 6 });
+    k.box(0.05, 1.85, 1.7, 0x9a8a7a, sx, 1.38, 2.55, 0.95);
+  }
+  for (const sx of [-2.9, 2.9]) {
+    for (const zz of [-1.7, -3.3]) {
+      k.box(2.6, 0.1, 0.48, TIMBER, sx, 0.62, zz);
+      k.box(2.6, 0.55, 0.09, TIMBER, sx, 1.0, zz - 0.26);
+      k.box(0.12, 0.5, 0.4, TIMBER_DARK, sx - 1.1, 0.37, zz);
+      k.box(0.12, 0.5, 0.4, TIMBER_DARK, sx + 1.1, 0.37, zz);
+      k.obstacle(sx, zz, 1.35, 0.32);
+    }
+  }
+  // supply shelves flank the door (its leaf rests between them)
+  for (const sx of [-2.0, 2.1]) {
+    k.box(1.3, 0.05, 0.44, TIMBER, sx, 0.62, 4.02);
+    k.box(1.3, 0.05, 0.44, TIMBER, sx, 1.14, 4.02);
+    k.box(0.06, 1.24, 0.4, TIMBER_DARK, sx - 0.62, 0.74, 4.02);
+    k.box(0.06, 1.24, 0.4, TIMBER_DARK, sx + 0.62, 0.74, 4.02);
+    k.obstacle(sx, 4.02, 0.68, 0.26);
+  }
+  k.box(0.34, 0.24, 0.3, 0xd8d4c8, -2.3, 1.29, 4.02);
+  k.box(0.3, 0.2, 0.26, 0xc23b2a, -1.8, 1.27, 4.02);
+  k.box(0.38, 0.3, 0.3, 0x8a6f4d, 2.2, 1.32, 4.02);
+  k.box(0.3, 0.22, 0.26, 0xd8d4c8, 1.75, 0.76, 4.02);
   k.roofGable(2.2, ROOF, STONE);
   // the cross on the east gable peak — two plain timbers
   k.box(0.1, 1.0, 0.14, TIMBER_DARK, 6.56, 5.55, 0);
@@ -432,6 +704,21 @@ function buildGreenhouse(id: string, cx: number, cz: number, rot: 0 | 1 | 2 | 3,
     k.box(9, 0.3, 0.8, 0x4a7a3a, 0, 1.1, rz, 0.95);
     k.obstacle(0, rz, 4.5, 0.5);
   }
+  // ── greeble: planted rows on the benches (tufted crops in the
+  // soil band), an irrigation line over each bench fed from a
+  // header tank at the west end of the aisle
+  const cropGreens = [0x55803e, 0x649048, 0x4a7a3a, 0x6a9a4a];
+  for (const rz of [-1.4, 1.4]) {
+    kitCyl(k, 0.03, 9, 0x8a9296, 0, 1.58, rz, { rz: Math.PI / 2, seg: 8 });
+    for (let i = 0; i < 10; i++) {
+      const tx = -4 + i * 0.89;
+      k.box(0.36, 0.24, 0.32, cropGreens[i % 4], tx, 1.37, rz + (i % 2 ? 0.14 : -0.14), 0.95);
+      k.box(0.2, 0.14, 0.18, cropGreens[(i + 2) % 4], tx + 0.3, 1.32, rz - (i % 2 ? 0.12 : -0.12), 0.95);
+    }
+  }
+  kitCyl(k, 0.42, 1.25, 0xb9bdc0, -5.15, 0.76, 0, { seg: 14 });
+  kitCyl(k, 0.3, 0.18, STEEL_DARK, -5.15, 1.47, 0, { seg: 14 });
+  k.obstacle(-5.15, 0, 0.48, 0.48);
   k.furnish({ kind: 'crate', lx: -5.2, lz: 2.3, id: `${id}_crate`, loot: FURNITURE_LOOT.crate.suburban, label: 'Search greenhouse crate' });
   k.furnish({ kind: 'cooler', lx: -5.2, lz: -2.3, id: `${id}_cooler`, loot: FURNITURE_LOOT.cooler.suburban, label: 'Search produce cooler' });
   k.roomPoint(0, 0, 'greenhouse');
@@ -459,6 +746,20 @@ function buildIcehouse(cx: number, cz: number, rot: 0 | 1 | 2 | 3, groundY: Grou
     k.box(0.95, 0.5, 0.62, 0xd8e8ee, -1.2 + i * 1.05, 0.9, -3.0, 0.3);
   }
   k.obstacle(0, -3.0, 1.7, 0.4);
+  // ── greeble: the day's work happens outside the south door — a
+  // fish table with the catch laid out, crates stacked beside it
+  k.box(1.9, 0.07, 0.85, 0xd8d4c8, 2.5, 0.95, 5.4);
+  k.box(1.7, 0.05, 0.65, TIMBER_DARK, 2.5, 0.45, 5.4);
+  for (const [lx, lz] of [[1.7, 5.1], [3.3, 5.1], [1.7, 5.7], [3.3, 5.7]] as [number, number][]) {
+    k.box(0.09, 0.9, 0.09, TIMBER_DARK, lx, 0.48, lz);
+  }
+  k.box(0.55, 0.1, 0.22, 0x9fc4d8, 2.1, 1.04, 5.3, 0.4);
+  k.box(0.45, 0.09, 0.2, 0x8fb0c2, 2.85, 1.03, 5.5, 0.4);
+  kitCyl(k, 0.16, 0.3, 0x51606e, 3.6, 0.29, 5.5, { seg: 10 });
+  k.obstacle(2.5, 5.4, 1.0, 0.48);
+  k.box(0.85, 0.85, 0.85, 0x6e5a3e, -3.6, 0.56, 4.7);
+  k.box(0.75, 0.75, 0.75, 0x77644a, -3.55, 1.36, 4.65);
+  k.obstacle(-3.6, 4.7, 0.5, 0.5);
   k.furnish({ kind: 'fridge', lx: -4.6, lz: -3.1, id: 'pier_icehouse_fridge_1', loot: FURNITURE_LOOT.fridge.camp, label: 'Search icehouse cold store' });
   k.furnish({ kind: 'fridge', lx: -3.6, lz: -3.1, id: 'pier_icehouse_fridge_2', loot: FURNITURE_LOOT.fridge.camp, label: 'Search icehouse cold store' });
   k.furnish({ kind: 'cooler', lx: 4.6, lz: -3.1, id: 'pier_icehouse_cooler', loot: FURNITURE_LOOT.cooler.camp, label: 'Search fish cooler' });
@@ -510,6 +811,34 @@ function buildBoardwalk(cx: number, cz: number, rot: 0 | 1 | 2 | 3, groundY: Gro
   k.detail(fall);
   k.furnish({ kind: 'crate', lx: 13, lz: 1.1, id: 'pier_boardwalk_crate', loot: FURNITURE_LOOT.crate.camp, label: 'Search pier crate' });
   k.furnish({ kind: 'barrel', lx: -16, lz: -1.0, id: 'pier_boardwalk_barrel', loot: FURNITURE_LOOT.barrel.camp, label: 'Search pier barrel' });
+  // ── greeble: the working deck — net bundles waiting on repair,
+  // buoys drying on the planks and the rail, a fish table mid-run
+  for (const [nx, nz, nr, sy] of [[-8, 1.15, 0.78, 0.5], [-7.0, 0.45, 0.55, 0.42]] as [number, number, number, number][]) {
+    const net = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(nr, 0),
+      new THREE.MeshStandardMaterial({ color: 0x2e4a34, roughness: 1 }),
+    );
+    net.scale.y = sy;
+    net.position.set(nx, 0.14 + nr * sy, nz);
+    net.castShadow = true;
+    net.name = 'deck_net';
+    k.detail(net);
+  }
+  k.obstacle(-7.6, 0.9, 1.0, 0.65);
+  for (const [bx, bz, bc] of [[5.5, -1.15, 0xd8622a], [18.5, 1.2, 0xc23b2a], [-2, -1.72, 0xe8c84a]] as [number, number, number][]) {
+    const buoy = new THREE.Mesh(new THREE.SphereGeometry(0.17, 10, 8), new THREE.MeshStandardMaterial({ color: bc, roughness: 0.7 }));
+    buoy.position.set(bx, bz === -1.72 ? 0.95 : 0.31, bz);
+    buoy.castShadow = true;
+    buoy.name = 'deck_buoy';
+    k.detail(buoy);
+    if (bz !== -1.72) k.obstacle(bx, bz, 0.2, 0.2);
+  }
+  k.box(1.7, 0.06, 0.8, TIMBER, -13.5, 0.99, 0.95);
+  for (const [lx, lz] of [[-14.2, 0.65], [-12.8, 0.65], [-14.2, 1.25], [-12.8, 1.25]] as [number, number][]) {
+    k.box(0.08, 0.85, 0.08, TIMBER_DARK, lx, 0.56, lz);
+  }
+  k.box(0.5, 0.09, 0.2, 0x9fc4d8, -13.7, 1.06, 0.9, 0.4);
+  k.obstacle(-13.5, 0.95, 0.9, 0.45);
   k.openEntrance('E', 0, 3.6, 2.9);
   k.growPad(23, 3);
   return k.finalize();
@@ -545,6 +874,43 @@ function buildCottage(
     ],
   });
   k.deck({ face: 'S', story: 1, depth: 1.8, spanFrom: -3.6, spanTo: 3.6, color: 0x8a7a66, railing: true, railColor: TIMBER_DARK });
+  // ── greeble: the porch is lived on — two chairs facing the
+  // water, a crate for a table, lanterns on the rail corners, and
+  // a lantern post lighting the stair foot (deck floor top is
+  // local 3.14; obstacles ride story 1 like the furniture there)
+  const deckY = 3.14;
+  for (const cx of [-2.3, 1.9]) {
+    k.box(0.46, 0.05, 0.44, TIMBER, cx, deckY + 0.45, 4.55);
+    k.box(0.46, 0.52, 0.05, TIMBER, cx, deckY + 0.72, 4.32);
+    k.box(0.05, 0.45, 0.44, TIMBER_DARK, cx - 0.21, deckY + 0.22, 4.55);
+    k.box(0.05, 0.45, 0.44, TIMBER_DARK, cx + 0.21, deckY + 0.22, 4.55);
+    k.obstacle(cx, 4.55, 0.28, 0.28, 1);
+  }
+  k.box(0.62, 0.62, 0.62, 0x6e5a3e, -3.15, deckY + 0.31, 4.6);
+  k.box(0.66, 0.06, 0.66, 0x54401f, -3.15, deckY + 0.65, 4.6);
+  k.obstacle(-3.15, 4.6, 0.35, 0.35, 1);
+  for (const lx of [-3.5, 3.5]) {
+    k.box(0.18, 0.1, 0.18, STEEL_DARK, lx, deckY + 1.12, 5.22);
+    const lampGlass = new THREE.Mesh(
+      new THREE.BoxGeometry(0.13, 0.16, 0.13),
+      new THREE.MeshStandardMaterial({ color: 0x38301e, emissive: 0xffca7a, emissiveIntensity: 1.1, roughness: 0.6 }),
+    );
+    lampGlass.position.set(lx, deckY + 1.26, 5.22);
+    lampGlass.name = 'porch_lantern';
+    k.detail(lampGlass);
+  }
+  kitCyl(k, 0.05, 1.6, TIMBER_DARK, 4.9, 0.8, 4.9, { seg: 8 });
+  const postLamp = new THREE.Mesh(
+    new THREE.BoxGeometry(0.17, 0.22, 0.17),
+    new THREE.MeshStandardMaterial({ color: 0x38301e, emissive: 0xffca7a, emissiveIntensity: 1.1, roughness: 0.6 }),
+  );
+  postLamp.position.set(4.9, 1.72, 4.9);
+  postLamp.name = 'porch_lantern';
+  k.detail(postLamp);
+  k.obstacle(4.9, 4.9, 0.18, 0.18);
+  k.box(0.85, 0.85, 0.85, 0x77644a, -2.9, 0.56, -2.7);
+  k.box(0.7, 0.7, 0.7, 0x6e5a3e, -2.85, 1.34, -2.65);
+  k.obstacle(-2.9, -2.7, 0.5, 0.5);
   k.roofGable(1.8, 0x6a7076, coat);
   // lived-in, upstairs and down
   k.furnish({ kind: 'fridge', lx: -3.3, lz: -2.7, story: 1, id: `${id}_fridge`, loot: FURNITURE_LOOT.fridge.suburban, label: 'Search cottage fridge' });
@@ -575,6 +941,32 @@ function buildStore(cx: number, cz: number, rot: 0 | 1 | 2 | 3, groundY: GroundY
   k.box(3.2, 1.02, 0.85, TIMBER, 0, 0.65, 1.2);
   k.box(3.4, 0.07, 1.0, TIMBER_DARK, 0, 1.19, 1.2);
   k.obstacle(0, 1.2, 1.65, 0.45);
+  // ── greeble: the counter works — a scale and register ride it;
+  // outside, the store hangs its name over the door between two
+  // lanterns, with produce crates by the front wall
+  k.box(0.34, 0.2, 0.3, 0x8a9296, -0.9, 1.32, 1.2);
+  k.box(0.4, 0.05, 0.34, 0x6e5639, -0.9, 1.45, 1.2);
+  k.box(0.4, 0.26, 0.36, 0x3a3d40, 0.8, 1.35, 1.2);
+  const regGlow = new THREE.Mesh(
+    new THREE.BoxGeometry(0.2, 0.07, 0.02),
+    new THREE.MeshStandardMaterial({ color: 0x10181a, emissive: 0xffca7a, emissiveIntensity: 0.9 }),
+  );
+  regGlow.position.set(0.8, 1.44, 1.0);
+  k.detail(regGlow);
+  const storeSign = decalPlane('TERN ROCK GENERAL STORE', 5.2, 'rgba(232,224,200,0.95)', 40);
+  storeSign.position.set(0.5, 2.72, 4.56);
+  k.addDetail(storeSign);
+  for (const lx of [-4.35, -1.65]) {
+    k.box(0.15, 0.24, 0.1, STEEL_DARK, lx, 2.3, 4.54);
+    kitLampFace(k, 0.09, 0.15, lx, 2.3, 4.6);
+  }
+  k.box(0.85, 0.85, 0.85, 0x6e5a3e, 3.6, 0.56, 5.4);
+  k.box(0.85, 0.85, 0.85, 0x77644a, 4.5, 0.56, 5.3);
+  k.box(0.8, 0.8, 0.8, 0x63512f, 4.05, 1.39, 5.35);
+  for (const [ax, ac] of [[3.45, 0xc23b2a], [3.65, 0x649048], [3.8, 0xc23b2a]] as [number, number][]) {
+    k.box(0.13, 0.13, 0.13, ac, ax, 1.05, 5.3);
+  }
+  k.obstacle(4.05, 5.35, 1.0, 0.5);
   k.furnish({ kind: 'bookshelf', lx: -4, lz: -3.9, id: 'tern_store_shelf_1', loot: FURNITURE_LOOT.bookshelf.suburban, label: 'Search store shelves' });
   k.furnish({ kind: 'bookshelf', lx: 0, lz: -3.9, id: 'tern_store_shelf_2', loot: FURNITURE_LOOT.bookshelf.suburban, label: 'Search store shelves' });
   k.furnish({ kind: 'bookshelf', lx: 4, lz: -3.9, id: 'tern_store_shelf_3', loot: FURNITURE_LOOT.bookshelf.suburban, label: 'Search store shelves' });
@@ -610,6 +1002,20 @@ function buildMarineGarage(cx: number, cz: number, rot: 0 | 1 | 2 | 3, groundY: 
   k.furnish({ kind: 'toolbox', lx: -4.8, lz: -3.3, id: 'tern_garage_toolbox', loot: FURNITURE_LOOT.toolbox.suburban, label: 'Search garage toolbox' });
   k.furnish({ kind: 'cabinets', lx: 4.9, lz: -3.4, id: 'tern_garage_cabinets', loot: FURNITURE_LOOT.cabinets.suburban, label: 'Search garage cabinets' });
   k.furnish({ kind: 'crate', lx: 4.8, lz: 3.2, id: 'tern_garage_crate', loot: FURNITURE_LOOT.crate.suburban, label: 'Search garage crate' });
+  // ── greeble: a workbench under the north windows, oil drums
+  // beside the cabinets, tires stacked in the open bay's corner
+  k.box(3.6, 0.08, 0.65, TIMBER, 0, 0.95, -3.45);
+  k.box(3.5, 0.78, 0.55, STEEL_DARK, 0, 0.5, -3.48);
+  k.box(0.4, 0.18, 0.3, 0x8a2f2f, -1.2, 1.08, -3.45);
+  k.box(0.3, 0.24, 0.26, 0x51606e, 0.9, 1.11, -3.45);
+  k.obstacle(0, -3.45, 1.85, 0.38);
+  kitCyl(k, 0.31, 0.9, 0x424c52, 3.1, 0.59, -3.25);
+  kitCyl(k, 0.31, 0.9, 0x5d6a72, 3.7, 0.59, -3.5);
+  k.obstacle(3.4, -3.37, 0.7, 0.4);
+  kitTire(k, -4.5, 0.27, 2.9);
+  kitTire(k, -4.5, 0.53, 2.9);
+  kitTire(k, -4.45, 0.79, 2.85);
+  k.obstacle(-4.5, 2.9, 0.45, 0.45);
   k.roomPoint(0, 2.2, 'marine garage');
   return k.finalize();
 }
@@ -647,6 +1053,36 @@ function buildFuelDock(cx: number, cz: number, rot: 0 | 1 | 2 | 3, groundY: Grou
     ],
     label: 'Search dock fuel drums', searchTime: 2.5, y: baseY + 0.2, collider: true,
   });
+  // ── greeble: tire fenders hang along both faces at the
+  // waterline, a hose coils on the pump, a lantern stands at the
+  // deep end, and a toolbox rides the deck mid-run
+  for (const fx of [-10, 0, 10]) {
+    for (const fz of [-1.62, 1.62]) {
+      const fender = new THREE.Mesh(
+        new THREE.TorusGeometry(0.3, 0.1, 8, 16),
+        new THREE.MeshStandardMaterial({ color: 0x24262a, roughness: 0.95 }),
+      );
+      fender.position.set(fx, -1.0, fz);
+      fender.name = 'dock_fender';
+      k.detail(fender);
+    }
+  }
+  const hose = new THREE.Mesh(
+    new THREE.TorusGeometry(0.22, 0.05, 8, 18),
+    new THREE.MeshStandardMaterial({ color: 0x2c2f33, roughness: 0.9 }),
+  );
+  hose.position.set(-13, 0.9, 0.32);
+  k.detail(hose);
+  k.box(0.08, 1.3, 0.08, STEEL_DARK, 15.2, 0.79, -1.1);
+  const dockLamp = new THREE.Mesh(
+    new THREE.BoxGeometry(0.16, 0.2, 0.16),
+    new THREE.MeshStandardMaterial({ color: 0x38301e, emissive: 0xffca7a, emissiveIntensity: 1.1, roughness: 0.6 }),
+  );
+  dockLamp.position.set(15.2, 1.56, -1.1);
+  dockLamp.name = 'dock_lantern';
+  k.detail(dockLamp);
+  k.obstacle(15.2, -1.1, 0.14, 0.14);
+  k.furnish({ kind: 'toolbox', lx: -8, lz: 0.85, id: 'tern_fuel_dock_toolbox', loot: FURNITURE_LOOT.toolbox.camp, label: 'Search dock toolbox' });
   k.openEntrance('W', 0, 2.8, 2.9);
   k.growPad(17, 2.5);
   return k.finalize();
@@ -864,6 +1300,31 @@ function ridgeGround(gw: GroundWorks): void {
   gw.group.add(beacon);
   gw.collider(mx, mz, 0.95, 0.95);
   gw.feature('ridge_mast', 'ridge', 'comms_mast', mx, mz, 1, 1, 'Lattice comms mast, 14 m + whip — the Redoubt\'s long ear.');
+  // ── greeble: the mast is dressed — two yagi arrays on the frame
+  // and three guy wires flown to anchored blocks
+  for (const [yy, ry] of [[11.2, 0.5], [8.6, -0.9]] as [number, number][]) {
+    gw.box(1.7, 0.06, 0.06, STEEL_DARK, mx, my + yy, mz, ry);
+    for (let e = 0; e < 4; e++) {
+      const t = -0.6 + e * 0.4;
+      gw.box(0.05, 0.05, 0.8 - Math.abs(t) * 0.3, STEEL_DARK, mx + Math.sin(ry) * t, my + yy, mz + Math.cos(ry) * t, ry);
+    }
+  }
+  const wireMat = new THREE.MeshStandardMaterial({ color: 0x2c2f33, roughness: 0.7, metalness: 0.4 });
+  for (const ang of [0.5, 2.6, 4.7]) {
+    const ax = mx + Math.cos(ang) * 7;
+    const az = mz + Math.sin(ang) * 7;
+    const ay = gw.gy(ax, az);
+    gw.box(0.55, 0.4, 0.55, CONCRETE_DARK, ax, ay + 0.2, az);
+    gw.collider(ax, az, 0.32, 0.32);
+    const from = new THREE.Vector3(mx, my + 13.6, mz);
+    const to = new THREE.Vector3(ax, ay + 0.45, az);
+    const dir = to.clone().sub(from);
+    const wire = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, dir.length(), 5), wireMat);
+    wire.position.copy(from.clone().add(to).multiplyScalar(0.5));
+    wire.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+    gw.group.add(wire);
+  }
+  gw.feature('ridge_guy_wires', 'ridge', 'greeble', mx, mz, 7.6, 7.6, 'Greeble: mast guy wires (3) flown to anchored blocks + yagi arrays on the frame.');
 
   // sandbag lines: one before the bunker's chicane, one covering the
   // tower approach — two staggered courses of bags with collision
@@ -887,6 +1348,18 @@ function ridgeGround(gw: GroundWorks): void {
   };
   sandbagLine('ridge_sandbags_a', -556, -198, -544, -198);
   sandbagLine('ridge_sandbags_b', -496, -200, -496, -192);
+  // ── greeble: the bunker line is stocked — a crate and ammo boxes
+  // ride the bags (the line's collider already covers the spot)
+  const sbY = gw.gy(-550, -198);
+  gw.box(0.82, 0.82, 0.82, 0x6e5a3e, -550, sbY + 1.06, -198, 0.12);
+  gw.box(0.52, 0.3, 0.36, 0x4a5548, -548.4, sbY + 0.8, -198, -0.08);
+  gw.box(0.52, 0.3, 0.36, 0x5a6656, -547.6, sbY + 0.8, -197.8, 0.15);
+  // ── greeble: patch-and-wear on the helipad slab — dark asphalt
+  // repairs laid between slab and paint
+  for (const [px, pz, pr] of [[pad.x - 4, pad.z - 3, 0.2], [pad.x + 3.5, pad.z + 4, -0.15], [pad.x + 5, pad.z - 4.5, 0.4], [pad.x - 5.5, pad.z + 2.5, -0.3]] as [number, number, number][]) {
+    gw.box(2.3, 0.015, 1.7, 0x33373b, px, gy + 0.095, pz, pr, 1);
+  }
+  gw.feature('ridge_pad_wear', 'ridge', 'greeble', pad.x, pad.z, 6.5, 6.5, 'Greeble: asphalt patch repairs worn into the helipad slab.');
 
   // rock revetment heaped behind the bunker's north and west faces
   const rock = (x: number, z: number, w: number, h: number, d: number, ry: number): void => {
@@ -969,6 +1442,59 @@ function citadelGround(gw: GroundWorks): void {
     gw.collider(fx, fz, 0.36, 0.36);
     gw.feature(fid, 'citadel', 'floodlight', fx, fz, 0.6, 0.6, 'Yard floodlight pole (prop).');
   }
+
+  // ── greeble: floodlight fixtures ride the fortress crown,
+  // aimed over the courtyard (emissive faces only, rooftop — no
+  // colliders up there)
+  const crownY = gw.gy(234.5, -268) + 3 * 2.6;
+  for (const fx of [229.5, 239.5]) {
+    gw.box(0.08, 0.5, 0.08, STEEL_DARK, fx, crownY + 0.25, -267.2);
+    gw.box(0.62, 0.26, 0.3, STEEL_DARK, fx, crownY + 0.6, -267.2);
+    const face = new THREE.Mesh(
+      new THREE.BoxGeometry(0.5, 0.18, 0.03),
+      new THREE.MeshStandardMaterial({ color: 0x38301e, emissive: 0xffca7a, emissiveIntensity: 1.2, roughness: 0.6 }),
+    );
+    face.position.set(fx, crownY + 0.6, -267.03);
+    face.name = 'crown_floodlight';
+    gw.group.add(face);
+  }
+
+  // ── greeble: the freight yard works — drum cluster, pallet
+  // stacks and a tire pile on the apron east of the truck hall,
+  // clear of the warehouse stations and the hall's drive-in mouth
+  const drumAt = (x: number, z: number, c: number): void => {
+    gw.cyl(0.31, 0.31, 0.92, c, x, gw.gy(x, z) + 0.46, z, 0, 0, 12);
+  };
+  drumAt(287.4, -188.4, 0x51606e);
+  drumAt(288.3, -187.8, 0x8a4a3a);
+  drumAt(287.8, -189.2, 0x424c52);
+  drumAt(288.6, -188.9, 0x746a52);
+  gw.collider(288, -188.6, 0.85, 0.85);
+  for (let p = 0; p < 3; p++) gw.box(1.2, 0.12, 1.0, 0x77644a, 283, gw.gy(283, -200) + 0.06 + p * 0.13, -200, p * 0.06);
+  gw.box(0.85, 0.85, 0.85, 0x6e5a3e, 283, gw.gy(283, -200) + 0.84, -200, 0.1);
+  gw.collider(283, -200, 0.7, 0.6);
+  for (let t = 0; t < 3; t++) {
+    const tire = new THREE.Mesh(
+      new THREE.TorusGeometry(0.33, 0.13, 8, 18),
+      new THREE.MeshStandardMaterial({ color: 0x24262a, roughness: 0.95 }),
+    );
+    tire.rotation.x = Math.PI / 2;
+    tire.position.set(292, gw.gy(292, -196) + 0.14 + t * 0.26, -196);
+    tire.castShadow = true;
+    gw.group.add(tire);
+  }
+  gw.collider(292, -196, 0.45, 0.45);
+  gw.feature('citadel_yard_clutter', 'citadel', 'greeble', 287.5, -194, 6, 7.5, 'Greeble: freight-yard working clutter — drum cluster, pallet stack, tire pile east of the truck hall.');
+
+  // ── greeble: the refinery's drum yard on its south apron
+  drumAt(300, -180, 0x8a4a3a);
+  drumAt(300.8, -179.3, 0x51606e);
+  drumAt(301.4, -180.2, 0x424c52);
+  gw.collider(300.7, -179.8, 0.95, 0.7);
+  for (let p = 0; p < 2; p++) gw.box(1.2, 0.12, 1.0, 0x77644a, 310, gw.gy(310, -179) + 0.06 + p * 0.13, -179, -p * 0.05);
+  gw.box(0.8, 0.6, 0.8, 0x63512f, 310, gw.gy(310, -179) + 0.56, -179);
+  gw.collider(310, -179, 0.7, 0.6);
+  gw.feature('citadel_yard_refinery_drums', 'citadel', 'greeble', 305, -180, 6.5, 1.8, 'Greeble: refinery drum yard + pallet stack on the south apron.');
 }
 
 function refugeGround(gw: GroundWorks): void {
@@ -992,6 +1518,34 @@ function refugeGround(gw: GroundWorks): void {
   gw.feature('refuge_palisade_s', 'refuge', 'palisade', -30, 30, 56, 0.4, 'Palisade south run.');
   gw.feature('refuge_palisade_w', 'refuge', 'palisade', -86, -10, 0.4, 40, 'Palisade west run — gate where the inland spur terminates.');
   gw.feature('refuge_palisade_e', 'refuge', 'palisade', 26, -10, 0.4, 40, 'Palisade east run — gate facing NC-12.');
+
+  // ── greeble: fighting platforms inside the north run (deck on
+  // posts at rail height, a crate staged on each, ladder rails up
+  // the inside face) + lanterns on both gate frames
+  for (const px of [-60, 5]) {
+    const py = gw.gy(px, -49.2);
+    for (const [ox, oz] of [[-1.55, -0.55], [1.55, -0.55], [-1.55, 0.55], [1.55, 0.55]] as [number, number][]) {
+      gw.box(0.18, 1.95, 0.18, TIMBER_DARK, px + ox, py + 0.97, -49.2 + oz);
+      gw.collider(px + ox, -49.2 + oz, 0.15, 0.15);
+    }
+    gw.box(3.4, 0.14, 1.3, TIMBER, px, py + 1.97, -49.2);
+    gw.box(0.7, 0.7, 0.7, 0x6e5a3e, px - 1.1, py + 2.39, -49.2);
+    gw.box(0.09, 1.9, 0.09, TIMBER_DARK, px + 0.75, py + 0.95, -48.4);
+    gw.box(0.09, 1.9, 0.09, TIMBER_DARK, px + 1.25, py + 0.95, -48.4);
+    for (let r = 0; r < 4; r++) gw.box(0.55, 0.07, 0.07, TIMBER, px + 1.0, py + 0.35 + r * 0.45, -48.4);
+  }
+  gw.feature('refuge_palisade_platforms', 'refuge', 'greeble', -27.5, -49.2, 36, 1.1, 'Greeble: two fighting platforms inside the north palisade — decks, staged crates, ladders.');
+  const lanternMat = new THREE.MeshStandardMaterial({ color: 0x38301e, emissive: 0xffca7a, emissiveIntensity: 1.15, roughness: 0.6 });
+  for (const [gx, gz] of [[-86, -42], [26, -10]] as [number, number][]) {
+    const gy2 = gw.gy(gx, gz);
+    for (const s of [-1, 1]) {
+      const lampMesh = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.26, 0.2), lanternMat);
+      lampMesh.position.set(gx, gy2 + 3.05, gz + s * 2.6);
+      lampMesh.name = 'gate_lantern';
+      gw.group.add(lampMesh);
+      gw.box(0.24, 0.06, 0.24, STEEL_DARK, gx, gy2 + 3.22, gz + s * 2.6);
+    }
+  }
 
   // the water filtration plant in the ring's NE corner
   const fy = gw.gy(14, -44);
@@ -1026,10 +1580,31 @@ function pierGround(gw: GroundWorks): void {
       gw.box(0.34, 0.1, 0.14, STEEL_DARK, cx - 0.8, 2.34, pz);
       gw.box(0.34, 0.1, 0.14, STEEL_DARK, cx + 0.8, 2.34, pz);
     }
+    // ── greeble: tire fenders hang on the outer piles at the
+    // waterline, mooring lines run from the cleats down to the
+    // water (geometry only — a boat earns the walkable part)
+    const fenderMat = new THREE.MeshStandardMaterial({ color: 0x24262a, roughness: 0.95 });
+    for (const pz of [cz - 3.8, cz + 0.2, cz + 3.8]) {
+      for (const px of [cx - 0.95, cx + 0.95]) {
+        const fender = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.1, 8, 16), fenderMat);
+        fender.rotation.y = Math.PI / 2;
+        fender.position.set(px, 1.5, pz);
+        fender.name = 'slip_fender';
+        gw.group.add(fender);
+      }
+    }
+    const lineMat = new THREE.MeshStandardMaterial({ color: 0x8a7d5c, roughness: 1 });
+    for (const [px, pz, tilt] of [[cx - 0.8, cz - 3.2, 0.6], [cx + 0.8, cz + 3.2, -0.6]] as [number, number, number][]) {
+      const line = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 2.3, 5), lineMat);
+      line.position.set(px + tilt * 0.8, 1.55, pz);
+      line.rotation.z = tilt;
+      gw.group.add(line);
+    }
     gw.feature(id, 'pier_hq', 'boat_slip', cx, cz, 1, 4.5, 'Workboat slip: finger deck on piling pairs, cleated both sides.');
   };
   slip('pier_slip_a', -530, 228.5);
   slip('pier_slip_b', -541.5, 216);
+  gw.feature('pier_slip_dressing', 'pier_hq', 'boat_slip', -535.75, 222.25, 6.75, 8.75, 'Greeble: tire fenders at the waterline + mooring lines on both slips.');
 
   // the landward palisade arc — two runs with the road gap between
   gw.palisadeRun('z', -444, 220, 248, [], -1);
@@ -1042,21 +1617,21 @@ function pierGround(gw: GroundWorks): void {
 const BUILDERS: Record<string, (cx: number, cz: number, rot: 0 | 1 | 2 | 3, gy: GroundY) => KitResult> = {
   ridge_bunker: buildRidgeBunker,
   ridge_tower: (cx, cz, r, gy) => buildWatchtower('ridge_tower', cx, cz, r, gy, { label: 'ridge watchtower', lootKind: 'camp' }),
-  ridge_ops: (cx, cz, r, gy) => buildCanopyShelter('ridge_ops', cx, cz, r, gy, 14, 10, 4.4, { label: 'ops shelter', lootKind: 'camp' }),
+  ridge_ops: (cx, cz, r, gy) => buildCanopyShelter('ridge_ops', cx, cz, r, gy, 14, 10, 4.4, { label: 'ops shelter', lootKind: 'camp', dress: 'ops' }),
   citadel_gate_w: (cx, cz, r, gy) => buildGateTower('citadel_gate_w', cx, cz, r, gy, 'E'),
   citadel_gate_e: (cx, cz, r, gy) => buildGateTower('citadel_gate_e', cx, cz, r, gy, 'W'),
-  citadel_container_office: (cx, cz, r, gy) => buildContainerRoom('citadel_container_office', cx, cz, r, gy, 0x7a4a38, { npc: true, label: 'toll office', lootKind: 'suburban' }),
-  citadel_container_store: (cx, cz, r, gy) => buildContainerRoom('citadel_container_store', cx, cz, r, gy, 0x44586a, { label: 'freight stores', lootKind: 'suburban' }),
+  citadel_container_office: (cx, cz, r, gy) => buildContainerRoom('citadel_container_office', cx, cz, r, gy, 0x7a4a38, { npc: true, label: 'toll office', lootKind: 'suburban', dress: 'office' }),
+  citadel_container_store: (cx, cz, r, gy) => buildContainerRoom('citadel_container_store', cx, cz, r, gy, 0x44586a, { label: 'freight stores', lootKind: 'suburban', dress: 'store' }),
   citadel_truck_hall: buildTruckHall,
   lighthouse_radar: buildRadarTower,
-  lighthouse_lab_a: (cx, cz, r, gy) => buildContainerRoom('lighthouse_lab_a', cx, cz, r, gy, 0x5a6e64, { npc: true, label: 'signal lab', lootKind: 'suburban' }),
-  lighthouse_lab_b: (cx, cz, r, gy) => buildContainerRoom('lighthouse_lab_b', cx, cz, r, gy, 0x746a52, { label: 'instrument lab', lootKind: 'suburban' }),
-  lighthouse_shed: (cx, cz, r, gy) => buildCanopyShelter('lighthouse_shed', cx, cz, r, gy, 9, 5, 3.0, { label: 'shore shed', lootKind: 'suburban', backWall: true }),
+  lighthouse_lab_a: (cx, cz, r, gy) => buildContainerRoom('lighthouse_lab_a', cx, cz, r, gy, 0x5a6e64, { npc: true, label: 'signal lab', lootKind: 'suburban', dress: 'lab' }),
+  lighthouse_lab_b: (cx, cz, r, gy) => buildContainerRoom('lighthouse_lab_b', cx, cz, r, gy, 0x746a52, { label: 'instrument lab', lootKind: 'suburban', dress: 'lab' }),
+  lighthouse_shed: (cx, cz, r, gy) => buildCanopyShelter('lighthouse_shed', cx, cz, r, gy, 9, 5, 3.0, { label: 'shore shed', lootKind: 'suburban', backWall: true, dress: 'shore' }),
   refuge_chapel: buildChapel,
   refuge_greenhouse_a: (cx, cz, r, gy) => buildGreenhouse('refuge_greenhouse_a', cx, cz, r, gy),
   refuge_greenhouse_b: (cx, cz, r, gy) => buildGreenhouse('refuge_greenhouse_b', cx, cz, r, gy),
   pier_icehouse: buildIcehouse,
-  pier_shed: (cx, cz, r, gy) => buildCanopyShelter('pier_shed', cx, cz, r, gy, 10, 6, 3.0, { label: 'gear shed', lootKind: 'camp', backWall: true }),
+  pier_shed: (cx, cz, r, gy) => buildCanopyShelter('pier_shed', cx, cz, r, gy, 10, 6, 3.0, { label: 'gear shed', lootKind: 'camp', backWall: true, dress: 'gear' }),
   pier_boardwalk: buildBoardwalk,
   tern_cottage_a: (cx, cz, r, gy) => buildCottage('tern_cottage_a', cx, cz, r, gy, COTTAGE_COAT[0]),
   tern_cottage_b: (cx, cz, r, gy) => buildCottage('tern_cottage_b', cx, cz, r, gy, COTTAGE_COAT[1]),
