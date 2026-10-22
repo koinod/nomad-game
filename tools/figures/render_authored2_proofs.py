@@ -97,8 +97,8 @@ def pose():
         P['armR'].rotation_euler.x = -0.34
     elif KIND == 'bloater':
         slump(0.10)
-        P['armL'].location.x -= 0.17
-        P['armR'].location.x += 0.17
+        # no outboard pivot shift — matches applyAuthoredPose after the
+        # joint-continuity pass (the shift floated the arms detached)
         P['armL'].rotation_euler.y = -0.38   # three rotation.z = +0.38
         P['armR'].rotation_euler.y = 0.38
     elif KIND == 'stalker':

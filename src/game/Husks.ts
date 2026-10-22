@@ -139,9 +139,11 @@ function applyAuthoredPose(rig: FigureRig, kind: HuskKind, id: string): void {
       break;
     case 'bloater':
       poseSlump(rig, 0.1, vrnd);
-      // arms ride outboard of the sac and splay around it (huskBloater)
-      rig.armL.position.x -= 0.17;
-      rig.armR.position.x += 0.17;
+      // arms splay around the sac — but keep the AUTHORED pivots: the
+      // kit's ±0.17 outboard shift (huskBloater) floated the authored
+      // arms fully detached beside the belly (joint-continuity pass,
+      // 2026-10-21); the splay alone rotates the shoulder balls clear
+      // of the authored mass.
       rig.armL.rotation.z = 0.38;
       rig.armR.rotation.z = -0.38;
       break;
