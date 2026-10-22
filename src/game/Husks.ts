@@ -1247,6 +1247,24 @@ export class HuskManager {
     return n;
   }
 
+  /** ORDER #6: the nearest live husk to a point — companion combat
+   *  targeting (the player-facing nearestThreat reports only numbers;
+   *  a companion needs the body itself). */
+  nearestAlive(x: number, z: number, radius: number): Husk | null {
+    let best: Husk | null = null;
+    let bestD = radius;
+    for (const h of this.husks) {
+      if (!h.alive) continue;
+      const c = h.group.position;
+      const d = Math.hypot(c.x - x, c.z - z);
+      if (d <= bestD) {
+        best = h;
+        bestD = d;
+      }
+    }
+    return best;
+  }
+
   /** Leave a burning-green acid pool where something nasty landed. */
   private addPool(x: number, z: number, r: number, groundY: (x: number, z: number, refY?: number) => number): void {
     const mat = new THREE.MeshBasicMaterial({

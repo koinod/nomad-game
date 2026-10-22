@@ -18,6 +18,7 @@ import { ProjectileManager } from './Projectiles';
 import { rangeFalloff, armorMult } from './gunMath';
 import { HuskManager } from './Husks';
 import type { Husk, SpawnZone } from './Husks';
+import { Companions } from './Companions';
 import { InteractSystem, buildContainerDefs, INTERACT_RADIUS_M, STORAGE_RADIUS_M } from './Interact';
 import { AnimalManager } from './Animals';
 import { VehicleManager, applyUpgradeVisuals, attachGt500Glb, attachPrimeGlb, attachSprinterGlb, placeSeahawk, applyGlbVisuals, itemsWeightKg, type Vehicle } from './Vehicles';
@@ -69,6 +70,8 @@ export class Game {
   private projectiles: ProjectileManager | null = null;
   private player: Player | null = null;
   private husks: HuskManager | null = null;
+  private companions: Companions | null = null; // ORDER #6: the crew, embodied
+  private lastAbsMin = -1; // ORDER #6: game-clock baseline for companion needs
   private animals: AnimalManager | null = null;
   private interact: InteractSystem | null = null;
   private turrets: TurretSystem | null = null;
@@ -328,6 +331,10 @@ export class Game {
       useGameStore.getState().daysElapsed,
     );
 
+    // ORDER #6: recruited survivors embodied — follows the roster in
+    // the store (figures spawn/despawn as the crew changes).
+    this.companions = new Companions(this.scene);
+
     // wildlife: deer + rabbits, huntable for raw meat
     this.animals = new AnimalManager(this.scene, opts.seed);
     this.animals.spawnInitial((x, z) => heightAt(x, z));
@@ -445,6 +452,8 @@ export class Game {
     this.canvas.removeEventListener('wheel', this.onWheel);
     ambience.stop();
     this.husks?.dispose();
+    this.companions?.dispose();
+    this.companions = null;
     this.animals?.dispose();
     this.postfx?.dispose();
     this.postfx = null;
@@ -1005,6 +1014,38 @@ export class Game {
       player.pos,
       night,
     );
+    // ORDER #6: the crew embodied — formation, seats, needs, combat
+    // assist. The game-minute delta comes from the store clock itself,
+    // so sleep fast-forwards land on companions too (they slept).
+    {
+      const absMin = s.daysElapsed * 1440 + s.timeMinutes;
+      const gameMinDelta = this.lastAbsMin < 0 ? 0 : Math.max(0, absMin - this.lastAbsMin);
+      this.lastAbsMin = absMin;
+      const homeAnchor = s.claims.home
+        ? (s.poiPositions[s.claims.home.siteId] ?? (s.claims.home.siteId === 'military_base' ? s.poiPositions['airbase'] : undefined))
+        : (s.base ? s.poiPositions[s.base.poiId] : undefined);
+      const basePos = homeAnchor ? { x: homeAnchor[0], z: homeAnchor[1] } : null;
+      const drv = this.driving;
+      this.companions?.update(dt, {
+        playerPos: player.pos,
+        playerHeading: player.group.rotation.y,
+        groundY: (x, z, refY) => this.groundYRef(x, z, refY ?? 0),
+        colliders: this.houseColliders,
+        nearestHusk: (x, z, r) => husks.nearestAlive(x, z, r),
+        vehicle: drv
+          ? {
+              x: drv.group.position.x, y: drv.group.position.y, z: drv.group.position.z,
+              quat: drv.group.quaternion,
+              defId: drv.def.id, kind: drv.def.kind,
+              width: drv.def.width, length: drv.def.length,
+              ax: drv.seatAnchor?.lx, az: drv.seatAnchor?.lz,
+            }
+          : null,
+        basePos,
+        gameMinDelta,
+      });
+    }
+
     this.animals?.update(dt, player.pos, (x, z) => heightAt(x, z));
 
     // deployed base turrets (stage 7): acquire + fire through the

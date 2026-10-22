@@ -13,7 +13,7 @@ import { applyUpkeep, dailyMoraleTick, moraleEvent, FOOD_ITEMS, WATER_ITEMS } fr
 import {
   comfortScore, claimChecklist, claimReady, applyClaim, applyRelocation, powerBudget,
 } from '../systems/baseClaims';
-import { DEFAULT_APPEARANCE, DIFFICULTIES } from './types';
+import { DEFAULT_APPEARANCE, DIFFICULTIES, defaultSurvivorRuntime } from './types';
 import type {
   Appearance, DifficultyId, Equipped, FleetEntry, InvItem, NearbyEntry, PhoneTab, QuestProgress, QuestStepType,
   SaveMeta, SaveSnapshot, Screen, SlotId, ToastMsg, TrailerFleetEntry, WeaponSlotId,
@@ -35,7 +35,7 @@ import {
   type CarriedDest,
 } from './containers';
 import { arrangeItems as arrangeGridItems } from './gridUtils';
-import { applyXp, canBuyPerk, meetsSkillReq, skillReqLabel, XP_EVENTS } from '../systems/skills';
+import { applyXp, awardEvent, canBuyPerk, meetsSkillReq, skillReqLabel, SKILL_IDS, XP_EVENTS, type XpEventId } from '../systems/skills';
 import { blockThroughFactor, carryBonusKg, disassemblyYields, fieldRepairCap, heavyShiftKg, modPartCost, vehicleRepairCost } from '../systems/perkEffects';
 import { deleteSaveSlot, listSaveSlots, loadGameFromSlot, saveGameToSlot } from '../systems/save';
 import { sfx } from '../systems/audio';
@@ -209,6 +209,20 @@ interface GameState {
   setClaims: (claims: ClaimsState) => void;
   moraleRuntime: MoraleRuntime;
   setMoraleRuntime: (m: MoraleRuntime) => void;
+  // ORDER #6: per-survivor runtime (orders / needs / carried weapon)
+  // and per-survivor skill maps (order #5's survivor XP, fed at last).
+  survivorRuntime: Record<string, import('./types').SurvivorRuntime>;
+  survivorSkills: Record<string, Record<string, { level: number; xp: number }>>;
+  setSurvivorOrder: (id: string, order: import('./types').SurvivorOrder) => void;
+  /** Hand a pack weapon to a survivor (the instance leaves the pack). */
+  equipSurvivorWeapon: (id: string, invUid: string) => boolean;
+  /** Take a survivor's weapon back into the pack (refused if no room). */
+  unequipSurvivorWeapon: (id: string) => boolean;
+  setSurvivorNeeds: (id: string, hunger: number, fatigue: number) => void;
+  /** A companion eats one food item; returns its id, or null if none. */
+  survivorEat: (id: string, from: 'pack' | 'base') => string | null;
+  /** Feed a §6.1 event into a survivor's own skill map (half rate). */
+  awardSurvivorEvent: (id: string, event: XpEventId) => void;
   beaconChoice: 'light' | 'dark' | null;
   setBeaconChoice: (c: 'light' | 'dark' | null) => void;
   dayStats: { kills: number; crafts: number; pickups: number };
@@ -717,6 +731,8 @@ export const useGameStore = create<GameState>()((set, get) => {
         claimHostiles: {},
         moraleRuntime: { idleDays: {}, breakingDays: {} },
         beaconChoice: null,
+        survivorRuntime: {},
+        survivorSkills: {},
         dayStats: { kills: 0, crafts: 0, pickups: 0 },
       });
       // a new run starts with an empty bench — clear Lane 7's store too
@@ -1613,6 +1629,11 @@ export const useGameStore = create<GameState>()((set, get) => {
     recruitSurvivor: (def) => {
       const s = get();
       if (s.survivors.some((x) => x.id === def.id)) return;
+      // ORDER #6: a recruit gets a runtime record — they walk with you
+      // (order 'follow') from the moment they join.
+      if (!s.survivorRuntime[def.id]) {
+        set({ survivorRuntime: { ...s.survivorRuntime, [def.id]: defaultSurvivorRuntime() } });
+      }
       // a new recruit lifts the whole crew (+2 morale, spec driver)
       const crew = s.survivors.map((x) => ({ ...x, morale: Math.min(100, x.morale + 2) }));
       set({ survivors: [...crew, def] });
@@ -2015,6 +2036,113 @@ export const useGameStore = create<GameState>()((set, get) => {
     setClaims: (claims) => set({ claims }),
     setMoraleRuntime: (moraleRuntime) => set({ moraleRuntime }),
     setBeaconChoice: (beaconChoice) => set({ beaconChoice }),
+    survivorRuntime: {},
+    survivorSkills: {},
+
+    setSurvivorOrder: (id, order) => {
+      const s = get();
+      const cur = s.survivorRuntime[id] ?? defaultSurvivorRuntime();
+      if (cur.order === order || !s.survivors.some((x) => x.id === id)) return;
+      set({ survivorRuntime: { ...s.survivorRuntime, [id]: { ...cur, order } } });
+      // an order given is a leadership act (§6.1 has the event for it)
+      const ev = XP_EVENTS.order_given;
+      s.addSkillXp(ev.skill, ev.xp);
+    },
+    equipSurvivorWeapon: (id, invUid) => {
+      const s = get();
+      if (!s.survivors.some((x) => x.id === id)) return false;
+      const rt = s.survivorRuntime[id] ?? defaultSurvivorRuntime();
+      if (rt.weapon) return false; // one weapon per survivor — unequip first
+      const found = findCarried(s.inventory, invUid);
+      if (!found || found.item.qty !== 1) return false;
+      const def = ITEMS[found.item.itemId];
+      if (!def || def.damage == null) return false; // weapons only
+      if (slotOfUid(s.equipped, invUid) || s.hotbar.includes(invUid)) return false;
+      const rem = removeCarried(s.inventory, invUid, 1);
+      if (!rem.ok || !rem.removed) return false;
+      set({
+        inventory: rem.inventory,
+        survivorRuntime: { ...s.survivorRuntime, [id]: { ...rt, weapon: rem.removed } },
+      });
+      return true;
+    },
+    unequipSurvivorWeapon: (id) => {
+      const s = get();
+      const rt = s.survivorRuntime[id];
+      if (!rt?.weapon) return false;
+      const back = addToCarried(s.inventory, s.equipped, rt.weapon, s.perks);
+      if (!back) {
+        s.addToast('No room in the pack for it.');
+        return false;
+      }
+      set({
+        inventory: back,
+        survivorRuntime: { ...s.survivorRuntime, [id]: { ...rt, weapon: null } },
+      });
+      return true;
+    },
+    setSurvivorNeeds: (id, hunger, fatigue) => {
+      const s = get();
+      const rt = s.survivorRuntime[id] ?? defaultSurvivorRuntime();
+      const h = Math.max(0, Math.min(100, hunger));
+      const f = Math.max(0, Math.min(100, fatigue));
+      if (Math.abs(h - rt.hunger) < 0.05 && Math.abs(f - rt.fatigue) < 0.05) return;
+      set({ survivorRuntime: { ...s.survivorRuntime, [id]: { ...rt, hunger: h, fatigue: f } } });
+    },
+    survivorEat: (id, from) => {
+      const s = get();
+      const rt = s.survivorRuntime[id] ?? defaultSurvivorRuntime();
+      const satiety: Record<string, number> = { produce: 30, raw_meat: 25, cooked_meat: 45, canned_food: 40 };
+      const fedWith = (itemId: string) => {
+        set({
+          survivorRuntime: {
+            ...get().survivorRuntime,
+            [id]: { ...(get().survivorRuntime[id] ?? rt), hunger: Math.min(100, rt.hunger + (satiety[itemId] ?? 30)) },
+          },
+        });
+        return itemId;
+      };
+      if (from === 'base') {
+        const home = s.claims.home;
+        if (!home) return null;
+        const stock = [...home.stockpile];
+        for (const fid of FOOD_ITEMS) {
+          const ix = stock.findIndex((i) => i.itemId === fid && i.qty > 0);
+          if (ix < 0) continue;
+          stock[ix] = { ...stock[ix], qty: stock[ix].qty - 1 };
+          set({ claims: { ...s.claims, home: { ...home, stockpile: stock.filter((i) => i.qty > 0) } } });
+          return fedWith(fid);
+        }
+        return null;
+      }
+      for (const fid of FOOD_ITEMS) {
+        const inst = walkCarried(s.inventory).find((i) => i.itemId === fid && i.qty > 0);
+        if (!inst) continue;
+        if (!s.removeItem(inst.uid, 1)) continue;
+        return fedWith(fid);
+      }
+      return null;
+    },
+    awardSurvivorEvent: (id, event) => {
+      const s = get();
+      const def = s.survivors.find((x) => x.id === id);
+      if (!def) return;
+      // seed the map from the def's authored levels the first time —
+      // SurvivorDef.skills stays the levels record production reads,
+      // and every award writes the grown levels back into it.
+      const cur = s.survivorSkills[id] ?? Object.fromEntries(
+        SKILL_IDS.map((k) => [k, { level: def.skills[k] ?? 0, xp: 0 }]),
+      );
+      const r = awardEvent(cur as import('../systems/skills').SkillMap, event, { survivor: true });
+      const levels = Object.fromEntries(SKILL_IDS.map((k) => [k, r.map[k]?.level ?? def.skills[k] ?? 0]));
+      set({
+        survivorSkills: { ...s.survivorSkills, [id]: r.map },
+        survivors: s.survivors.map((x) => (x.id === id ? { ...x, skills: levels as typeof x.skills } : x)),
+      });
+      if (r.levelsGained > 0) {
+        s.addToast(`${def.name}'s ${r.skill} rose to ${r.map[r.skill].level}.`);
+      }
+    },
 
     addJournal: (title, lines) => {
       const s = get();
@@ -2342,6 +2470,8 @@ export const useGameStore = create<GameState>()((set, get) => {
         claims: s.claims,
         moraleRuntime: s.moraleRuntime,
         beaconChoice: s.beaconChoice,
+        survivorRuntime: s.survivorRuntime,
+        survivorSkills: s.survivorSkills,
       };
       try {
         await saveGameToSlot(slot, snapshot);
@@ -2420,6 +2550,11 @@ export const useGameStore = create<GameState>()((set, get) => {
         // single base into a home BaseInstance (name-mapped facilities).
         claims: snap.claims ?? claimsFromLegacyBase(cleanBase),
         moraleRuntime: snap.moraleRuntime ?? { idleDays: {}, breakingDays: {} },
+        // ORDER #6: absent on older v3 saves — everyone defaults to
+        // following, fed and rested, unarmed (defaultSurvivorRuntime
+        // is applied lazily wherever a record is read).
+        survivorRuntime: snap.survivorRuntime ?? {},
+        survivorSkills: snap.survivorSkills ?? {},
         // Lane 9 (F3): derive the beacon state from the flags when the
         // save predates the explicit field.
         beaconChoice: snap.beaconChoice

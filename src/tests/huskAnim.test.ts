@@ -15,7 +15,7 @@ import { GAITS, STRIKE_SEC } from '../game/figureAnim';
 import { mulberry32 } from '../game/rng';
 import { useGameStore } from '../store/gameStore';
 
-const groundY = (x: number, z: number) => 0;
+const groundY = (_x: number, _z: number) => 0;
 function ctx(playerPos: THREE.Vector3): HuskCtx {
   return { playerPos, isNight: false, groundY, colliders: [], onHuskKilled: () => undefined, daysElapsed: 0 };
 }
