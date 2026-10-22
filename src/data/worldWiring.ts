@@ -3,8 +3,9 @@
 // world needs from factions+story lives here as data + the enumerated
 // steps in WORLD_WIRING_STEPS.
 //
-// Coordinates are approximations anchored to World.POI_DEFS (x, zGuess);
-// the wiring pass resolves real terrain z via findLandZ like every POI.
+// Anchors are POI ids (data/betaLayout.ts BETA_POI_PLACEMENTS carries
+// the surveyed positions since the map integration, 2026-10-21 — the
+// old x/zGuess + findLandZ resolution is retired with its terrain).
 
 export interface NpcPlacement {
   key: string;
@@ -38,8 +39,8 @@ export const NPC_PLACEMENTS: NpcPlacement[] = [
   },
   {
     key: 'the_accountant', name: 'The Accountant', faction: 'skulls',
-    approx: [520, 210], dx: 0, dz: 0, role: 'Ocracoke fence (folded: Hollow Market)',
-    note: 'Off the island’s south dunes toward Ocracoke. Event-traded fence, NOT a shop UI — the Skulls deny he exists.',
+    poiId: 'dune_cache', dx: 15, dz: 22, role: 'Ocracoke fence (folded: Hollow Market)',
+    note: 'Off the island’s south dunes toward Ocracoke. Event-traded fence, NOT a shop UI — the Skulls deny he exists. (Map integration, 2026-10-21: anchored to the dune_cache POI — his old free-standing approx was an old-map coordinate.)',
   },
   // — canonical faction presences —
   {
@@ -55,9 +56,9 @@ export const NPC_PLACEMENTS: NpcPlacement[] = [
   },
   {
     key: 'wraith', name: 'Wraith', faction: 'tollkeepers',
-    approx: [672, 60], dx: 0, dz: 0, role: 'Tollgate booth keeper',
+    poiId: 'tollgate', dx: 0, dz: 0, role: 'Tollgate booth keeper',
     traderId: 'toll_exchange',
-    note: 'Island’s eastern edge, causeway out. Needs the tollgate POI (wiring step).',
+    note: 'The causeway gate on the northern span (Beta canon moved the toll from the old map’s east edge). (Map integration, 2026-10-21: POI-anchored — his old approx WAS the old tollgate’s coordinates.)',
   },
   {
     key: 'vesper', name: 'Cpt. Selene Vesper', faction: 'drowned',
@@ -158,4 +159,5 @@ export const WORLD_WIRING_STEPS: string[] = [
   'W6. Enclave caches: place ENCLAVE_CACHES as locked container interactables (lockpick-gated) at their anchors with signatureItem + generic tech loot; flavor text on open; each registers interact id cache:<cacheId> and fires questEvent(\'interact\', \'cache:<cacheId>\') on open so q_enclave_burst steps complete.',
   'W7. Radio burst: after flag relay_online first set, play ENCLAVE_RADIO_BURST via the dialogue/journal surface and set enclave_burst_heard — q_enclave_burst starts on that flag (startsWhen {flag} already supported) and completes on the three cache interacts (W6).',
   'W8. Relay mast visual: the relay_station interactable the purge left standing (Priya gate) — confirm its interact id stays poi:relay_switch so q3_clear_relay step s2 keeps completing.',
+  'W9. MAP INTEGRATION (2026-10-21) supersedes the coordinate statements in W1/W2/W5: POI positions live in data/betaLayout.ts BETA_POI_PLACEMENTS (the W1 sites sit at their Beta placements — tollgate on the Citadel causeway, warehouse in the Citadel yard, gas_station on NC-12, town/strip_mall at Tern Rock, barn in the Refuge orbit, raider_fort in the SE dunes); every NPC placement is POI-anchored (wraith → tollgate, the_accountant → dune_cache); drawn roads are BETA_ROADS (ROAD_GRAPH remains the travel/faction graph only).',
 ];

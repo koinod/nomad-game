@@ -8,9 +8,11 @@ import { TERRITORY, MAP_MARKERS, territoryAt } from '../data/territory';
 import { NPC_PLACEMENTS, ROAD_GRAPH, ENCLAVE_CACHES, ENCLAVE_RADIO_BURST } from '../data/worldWiring';
 import { QUESTS } from '../data/quests';
 import { ITEMS } from '../data/items';
-import { POI_DEFS } from '../game/World';
+import { BETA_POI_PLACEMENTS } from '../data/betaLayout';
 
-const poiIds = new Set(POI_DEFS.map((p) => p.id));
+// POI id set: BETA_POI_PLACEMENTS is the POI source of truth since
+// the map integration (2026-10-21; World.POI_DEFS retired with the old map)
+const poiIds = new Set(BETA_POI_PLACEMENTS.map((p) => p.poiId));
 
 describe('canon roster (FACTIONS_CANON §1/§2)', () => {
   it('six easymode factions, exactly the canon set', () => {

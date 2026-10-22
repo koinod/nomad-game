@@ -1,8 +1,9 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { CarPhysics, geomFor, ackermannSteer } from '../game/CarPhysics';
 import { VEHICLE_DEFS, type Vehicle } from '../game/Vehicles';
-import { initTerrainField, setTerrainPads, bakeGroundField, heightAt } from '../game/World';
+import { heightAt } from '../game/World';
+import { buildBetaRapierHeightfield } from '../game/betaTerrain';
 
 /**
  * Item 4 (2026-10-21, Ian's playtest): "the turning should be from the
@@ -249,44 +250,42 @@ describe('Item 4b — lane hold at full throttle', () => {
     expect(maxLat).toBeLessThan(1.5);
   }, 90000);
 
-  it('mustang holds its line at cruise on the REAL island field', async () => {
-    // The wander Ian feels lives here, not on flat ground: the baked
-    // island field (2 m nodes, dune crests to 18 deg). Baseline before
-    // the self-aligning torque: heading random-walked continuously
-    // (+10 deg and 5.3 m of drift over ~130 m at cruise, wheel never
-    // touched). With the torque, the same course holds heading within
-    // ~2 deg and the line within ~1.4 m.
-    // The course ends at z ~ -143 on purpose: at z ~ -138 a sharp
-    // diagonal ridge crest (~1 m face) launches the car at cruise
-    // speed and it lands with a ~10 deg heading kick — a discrete
-    // terrain-impact event, not wander (the car then holds its NEW
-    // heading stably, exactly like a real car knocked off line; the
-    // driver corrects it). Pinning the wander claim over the 120 m
-    // of dunes BEFORE that crest is the honest course.
+  it('mustang holds its line at cruise on the REAL island field (NC-12)', async () => {
+    // The wander Ian feels lives here, not on flat ground. MAP
+    // INTEGRATION (2026-10-21): the course is the NC-12 corridor's
+    // Citadel leg on the Beta grid — start on the Citadel pad,
+    // heading along the graded centerline toward the Refuge; lateral
+    // deviation is measured from the drive line itself. (The old
+    // course crossed the retired analytic island; that terrain is
+    // deleted, and the graded road is the surface the player actually
+    // cruises.) No steering input the whole run: any drift is the
+    // car + surface, not the driver.
     const ground = (x: number, z: number) => heightAt(x, z);
-    const cp = await CarPhysics.create(ground);
-    const v = fakeVehicle('mustang', 0, -260, 0);
-    v.group.position.y = ground(0, -260);
+    const cp = await CarPhysics.create(ground, buildBetaRapierHeightfield());
+    const sx = 268;
+    const sz = -252; // the Citadel point — nc12_corridor's first node
+    const heading = Math.atan2(296 - sx, -176 - sz); // toward the next node
+    const v = fakeVehicle('mustang', sx, sz, heading);
+    v.group.position.y = ground(sx, sz);
     cp.spawnCar(v, [], 0);
+    const dirX = Math.sin(heading);
+    const dirZ = Math.cos(heading);
     const dt = 1 / 60;
     let maxLat = 0;
-    for (let i = 0; i < 60 * 12; i++) {
-      const throttle = THREE.MathUtils.clamp((12 - cp.speed) * 0.25, 0, 0.7);
+    for (let i = 0; i < 60 * 7.5; i++) {
+      const throttle = THREE.MathUtils.clamp((10 - cp.speed) * 0.25, 0, 0.7);
       cp.step(dt, { throttle, steer: 0, handbrake: false, hasFuel: true }, v, ground);
-      if (i > 60) maxLat = Math.max(maxLat, Math.abs(v.group.position.x));
+      const rx = v.group.position.x - sx;
+      const rz = v.group.position.z - sz;
+      if (i > 60) maxLat = Math.max(maxLat, Math.abs(rx * dirZ - rz * dirX));
     }
+    const along = (v.group.position.x - sx) * dirX + (v.group.position.z - sz) * dirZ;
     console.log(
-      `[lane island] maxLat ${maxLat.toFixed(2)} m, final x ${v.group.position.x.toFixed(2)}, ` +
-      `z ${v.group.position.z.toFixed(0)}, heading ${(v.heading * 180 / Math.PI).toFixed(2)} deg`,
+      `[lane nc12] maxLat ${maxLat.toFixed(2)} m, along ${along.toFixed(1)} m, ` +
+      `heading drift ${((v.heading - heading) * 180 / Math.PI).toFixed(2)} deg`,
     );
-    expect(v.group.position.z).toBeGreaterThan(-160); // it actually went somewhere
-    expect(maxLat).toBeLessThan(2.0);
-    expect(Math.abs(v.heading * 180 / Math.PI)).toBeLessThan(3.5);
+    expect(along).toBeGreaterThan(45); // it actually went somewhere (the leg runs 81 m)
+    expect(maxLat).toBeLessThan(2.5); // holds the corridor (graded half width 4.6 m)
+    expect(Math.abs((v.heading - heading) * 180 / Math.PI)).toBeLessThan(4);
   }, 120000);
-});
-
-beforeAll(() => {
-  initTerrainField(1337);
-  setTerrainPads([]);
-  bakeGroundField();
 });

@@ -16,7 +16,7 @@ export interface DispatchPoi {
 }
 
 /** Destinations the crew can be sent to (sub-locations excluded).
- *  Census verified against World.ts POI_DEFS (the live poiPositions
+ *  Census verified against BETA_POI_PLACEMENTS (the live poiPositions
  *  source): relay_switch and lighthouse_top are sub-locations of
  *  relay_station / lighthouse_base and stay excluded, as before. */
 export const DISPATCH_POIS: DispatchPoi[] = [

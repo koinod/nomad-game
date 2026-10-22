@@ -11,6 +11,7 @@ import { buildStallion, applyStallionUpgrades } from './carModels';
 import { GT500_DEF, GT500_GLB_PATH, GT500_SPAWN, GT500_WHEEL_RIG } from './gt500Def';
 import { PRIME_DEF, PRIME_GLB_PATH, PRIME_SPAWN, PRIME_WHEEL_RIG } from './primeDef';
 import { SPRINTER_DEF, SPRINTER_GLB_PATH, SPRINTER_SPAWN, SPRINTER_WHEEL_RIG } from './sprinterDef';
+import { padWorld } from './airbaseSite';
 
 export { glassTint } from './modelKit';
 export { GT500_DEF, GT500_SPAWN } from './gt500Def';
@@ -480,11 +481,12 @@ export function attachSprinterGlb(v: Vehicle): void {
 
 export const SEAHAWK_GLB_PATH = '/seahawk.glb';
 
-/** Where the Seahawk sits: the hangar apron survey point on the airbase
- *  plateau (AIRFIELD_LAYOUT's hangar at AIRBASE_CENTER + (-18,-34), its
- *  apron 24 m south of the hangar front). Heading -PI/2 reads as a
- *  vehicle heading — nose west, parked parallel to the hangar front. */
-export const SEAHAWK_PAD = { x: 462, z: -118, heading: -Math.PI / 2 };
+/** Where the Seahawk sits: its marked pad at the fleet home — derived
+ *  from airbaseSite's pad table (map integration, 2026-10-21: the pad
+ *  moved with the site's Beta re-siting; there is no second copy of
+ *  the position to drift). Heading -PI/2 reads as a vehicle heading —
+ *  nose west, parked parallel to the hangar front. */
+export const SEAHAWK_PAD = padWorld('pad_seahawk');
 
 /**
  * Lane 2's MH-60S Seahawk (public/seahawk.glb, tools/seahawk/SPEC.md),

@@ -19,7 +19,7 @@ import { buildItemModel } from './itemModels';
 import { buildFurnitureMesh, applyDisturbed, applyRestored, FURNITURE_LABEL, type FurnitureKind } from './furnitureMeshes';
 import { sfx } from '../systems/audio';
 import { AlarmRegistry, type AlarmDef } from './alarm';
-import { CAMPFIRE_SPOTS, biomeAt, findLandZ } from './World';
+import { CAMPFIRE_SPOTS, biomeAt } from './World';
 import { ENCLAVE_CACHES, NPC_PLACEMENTS } from '../data/worldWiring';
 
 export interface LootEntry {
@@ -598,9 +598,12 @@ export class InteractSystem {
       { id: 'npc:kowalski', poiId: 'lighthouse_base', label: 'Talk to Kowalski', jacket: 0x3c5a6e, dx: -1.8, dz: 1.0 },
     ];
     // W2 (stage 7): Lane 9's placements. POI-anchored where the data
-    // gives a poiId; Wraith anchors to the tollgate POI W1 landed (his
-    // approx IS the tollgate); the Accountant stands free at his dune
-    // approx, z resolved by the same land scan the POIs use.
+    // gives a poiId (since the map integration, 2026-10-21, every
+    // placement has one — Wraith fronts the tollgate POI, the
+    // Accountant rides the dune_cache POI). A free-standing approx,
+    // if data ever carries one again, is a true position used
+    // verbatim: the findLandZ land scan it used to feed died with
+    // the analytic terrain it scanned.
     for (const p of NPC_PLACEMENTS) {
       const def: NpcDef = {
         id: `npc:${p.key}`,
@@ -610,10 +613,9 @@ export class InteractSystem {
         dz: p.dz,
       };
       if (p.poiId) def.poiId = p.poiId;
-      else if (p.key === 'wraith') def.poiId = 'tollgate';
       else if (p.approx) {
         def.ax = p.approx[0];
-        def.az = findLandZ(p.approx[0], p.approx[1]);
+        def.az = p.approx[1];
       }
       npcDefs.push(def);
     }
@@ -947,7 +949,10 @@ export function buildContainerDefs(pois: Record<string, [number, number]>): Cont
     ]),
     // vehicle-part caches: every upgrade/repair input is findable in the
     // world (and craftable at the Machine Shop) — logistics + military spots
-    C('c_parts_warehouse', 'town', 100, 50, [
+    // (map integration, 2026-10-21: anchored to the warehouse POI it
+    // names — the old 'town' + (100, 50) offset was old-map geometry
+    // compensation and lands in an empty field on the Beta island)
+    C('c_parts_warehouse', 'warehouse', 6, 4, [
       { id: 'tire', min: 1, max: 1, chance: 0.9 },
       { id: 'engine_part', min: 1, max: 1, chance: 0.8 },
       { id: 'armor_plate', min: 1, max: 2, chance: 0.6 },
@@ -958,7 +963,9 @@ export function buildContainerDefs(pois: Record<string, [number, number]>): Cont
       { id: 'car_battery', min: 1, max: 1, chance: 0.6 },
       { id: 'scrap', min: 1, max: 3, chance: 0.9 },
     ]),
-    C('c_parts_gas', 'town', 72, 26, [
+    // (map integration, 2026-10-21: anchored to the gas_station POI
+    // it names — same old-map offset compensation as the warehouse)
+    C('c_parts_gas', 'gas_station', 5, 3, [
       { id: 'fuel_can', min: 1, max: 1, chance: 0.7 },
       { id: 'tire', min: 1, max: 1, chance: 0.5 },
       { id: 'engine_part', min: 1, max: 1, chance: 0.4 },

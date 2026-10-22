@@ -14,11 +14,13 @@
 //     dx/dz/heading from their pad via padSpawn(), so a pad move moves
 //     the spawn with it — no second copy to drift.
 //
-// The demonstration siting below puts the site on the old map's airbase
-// plateau: origin == the 'airbase' POI == World.AIRBASE_CENTER (a test
-// pins the equality so the two can never silently diverge). Everything
-// is site-local; siteToWorld() is the single transform, using the same
-// quarter-turn convention as the building kit (kit.ts pt()).
+// The siting below IS the Beta Island placement (map integration,
+// 2026-10-21): origin == the 'airbase' POI in data/betaLayout.ts
+// BETA_POI_PLACEMENTS (468, −128), on the airbase sector's surveyed
+// pad (grade 2.7, betaTerrain) — a test pins the equality so the two
+// can never silently diverge. Everything is site-local; siteToWorld()
+// is the single transform, using the same quarter-turn convention as
+// the building kit (kit.ts pt()).
 
 export interface AirbaseSite {
   /** World [x, z] of the site origin — today the 'airbase' POI. */
@@ -27,9 +29,10 @@ export interface AirbaseSite {
   rotQ: 0 | 1 | 2 | 3;
 }
 
-/** Demonstration placement: the current plateau. The Beta Island map
- *  wave re-sites this (and World.AIRBASE_CENTER with it) in one move. */
-export const AIRBASE_SITE: AirbaseSite = { origin: [480, -108], rotQ: 0 };
+/** Beta Island placement: the 'airbase' POI (468, −128) on the NE-coast
+ *  sector pad — re-sited here in the map integration (2026-10-21), the
+ *  one edit this module was designed for. */
+export const AIRBASE_SITE: AirbaseSite = { origin: [468, -128], rotQ: 0 };
 
 /** The POI every fleet spawn anchors to. SpawnDef dx/dz are POI-relative,
  *  so the POI position must stay the site origin. */
@@ -80,7 +83,7 @@ export interface AirbasePad {
 
 export const AIRBASE_PADS: AirbasePad[] = [
   // The Seahawk's pad — position is contract (seahawkPlacement.test):
-  // site + (-18, -10) == (462, -118), nose west.
+  // site + (-18, -10) == (450, -138) under the Beta siting, nose west.
   { id: 'pad_seahawk', label: 'H', lx: -18, lz: -10, hx: 9.5, hz: 9.5, heading: -Math.PI / 2 },
   // Reserved for the Dark Horse when it lands — marked, honestly empty.
   { id: 'pad_dark_horse', label: 'DH', lx: -4, lz: -9, hx: 4.5, hz: 3.2, heading: Math.PI / 2 },
