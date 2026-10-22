@@ -27,9 +27,11 @@ import {
 import type { SkillId } from '../data/skills';
 import {
   hasTurretHost,
+  reachableStationTier,
   type CraftStationId,
 } from '../data/stations';
-import { useGameStore, craftQueueBridge } from '../store/gameStore';
+import { useGameStore, craftQueueBridge, claimsFromLegacyBase } from '../store/gameStore';
+import { facilityPresenceAt, presenceContext } from './facilityPresence';
 import { walkCarried } from '../store/containers';
 import { craftTimeMult } from './perkEffects';
 import { perkById } from '../data/skills';
@@ -222,8 +224,13 @@ export interface CraftContext {
   facilityStation?: CraftStationId | null;
   /** Best tier reachable for the recipe's station (see data/stations). */
   nearStationTier: number;
-  /** Built facility ids at the player's base (turret host + tiers). */
+  /** Host ids (FACILITY_STATION_HOSTS space) of the base the player is
+   *  standing in — ORDER #4 C5 presence semantics: a base across the
+   *  island contributes nothing. Empty away from any claimed base. */
   facilities: readonly string[];
+  /** Name of the base the player is standing in, if any (C5) — used
+   *  only to make gate reasons say where the player needs to be. */
+  atBaseName?: string | null;
   skillLevel: SkillLevelProvider;
   /** Order #5: owned perks — the perk gate (Master Fabricator) and the
    *  turret blueprint waiver read these. Absent = no perks. */
@@ -303,7 +310,13 @@ export function checkCraft(recipe: FieldRecipe, ctx: CraftContext): CraftCheck {
   if (!blueprintOk) reasons.push('Needs the blueprint (loot: military armory, convoy cargo).');
 
   const facilityOk = meta.facilityReq !== 'turret_host' || hasTurretHost(ctx.facilities);
-  if (!facilityOk) reasons.push('Needs a T3 Machine Shop or Garage facility at your base.');
+  if (!facilityOk) {
+    reasons.push(
+      ctx.atBaseName
+        ? `Needs a T3 Machine Shop or Garage at ${ctx.atBaseName} — not built here.`
+        : 'Needs a T3 Machine Shop or Garage facility at your base — and you have to be standing there.',
+    );
+  }
 
   const resultKnown = ITEMS[recipe.resultId] !== undefined;
   if (!resultKnown) reasons.push('Schematics pending — item data not in the world yet.');
@@ -449,6 +462,38 @@ function refundComponents(recipe: FieldRecipe): void {
   for (const c of recipe.components) s.addItem(c.itemId, c.qty, true);
 }
 
+/**
+ * ORDER #4 C5 — execution-time presence enforcement. The caller's ctx
+ * is a UI snapshot; the queue re-derives every world-derived field
+ * (world-station mirror, base presence, hosted tiers) from live store
+ * state before gating, so a stale or hand-built ctx cannot start a
+ * facility craft from outside the base ring — the same lesson as
+ * order #5's instant-craft gate hole. Caller-owned fields (countItem,
+ * skillLevel, perks) pass through untouched.
+ */
+export function liveCraftContext(recipe: FieldRecipe, ctx: CraftContext): CraftContext {
+  const s = useGameStore.getState();
+  const claims = s.claims.home || !s.base
+    ? s.claims
+    : { home: claimsFromLegacyBase(s.base).home, outposts: s.claims.outposts };
+  const presence = facilityPresenceAt(claims, s.poiPositions, s.pos[0], s.pos[2]);
+  const station = (recipe.station ?? null) as CraftStationId | null;
+  const pc = presenceContext(presence, station);
+  return {
+    ...ctx,
+    nearStation: s.nearStation,
+    facilityStation: pc.facilityStation,
+    nearStationTier: station
+      ? reachableStationTier(station, {
+          atWorldStation: s.nearStation === station,
+          facilities: pc.facilityIds,
+        })
+      : ctx.nearStationTier,
+    facilities: pc.facilityIds,
+    atBaseName: presence?.siteName ?? null,
+  };
+}
+
 let jobSeq = 0;
 
 export interface CraftQueueState {
@@ -471,7 +516,7 @@ export const useCraftQueue = create<CraftQueueState>()((set, get) => ({
     const recipe = getRecipe(recipeId);
     if (!recipe) return 'Unknown recipe.';
     if (isInstant(recipe)) return 'Instant recipe — use the regular craft action.';
-    const check = checkCraft(recipe, ctx);
+    const check = checkCraft(recipe, liveCraftContext(recipe, ctx));
     if (!check.ok) return check.reasons[0] ?? 'Cannot craft that yet.';
     if (!consumeComponents(recipe)) return 'Missing components.';
     const uid = `job_${++jobSeq}_${recipeId}`;

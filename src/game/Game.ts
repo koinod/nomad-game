@@ -2,7 +2,8 @@
 // Public API matches INTERFACES.md exactly.
 
 import * as THREE from 'three';
-import { useGameStore } from '../store/gameStore';
+import { useGameStore, claimsFromLegacyBase } from '../store/gameStore';
+import { facilityPresenceAt } from '../systems/facilityPresence';
 import type { DifficultyId, NearbyEntry, SaveSnapshot, VehicleSave, WorldDiff } from '../store/types';
 import { hasPhoneCarried, nearbyFromSources, walkCarried } from '../store/containers';
 import { DIFFICULTIES } from '../store/types';
@@ -816,6 +817,19 @@ export class Game {
       }
     }
     s.setNearStation(foundStation);
+
+    // ORDER #4 C5: base presence, mirrored beside the station check —
+    // which claimed base's ring the player stands in and what it hosts
+    // (systems/facilityPresence). Effective claims mirror the phone
+    // Base tab's rule: the tiered claims state, with a legacy-only
+    // base folded in until the next load migrates it. The setter is
+    // signature-guarded, so this costs a store write only on change.
+    {
+      const claims = s.claims.home || !s.base
+        ? s.claims
+        : { home: claimsFromLegacyBase(s.base).home, outposts: s.claims.outposts };
+      s.setAtBase(facilityPresenceAt(claims, s.poiPositions, px, pz));
+    }
 
     // fleet telemetry for the phone's Vehicles app (~1 Hz)
     this.fleetT += dt;
