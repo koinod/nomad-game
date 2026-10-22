@@ -52,6 +52,8 @@ export const ITEM_MODEL_IDS = new Set([
   'finish_matte', 'finish_camo', 'finish_rust', 'finish_worn',
   'armored_vest', 'riot_helmet', 'plate_carrier', 'shin_guards',
   'circuit_board', 'gunpowder', 'brass', 'lead', 'bp_turret', 'turret',
+  'bp_machine_shop', 'bp_command_post', 'bp_supply_depot', 'bp_pump_station',
+  'bp_hydroponics', 'bp_field_hospital', 'bp_heavy_garage',
   'field_jacket', 'cargo_pants', 'hard_case', 'ammo_can',
 ]);
 
@@ -368,8 +370,23 @@ export function buildItemModel(itemId: string, qty = 1): THREE.Group | null {
       add(box(0.16, 0.07, 0.005), new THREE.MeshStandardMaterial({ color: 0xc9b458, roughness: 0.7 }), 0, 0.09, 0.082); // stencil plate
       break;
     }
-    case 'bp_turret': {
-      add(cyl(0.035, 0.035, 0.3, 12), new THREE.MeshStandardMaterial({ color: 0x38618a, roughness: 0.6 }), 0, 0.04, 0).rotation.z = Math.PI / 2; // rolled plans tube
+    case 'bp_turret':
+    case 'bp_machine_shop':
+    case 'bp_command_post':
+    case 'bp_supply_depot':
+    case 'bp_pump_station':
+    case 'bp_hydroponics':
+    case 'bp_field_hospital':
+    case 'bp_heavy_garage': {
+      // every blueprint reads the same at arm's length — a rolled plans
+      // tube with one sheet escaping; the tube's stencil color is the
+      // facility's (machinist brown, ops green, medic red, ...)
+      const tubeColor = {
+        bp_turret: 0x38618a, bp_machine_shop: 0x8a5a38, bp_command_post: 0x4a6b4f,
+        bp_supply_depot: 0x7a6a38, bp_pump_station: 0x386a7a, bp_hydroponics: 0x4f7a3a,
+        bp_field_hospital: 0x8a3a3a, bp_heavy_garage: 0x555c66,
+      }[itemId] ?? 0x38618a;
+      add(cyl(0.035, 0.035, 0.3, 12), new THREE.MeshStandardMaterial({ color: tubeColor, roughness: 0.6 }), 0, 0.04, 0).rotation.z = Math.PI / 2; // rolled plans tube
       add(box(0.26, 0.005, 0.19), new THREE.MeshStandardMaterial({ color: 0xd8dee2, roughness: 0.9 }), 0.02, 0.012, 0.1); // one sheet, escaped
       break;
     }

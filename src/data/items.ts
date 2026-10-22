@@ -407,6 +407,41 @@ export const ITEMS: Record<string, ItemDef> = {
     id: 'bp_turret', name: 'Blueprint — Automated Turret', category: 'blueprint', weight: 0.1, slots: 1, stack: 1,
     desc: 'Sodgame-era schematics, grease-pencil annotations. Unlocks the turret craft: gun parts, boards, an engine part, and a bench that can read.',
   },
+  // Facility blueprints (BASE_DESIGN §3.3): every T3 tier in data/base.ts
+  // gates on one of these (gate 'builder_specialist_blueprint'). They are
+  // loot-first per Decision 5 — found in the world, never crafted, never
+  // consumed: holding the sheet is what the build menu checks. Placement
+  // follows the fiction (see the loot tables below): engineering sheets
+  // ride the military salvage stream, comms plans sit with the relay crew,
+  // logistics/civil sheets turn up in safes.
+  bp_machine_shop: {
+    id: 'bp_machine_shop', name: 'Blueprint — Machine Shop', category: 'blueprint', weight: 0.1, slots: 1, stack: 1,
+    desc: 'Lathe layouts, jig tolerances, a parts catalog annotated by hand. Unlocks the Machine Shop (Workbench T3) at a claimed base.',
+  },
+  bp_command_post: {
+    id: 'bp_command_post', name: 'Blueprint — Command Post', category: 'blueprint', weight: 0.1, slots: 1, stack: 1,
+    desc: 'Antenna plots, watch rotations, convoy-tracking boards. Unlocks the Command Post T3 at a claimed base.',
+  },
+  bp_supply_depot: {
+    id: 'bp_supply_depot', name: 'Blueprint — Supply Depot', category: 'blueprint', weight: 0.1, slots: 1, stack: 1,
+    desc: 'Racking plans and a stockpile ledger system that actually balances. Unlocks the Supply Depot (Storage T3) at a claimed base.',
+  },
+  bp_pump_station: {
+    id: 'bp_pump_station', name: 'Blueprint — Pump Station', category: 'blueprint', weight: 0.1, slots: 1, stack: 1,
+    desc: 'Wellhead fittings, pressure tables, a note: "the water table is 2m down — trust it." Unlocks the Pump Station (Water T3) at a claimed base.',
+  },
+  bp_hydroponics: {
+    id: 'bp_hydroponics', name: 'Blueprint — Hydroponics', category: 'blueprint', weight: 0.1, slots: 1, stack: 1,
+    desc: 'Nutrient schedules and lamp timings in a careful hand. Unlocks Hydroponics (Garden T3) at a claimed base.',
+  },
+  bp_field_hospital: {
+    id: 'bp_field_hospital', name: 'Blueprint — Field Hospital', category: 'blueprint', weight: 0.1, slots: 1, stack: 1,
+    desc: 'Triage flowcharts, sterile-field diagrams, a formulary. Unlocks the Field Hospital (Infirmary T3) at a claimed base.',
+  },
+  bp_heavy_garage: {
+    id: 'bp_heavy_garage', name: 'Blueprint — Heavy Garage', category: 'blueprint', weight: 0.1, slots: 1, stack: 1,
+    desc: 'Lift schematics rated for a loaded semi, bay drainage, crane rails. Unlocks the Heavy Garage (Garage T3) at a claimed base.',
+  },
   turret: {
     // the blueprint craft's product (SYSTEMS_SPEC §4.3): a deployable
     // defense for claim ground — placement/ghost logic is Lane 7 + 10's,
@@ -484,6 +519,11 @@ export const HUSK_LOOT: Record<string, HuskLootEntry[]> = {
     { id: 'lead', min: 1, max: 2, chance: 0.3 },
     { id: 'plate_carrier', min: 1, max: 1, chance: 0.08 },
     { id: 'bp_turret', min: 1, max: 1, chance: 0.05 },
+    // the motor pool's paper: engineering blueprints and the rigger
+    // pack ride the same salvage stream as the turret sheet
+    { id: 'bp_machine_shop', min: 1, max: 1, chance: 0.04 },
+    { id: 'bp_heavy_garage', min: 1, max: 1, chance: 0.03 },
+    { id: 'pack_t2', min: 1, max: 1, chance: 0.05 },
   ],
   forest: [
     { id: 'cloth', min: 1, max: 2, chance: 0.6 },
@@ -492,6 +532,7 @@ export const HUSK_LOOT: Record<string, HuskLootEntry[]> = {
     { id: 'flare', min: 1, max: 1, chance: 0.15 },
     { id: 'scrap', min: 1, max: 2, chance: 0.2 },
     { id: 'rock', min: 1, max: 2, chance: 0.25 },
+    { id: 'finish_camo', min: 1, max: 1, chance: 0.08 },
   ],
   town: [
     { id: 'canned_food', min: 1, max: 2, chance: 0.35 },
@@ -501,6 +542,7 @@ export const HUSK_LOOT: Record<string, HuskLootEntry[]> = {
     { id: 'ammo_9mm', min: 2, max: 5, chance: 0.12 },
     { id: 'armor_plate', min: 1, max: 1, chance: 0.05 },
     { id: 'finish_worn', min: 1, max: 1, chance: 0.06 },
+    { id: 'bp_field_hospital', min: 1, max: 1, chance: 0.04 },
   ],
   relay: [
     { id: 'wire', min: 1, max: 3, chance: 0.4 },
@@ -510,12 +552,16 @@ export const HUSK_LOOT: Record<string, HuskLootEntry[]> = {
     { id: 'chemicals', min: 1, max: 1, chance: 0.2 },
     { id: 'circuit_board', min: 1, max: 1, chance: 0.25 },
     { id: 'scope', min: 1, max: 1, chance: 0.15 },
+    // the relay crew ran the island's comms — the command plans were
+    // in a tech's pocket when the Static took the station
+    { id: 'bp_command_post', min: 1, max: 1, chance: 0.06 },
   ],
   dunes: [
     { id: 'water_bottle', min: 1, max: 2, chance: 0.35 },
     { id: 'bandage', min: 1, max: 1, chance: 0.25 },
     { id: 'canned_food', min: 1, max: 1, chance: 0.25 },
     { id: 'cloth', min: 1, max: 2, chance: 0.2 },
+    { id: 'finish_rust', min: 1, max: 1, chance: 0.08 },
   ],
   default: [
     { id: 'cloth', min: 1, max: 2, chance: 0.3 },
@@ -702,6 +748,36 @@ export const STATION_RECIPES: Record<string, FieldRecipe> = {
     components: [{ itemId: 'gun_parts', qty: 1 }, { itemId: 'wire', qty: 1 }],
     resultId: 'flashlight', resultQty: 1,
   },
+  r_scope: {
+    // §3.2 roster parity: every sibling mod is a bench craft — the
+    // scope was the only one left loot-only. Same family cost as the
+    // reflex sight, plus the wire its reticle illumination drinks.
+    id: 'r_scope', name: '4× scope', station: 'workbench',
+    components: [{ itemId: 'gun_parts', qty: 2 }, { itemId: 'wire', qty: 1 }],
+    resultId: 'scope', resultQty: 1,
+    skillReq: { skill: 'mechanics', level: 1 },
+  },
+  r_reload_556: {
+    // §4.2 ladder completion: 9mm and shells had component reloads;
+    // 5.56 (carbine/DMR feed) had none — the guns went quiet once the
+    // placed ammo ran out. Same T2 recipe shape, same yield class.
+    id: 'r_reload_556', name: 'Reload 5.56 (components)', station: 'workbench',
+    components: [{ itemId: 'gunpowder', qty: 1 }, { itemId: 'brass', qty: 1 }, { itemId: 'lead', qty: 1 }],
+    resultId: 'ammo_556', resultQty: 12,
+  },
+  r_reload_rifle: {
+    // §4.2 ladder completion: hunting-rifle rounds join the reload
+    // bench — fewer per batch (bigger case, longer bullet).
+    id: 'r_reload_rifle', name: 'Reload rifle rounds (components)', station: 'workbench',
+    components: [{ itemId: 'gunpowder', qty: 1 }, { itemId: 'brass', qty: 1 }, { itemId: 'lead', qty: 1 }],
+    resultId: 'ammo_rifle', resultQty: 8,
+  },
+  r_bolts: {
+    // the crossbow's feed: fletched bolts are bench work, not loot luck
+    id: 'r_bolts', name: 'Bolts', station: 'workbench',
+    components: [{ itemId: 'wood', qty: 1 }, { itemId: 'scrap', qty: 1 }],
+    resultId: 'bolts', resultQty: 6,
+  },
   // --- Chemistry Station ---
   r_medkit: {
     id: 'r_medkit', name: 'Medkit', station: 'chemistry',
@@ -730,6 +806,21 @@ export const STATION_RECIPES: Record<string, FieldRecipe> = {
     id: 'r_smoke_grenade', name: 'Smoke grenade', station: 'chemistry',
     components: [{ itemId: 'chemicals', qty: 2 }, { itemId: 'scrap', qty: 1 }],
     resultId: 'smoke', resultQty: 1,
+    skillReq: { skill: 'mechanics', level: 1 },
+  },
+  r_frag: {
+    // throwable-set completion: molotov and smoke were chemistry
+    // crafts; the frag was loot-and-pickup only. Powder does the work,
+    // scrap is the casing — same gate class as the smoke grenade.
+    id: 'r_frag', name: 'Frag grenade', station: 'chemistry',
+    components: [{ itemId: 'gunpowder', qty: 2 }, { itemId: 'scrap', qty: 1 }],
+    resultId: 'frag', resultQty: 1,
+    skillReq: { skill: 'mechanics', level: 1 },
+  },
+  r_flashbang: {
+    id: 'r_flashbang', name: 'Flashbang', station: 'chemistry',
+    components: [{ itemId: 'chemicals', qty: 1 }, { itemId: 'gunpowder', qty: 1 }],
+    resultId: 'flashbang', resultQty: 1,
     skillReq: { skill: 'mechanics', level: 1 },
   },
   // --- Machine Shop ---
@@ -884,6 +975,12 @@ export const SAFE_LOOT: HuskLootEntry[] = [
   { id: 'lockpick', min: 1, max: 2, chance: 0.35 },
   { id: 'circuit_board', min: 1, max: 2, chance: 0.3 },
   { id: 'scope', min: 1, max: 1, chance: 0.12 },
+  // civil paper is safe paper: logistics, water, food and medical
+  // plans were worth locking up before the Static — and still are
+  { id: 'bp_supply_depot', min: 1, max: 1, chance: 0.10 },
+  { id: 'bp_pump_station', min: 1, max: 1, chance: 0.08 },
+  { id: 'bp_hydroponics', min: 1, max: 1, chance: 0.08 },
+  { id: 'bp_field_hospital', min: 1, max: 1, chance: 0.06 },
 ];
 
 /** Harvest nodes in the wild: fallen logs give wood, berry bushes give produce. */
@@ -972,6 +1069,8 @@ export const FOOTPRINTS: Record<string, [number, number]> = {
   ammo_9mm: [1, 1], shells: [1, 1], ammo_rifle: [1, 1], ammo_556: [1, 1], bolts: [1, 1],
   scrap: [1, 1], wire: [1, 1], cloth: [1, 1], chemicals: [1, 1], gun_parts: [1, 1],
   gunpowder: [1, 1], brass: [1, 1], lead: [1, 1], circuit_board: [1, 1], bp_turret: [1, 1],
+  bp_machine_shop: [1, 1], bp_command_post: [1, 1], bp_supply_depot: [1, 1], bp_pump_station: [1, 1],
+  bp_hydroponics: [1, 1], bp_field_hospital: [1, 1], bp_heavy_garage: [1, 1],
   plate_carrier: [2, 2], shin_guards: [1, 1], turret: [3, 2],
   valuables: [1, 1], lockpick: [1, 1], phone: [1, 1], relay_part: [1, 1], beacon_cell: [1, 1],
   flare: [1, 1], fire_starter: [1, 1], gun_oil: [1, 1], cleaning_kit: [1, 1],
@@ -1030,6 +1129,8 @@ export const BARTER_VALUES: Record<string, number> = {
   armored_vest: 90, riot_helmet: 55, shin_guards: 30, plate_carrier: 180,
   // packs + the blueprint economy
   pack_t1: 35, pack_t2: 70, bp_turret: 150, turret: 400,
+  bp_machine_shop: 200, bp_command_post: 200, bp_supply_depot: 150, bp_pump_station: 150,
+  bp_hydroponics: 150, bp_field_hospital: 175, bp_heavy_garage: 250,
   // worn garments + rigid containers (priced like the storage they are)
   field_jacket: 45, cargo_pants: 30, hard_case: 55, ammo_can: 25,
 };
@@ -1060,6 +1161,9 @@ export const BIOME_LOOT_WEIGHT: Record<LootBiome, Record<LootClass, number>> = {
 const LOOT_CLASS_BY_ITEM: Record<string, LootClass> = {
   gun_parts: 'military', armor_plate: 'military', bp_turret: 'military',
   plate_carrier: 'military', armored_vest: 'military', riot_helmet: 'military',
+  bp_machine_shop: 'military', bp_command_post: 'military', bp_supply_depot: 'military',
+  bp_pump_station: 'military', bp_hydroponics: 'military', bp_field_hospital: 'military',
+  bp_heavy_garage: 'military',
 };
 
 /** The class an entry rolls as: explicit field > item override > category. */
