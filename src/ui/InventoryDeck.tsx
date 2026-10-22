@@ -71,13 +71,19 @@ export default function InventoryDeck({ compact = false }: { compact?: boolean }
   const useItemUid = useGameStore((s) => s.useItemUid);
   const dropUid = useGameStore((s) => s.dropUid);
   const transferItem = useGameStore((s) => s.transferItem);
+  const transferItemQty = useGameStore((s) => s.transferItemQty);
+  const splitStack = useGameStore((s) => s.splitStack);
   const moveInvItem = useGameStore((s) => s.moveInvItem);
   const moveStorageItem = useGameStore((s) => s.moveStorageItem);
   const arrangeContainer = useGameStore((s) => s.arrangeContainer);
+  const arrangeStorage = useGameStore((s) => s.arrangeStorage);
   const openStorage = useGameStore((s) => s.openStorage);
   const closeStorage = useGameStore((s) => s.closeStorage);
   const storagePut = useGameStore((s) => s.storagePut);
-  const storageTake = useGameStore((s) => s.storageTake);
+  const storagePutQty = useGameStore((s) => s.storagePutQty);
+  const storageTakeQty = useGameStore((s) => s.storageTakeQty);
+  const storageTakeAll = useGameStore((s) => s.storageTakeAll);
+  const storagePutAll = useGameStore((s) => s.storagePutAll);
   const assignHotbar = useGameStore((s) => s.assignHotbar);
   const nearStation = useGameStore((s) => s.nearStation);
   const repairWeapon = useGameStore((s) => s.repairWeapon);
@@ -87,6 +93,10 @@ export default function InventoryDeck({ compact = false }: { compact?: boolean }
   const [trail, setTrail] = useState<string[]>([]);
   const [selectedUid, setSelectedUid] = useState<string | null>(null);
   const [storageSel, setStorageSel] = useState<number | null>(null);
+  // quantity stepper for the inspected stack: how many units the
+  // Split / Send / Put actions move. null = the whole stack.
+  const [moveQty, setMoveQty] = useState<number | null>(null);
+  useEffect(() => { setMoveQty(null); }, [selectedUid]);
 
   useEffect(() => { refreshNearby(); }, [refreshNearby]);
 
@@ -399,19 +409,58 @@ export default function InventoryDeck({ compact = false }: { compact?: boolean }
                 >Strip (bench)</button>
               )}
             </div>
+            {selected.qty > 1 && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                <span className="text-[9px] uppercase tracking-wide text-[#8a94a3]">Move</span>
+                <button
+                  onClick={() => setMoveQty(Math.max(1, (moveQty ?? selected.qty) - 1))}
+                  className="rounded border border-[#232b36] px-1.5 py-0.5 text-[10px] text-[#d7dde5] hover:border-[#7fb0d9]"
+                >−</button>
+                <span className="min-w-[3ch] text-center font-mono text-[11px] text-[#e8b34b]">
+                  {moveQty ?? selected.qty}
+                </span>
+                <button
+                  onClick={() => setMoveQty(Math.min(selected.qty, (moveQty ?? selected.qty) + 1))}
+                  className="rounded border border-[#232b36] px-1.5 py-0.5 text-[10px] text-[#d7dde5] hover:border-[#7fb0d9]"
+                >+</button>
+                <span className="text-[9px] text-[#8a94a3]">of {selected.qty}</span>
+                <button
+                  disabled={(moveQty ?? selected.qty) >= selected.qty}
+                  onClick={() => { splitStack(selected.uid, moveQty ?? 1); }}
+                  className="rounded border border-[#232b36] px-1.5 py-0.5 text-[10px] text-[#d7dde5] hover:border-[#7fb0d9] disabled:cursor-not-allowed disabled:opacity-40"
+                  title="Split this many off into their own stack, here"
+                >Split</button>
+                <button
+                  onClick={() => setMoveQty(Math.max(1, Math.floor(selected.qty / 2)))}
+                  className="rounded border border-[#232b36] px-1.5 py-0.5 text-[10px] text-[#8a94a3] hover:text-[#f2f5f8]"
+                >½</button>
+                <button
+                  onClick={() => setMoveQty(null)}
+                  className="rounded border border-[#232b36] px-1.5 py-0.5 text-[10px] text-[#8a94a3] hover:text-[#f2f5f8]"
+                >All</button>
+              </div>
+            )}
             {sendTargets.length > 0 && (
               <div className="mt-1.5 flex flex-wrap items-center gap-1">
                 <span className="text-[9px] uppercase tracking-wide text-[#8a94a3]">Send to</span>
                 {sendTargets.map((t) => (
                   <button
                     key={t.label + (t.dest.type === 'container' ? t.dest.uid : 'p')}
-                    onClick={() => { transferItem(selected.uid, t.dest); }}
+                    onClick={() => {
+                      const q = moveQty ?? selected.qty;
+                      if (q >= selected.qty) transferItem(selected.uid, t.dest);
+                      else transferItemQty(selected.uid, t.dest, q);
+                    }}
                     className="rounded border border-[#232b36] px-1.5 py-0.5 text-[10px] text-[#d7dde5] hover:border-[#7fb0d9]"
                   >{t.label}</button>
                 ))}
                 {storageOpen && (
                   <button
-                    onClick={() => storagePut(selected.uid)}
+                    onClick={() => {
+                      const q = moveQty ?? selected.qty;
+                      if (q >= selected.qty) storagePut(selected.uid);
+                      else storagePutQty(selected.uid, q);
+                    }}
                     className="rounded border border-[#232b36] px-1.5 py-0.5 text-[10px] text-[#d7dde5] hover:border-[#7fb0d9]"
                   >{storageOpen.label}</button>
                 )}
@@ -443,17 +492,46 @@ export default function InventoryDeck({ compact = false }: { compact?: boolean }
                 if (idx >= 0) moveStorageItem(idx, gx, gy, rot);
               }}
             />
-            <div className="mt-1.5 flex gap-1">
+            <div className="mt-1.5 flex flex-wrap gap-1">
               <button
                 disabled={!selected}
-                onClick={() => selected && storagePut(selected.uid)}
+                onClick={() => {
+                  if (!selected) return;
+                  const q = moveQty ?? selected.qty;
+                  if (q >= selected.qty) storagePut(selected.uid);
+                  else storagePutQty(selected.uid, q);
+                }}
                 className="rounded border border-[#232b36] px-2 py-1 text-[10px] text-[#d7dde5] disabled:opacity-40"
               >Put selected →</button>
               <button
                 disabled={storageSel === null}
-                onClick={() => storageSel !== null && storageTake(storageSel)}
+                onClick={() => {
+                  if (storageSel === null) return;
+                  const st = storageItems[storageSel];
+                  if (!st) return;
+                  // the deck stepper belongs to the pack selection;
+                  // storage takes move the whole stack unless the
+                  // stepper was set against this exact stack size
+                  storageTakeQty(storageSel, st.qty);
+                }}
                 className="rounded border border-[#232b36] px-2 py-1 text-[10px] text-[#d7dde5] disabled:opacity-40"
               >← Take</button>
+              <button
+                onClick={() => storageTakeAll()}
+                className="rounded border border-[#232b36] px-2 py-1 text-[10px] text-[#d7dde5]"
+              >Take all</button>
+              <button
+                onClick={() => storagePutAll()}
+                className="rounded border border-[#232b36] px-2 py-1 text-[10px] text-[#d7dde5]"
+              >Put all</button>
+              <button
+                onClick={() => arrangeStorage('size')}
+                className="rounded border border-[#232b36] px-2 py-1 text-[10px] text-[#8a94a3] hover:text-[#f2f5f8]"
+              >Arrange</button>
+              <button
+                onClick={() => arrangeStorage('category')}
+                className="rounded border border-[#232b36] px-2 py-1 text-[10px] text-[#8a94a3] hover:text-[#f2f5f8]"
+              >Sort</button>
             </div>
             <div className="mt-1 text-[10px] text-[#8a94a3]">
               {storageItems.reduce((a, i) => a + (ITEMS[i.itemId]?.weight ?? 0) * i.qty, 0).toFixed(1)} kg stored

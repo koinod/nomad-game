@@ -1,6 +1,7 @@
 // LootPanel.tsx — container loot preview. E opens a box and shows what's
 // inside; take what you want, leave the rest for later.
 
+import { useEffect, useState } from 'react';
 import { useGameStore } from '../store/gameStore';
 import { ITEMS } from '../data/items';
 import { sfx } from '../systems/audio';
@@ -10,7 +11,12 @@ export default function LootPanel() {
   const items = useGameStore((s) => (s.lootOpenId ? s.lootStash[s.lootOpenId] : undefined));
   const closeLoot = useGameStore((s) => s.closeLoot);
   const takeLootIndex = useGameStore((s) => s.takeLootIndex);
+  const takeLootQty = useGameStore((s) => s.takeLootQty);
   const takeAllLoot = useGameStore((s) => s.takeAllLoot);
+  // per-row take quantities (keyed by row index; reset when the
+  // container changes — rows shift as stacks drain)
+  const [rowQty, setRowQty] = useState<Record<number, number>>({});
+  useEffect(() => { setRowQty({}); }, [lootOpenId]);
 
   if (!lootOpenId || !items) return null;
 
@@ -57,11 +63,27 @@ export default function LootPanel() {
                     {def.damage ? ` · ${def.damage} dmg` : ''}
                     {def.heal ? ` · +${def.heal} HP` : ''}
                   </div>
+                  {it.qty > 1 && (
+                    <div className="mt-1 flex items-center gap-1 text-[10px] text-[#8a94a3]">
+                      <button
+                        onClick={() => setRowQty((m) => ({ ...m, [i]: Math.max(1, (m[i] ?? it.qty) - 1) }))}
+                        className="rounded border border-[#232b36] px-1.5 py-0.5 text-[#d7dde5]"
+                      >−</button>
+                      <span className="min-w-[3ch] text-center font-mono text-[#e8b34b]">{rowQty[i] ?? it.qty}</span>
+                      <button
+                        onClick={() => setRowQty((m) => ({ ...m, [i]: Math.min(it.qty, (m[i] ?? it.qty) + 1) }))}
+                        className="rounded border border-[#232b36] px-1.5 py-0.5 text-[#d7dde5]"
+                      >+</button>
+                      <span>of {it.qty}</span>
+                    </div>
+                  )}
                 </div>
                 <button
                   onClick={() => {
                     sfx.play('pickup', { volume: 0.6 });
-                    takeLootIndex(lootOpenId, i);
+                    const q = rowQty[i] ?? it.qty;
+                    if (q >= it.qty) takeLootIndex(lootOpenId, i);
+                    else takeLootQty(lootOpenId, i, q);
                   }}
                   className="shrink-0 rounded border border-[#232b36] px-2.5 py-1 text-xs text-[#d7dde5] transition-colors hover:border-[#e8b34b]"
                 >

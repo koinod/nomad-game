@@ -24,12 +24,20 @@ export default function StoragePanel() {
   const closeStorage = useGameStore((s) => s.closeStorage);
   const storagePut = useGameStore((s) => s.storagePut);
   const storageTake = useGameStore((s) => s.storageTake);
+  const storagePutQty = useGameStore((s) => s.storagePutQty);
+  const storageTakeQty = useGameStore((s) => s.storageTakeQty);
+  const storageTakeAll = useGameStore((s) => s.storageTakeAll);
+  const storagePutAll = useGameStore((s) => s.storagePutAll);
+  const arrangeStorage = useGameStore((s) => s.arrangeStorage);
   const moveInvItem = useGameStore((s) => s.moveInvItem);
   const moveStorageItem = useGameStore((s) => s.moveStorageItem);
   const fleet = useGameStore((s) => s.fleet);
   const trailerFleet = useGameStore((s) => s.trailerFleet);
   const [selStored, setSelStored] = useState<string | null>(null);
   const [selPack, setSelPack] = useState<string | null>(null);
+  // per-side quantity steppers (null = the whole selected stack)
+  const [takeQty, setTakeQty] = useState<number | null>(null);
+  const [putQty, setPutQty] = useState<number | null>(null);
 
   if (!storageOpen || inventoryOpen) return null;
 
@@ -81,14 +89,43 @@ export default function StoragePanel() {
           <div>
             <div className="mb-1 flex items-center justify-between">
               <div className="text-[11px] font-semibold tracking-wide text-[#8a94a3]">STORED</div>
-              <button
-                disabled={!storedSel}
-                onClick={() => { sfx.play('ui'); storageTake(storedSelIdx); setSelStored(null); }}
-                className="rounded border border-[#232b36] px-2.5 py-1 text-xs text-[#d7dde5] transition-colors hover:border-[#e8b34b] disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Take{storedSel ? ` ${ITEMS[storedSel.itemId]?.name}` : ''}
-              </button>
+              <span className="flex gap-1">
+                <button
+                  onClick={() => { sfx.play('ui'); arrangeStorage('size'); }}
+                  className="rounded border border-[#232b36] px-2 py-1 text-[11px] text-[#8a94a3] transition-colors hover:text-[#f2f5f8]"
+                >
+                  Arrange
+                </button>
+                <button
+                  onClick={() => { sfx.play('ui'); storageTakeAll(); setSelStored(null); setTakeQty(null); }}
+                  className="rounded border border-[#232b36] px-2.5 py-1 text-xs text-[#d7dde5] transition-colors hover:border-[#e8b34b]"
+                >
+                  Take all
+                </button>
+                <button
+                  disabled={!storedSel}
+                  onClick={() => {
+                    sfx.play('ui');
+                    const q = takeQty ?? storedSel!.qty;
+                    if (q >= storedSel!.qty) storageTake(storedSelIdx);
+                    else storageTakeQty(storedSelIdx, q);
+                    setSelStored(null); setTakeQty(null);
+                  }}
+                  className="rounded border border-[#232b36] px-2.5 py-1 text-xs text-[#d7dde5] transition-colors hover:border-[#e8b34b] disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Take{storedSel ? ` ${ITEMS[storedSel.itemId]?.name}` : ''}
+                </button>
+              </span>
             </div>
+            {storedSel && storedSel.qty > 1 && (
+              <div className="mb-1 flex items-center gap-1 text-[11px] text-[#8a94a3]">
+                <span>Take</span>
+                <button onClick={() => setTakeQty(Math.max(1, (takeQty ?? storedSel.qty) - 1))} className="rounded border border-[#232b36] px-1.5 py-0.5 text-[#d7dde5]">−</button>
+                <span className="min-w-[3ch] text-center font-mono text-[#e8b34b]">{takeQty ?? storedSel.qty}</span>
+                <button onClick={() => setTakeQty(Math.min(storedSel.qty, (takeQty ?? storedSel.qty) + 1))} className="rounded border border-[#232b36] px-1.5 py-0.5 text-[#d7dde5]">+</button>
+                <span>of {storedSel.qty}</span>
+              </div>
+            )}
             {items.length === 0 ? (
               <p className="text-xs text-[#8a94a3]">Empty.</p>
             ) : (
@@ -109,14 +146,37 @@ export default function StoragePanel() {
           <div>
             <div className="mb-1 flex items-center justify-between">
               <div className="text-[11px] font-semibold tracking-wide text-[#8a94a3]">{packHolder ? `YOUR PACK — ${ITEMS[packHolder.itemId]?.name ?? ''}` : 'YOUR POCKETS'}</div>
-              <button
-                disabled={!packSel}
-                onClick={() => { sfx.play('ui'); storagePut(packSel!.uid); setSelPack(null); }}
-                className="rounded border border-[#232b36] px-2.5 py-1 text-xs text-[#d7dde5] transition-colors hover:border-[#e8b34b] disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Put{packSel ? ` ${ITEMS[packSel.itemId]?.name}` : ''}
-              </button>
+              <span className="flex gap-1">
+                <button
+                  onClick={() => { sfx.play('ui'); storagePutAll(); setSelPack(null); setPutQty(null); }}
+                  className="rounded border border-[#232b36] px-2.5 py-1 text-xs text-[#d7dde5] transition-colors hover:border-[#e8b34b]"
+                >
+                  Put all
+                </button>
+                <button
+                  disabled={!packSel}
+                  onClick={() => {
+                    sfx.play('ui');
+                    const q = putQty ?? packSel!.qty;
+                    if (q >= packSel!.qty) storagePut(packSel!.uid);
+                    else storagePutQty(packSel!.uid, q);
+                    setSelPack(null); setPutQty(null);
+                  }}
+                  className="rounded border border-[#232b36] px-2.5 py-1 text-xs text-[#d7dde5] transition-colors hover:border-[#e8b34b] disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Put{packSel ? ` ${ITEMS[packSel.itemId]?.name}` : ''}
+                </button>
+              </span>
             </div>
+            {packSel && packSel.qty > 1 && (
+              <div className="mb-1 flex items-center gap-1 text-[11px] text-[#8a94a3]">
+                <span>Put</span>
+                <button onClick={() => setPutQty(Math.max(1, (putQty ?? packSel.qty) - 1))} className="rounded border border-[#232b36] px-1.5 py-0.5 text-[#d7dde5]">−</button>
+                <span className="min-w-[3ch] text-center font-mono text-[#e8b34b]">{putQty ?? packSel.qty}</span>
+                <button onClick={() => setPutQty(Math.min(packSel.qty, (putQty ?? packSel.qty) + 1))} className="rounded border border-[#232b36] px-1.5 py-0.5 text-[#d7dde5]">+</button>
+                <span>of {packSel.qty}</span>
+              </div>
+            )}
             {packItems.length === 0 ? (
               <p className="text-xs text-[#8a94a3]">Nothing there.</p>
             ) : (
