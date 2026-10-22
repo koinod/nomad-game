@@ -20,6 +20,12 @@ import { mulberry32 } from '../game/rng';
  * anywhere changes (the height-identity suite pins that side).
  */
 
+const bytesEqual = (a: Uint8Array, b: Uint8Array): boolean => {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+};
+
 const channelMean = (px: Uint8Array, ch: number): number => {
   let s = 0;
   const n = px.length / 4;
@@ -32,7 +38,7 @@ describe('ground detail maps — procedural, deterministic, tileable', () => {
     const a = generateDetailPixels();
     const b = generateDetailPixels();
     expect(a.length).toBe(DETAIL_TEX_SIZE * DETAIL_TEX_SIZE * 4);
-    expect(Buffer.from(a).equals(Buffer.from(b))).toBe(true);
+    expect(bytesEqual(a, b)).toBe(true);
     // alpha is opaque everywhere; channel means sit mid-field (the
     // shader decodes them as multipliers around 1.0)
     for (let i = 3; i < a.length; i += 4) expect(a[i]).toBe(255);
@@ -61,7 +67,7 @@ describe('ground detail maps — procedural, deterministic, tileable', () => {
     const a = generateMacroPixels();
     const b = generateMacroPixels();
     expect(a.length).toBe(MACRO_TEX_SIZE * MACRO_TEX_SIZE * 4);
-    expect(Buffer.from(a).equals(Buffer.from(b))).toBe(true);
+    expect(bytesEqual(a, b)).toBe(true);
     const m = channelMean(a, 0);
     expect(m).toBeGreaterThan(100);
     expect(m).toBeLessThan(150);
