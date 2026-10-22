@@ -10,7 +10,7 @@ export type TerritoryOwner =
 export interface TerritoryDef {
   /** Canonical site key (canon §6 wording). */
   site: string;
-  /** Engine POI id when the site exists in World.POI_DEFS. */
+  /** Engine POI id when the site exists in BETA_POI_PLACEMENTS. */
   poiId?: string;
   owner: TerritoryOwner;
   /** What a player sees / who is standing there. */
@@ -36,8 +36,8 @@ export const TERRITORY: TerritoryDef[] = [
   { site: 'dune_cache', poiId: 'dune_cache', owner: 'neutral', presence: 'D.C.-road staging', notes: 'Lina watches the road from here.', claim: 'n/a' },
   { site: 'raider fort', poiId: 'raider_fort', owner: 'skulls', presence: 'Rust Skulls main base (~x 500 dunes)', notes: 'Spike walls, skull poles, the fighting pit.', claim: 'never' },
   { site: 'lighthouse', poiId: 'lighthouse_base', owner: 'lighthouse', presence: 'Lighthouse Collective — story anchor', notes: 'Not claimable, ever.', claim: 'never' },
-  { site: 'military base / Coast Guard', poiId: 'airbase', owner: 'remnants', presence: 'Military Remnants main base, east cape', notes: 'HESCO perimeter, motor pool, the armory. (POI id is the shipped “airbase”.)', claim: 'never' },
-  { site: 'eastern tollgate', poiId: 'tollgate', owner: 'tollkeepers', presence: 'The Tollkeepers — the island’s exit gate', notes: 'The bridge proper is the OBX leg.', claim: 'never' },
+  { site: 'military base / Coast Guard', poiId: 'airbase', owner: 'remnants', presence: 'Military Remnants main base, NE coast', notes: 'HESCO perimeter, motor pool, the armory. (POI id is the shipped “airbase”.)', claim: 'never' },
+  { site: 'eastern tollgate', poiId: 'tollgate', owner: 'tollkeepers', presence: 'The Tollkeepers — the island’s exit gate', notes: 'The bridge proper is the OBX leg. (Site key predates the Beta map: the gate itself stands on the northern causeway at the Citadel — map integration, 2026-10-21.)', claim: 'never' },
   { site: 'enclave caches', owner: 'enclave', presence: 'Dead-drop sites (rumor)', notes: 'Locked lockers, odd tech, one radio burst. Placement data in worldWiring.ENCLAVE_CACHES.', claim: 'never' },
 ];
 
@@ -66,6 +66,6 @@ export const MAP_MARKERS: MapMarker[] = [
   { id: 'mk_town', label: 'Town — Survivors Union', poiId: 'town', owner: 'union', kind: 'base' },
   { id: 'mk_marina', label: 'Marina — the Drowned / Union harbor', poiId: 'marina', owner: 'drowned', kind: 'trader' },
   { id: 'mk_fort', label: 'Dune Fort — Rust Skulls', poiId: 'raider_fort', owner: 'skulls', kind: 'base' },
-  { id: 'mk_tollgate', label: 'Eastern Tollgate — the Tollkeepers', poiId: 'tollgate', owner: 'tollkeepers', kind: 'gate' },
+  { id: 'mk_tollgate', label: 'The Tollgate — the Tollkeepers', poiId: 'tollgate', owner: 'tollkeepers', kind: 'gate' },
   { id: 'mk_wreck', label: 'The Wreck — contested', poiId: 'wreck', owner: 'contested', kind: 'cache' },
 ];
